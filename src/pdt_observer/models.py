@@ -16,6 +16,13 @@ class ResultStatus(StrEnum):
     NOT_FOUND = "not_found"
 
 
+class WorkStatus(StrEnum):
+    OPEN = "open"
+    CLAIMED = "claimed"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -119,3 +126,73 @@ class InvestigationRun(StrictModel):
     task: InvestigationTask
     source_bundle: SourceBundle
     candidate: CandidateObservation
+
+
+class BuildingTypeProfile(StrictModel):
+    profile_id: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+    source_search_prompt: str = Field(min_length=1)
+    positive_evidence_patterns: tuple[str, ...] = ()
+    negative_evidence_patterns: tuple[str, ...] = ()
+    venue_aliases: tuple[str, ...] = ()
+    priority: int = Field(default=100, ge=0)
+    enabled: bool = True
+
+
+class BuildingProfileSet(StrictModel):
+    profile_set_id: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+    profiles: tuple[BuildingTypeProfile, ...]
+
+
+class WorkItem(StrictModel):
+    work_item_id: str = Field(min_length=1)
+    batch_id: str = Field(min_length=1)
+    locality: str = Field(min_length=1)
+    country: str = Field(min_length=2)
+    profile_id: str = Field(min_length=1)
+    observation_type: ObservationType = ObservationType.PEOPLE_PRESENT
+    status: WorkStatus = WorkStatus.OPEN
+    claimed_by: str | None = None
+    source_hints: tuple[str, ...] = ()
+    run_artifact_path: str | None = None
+    created_at: str = Field(min_length=1)
+    updated_at: str = Field(min_length=1)
+
+
+class HarvestBatch(StrictModel):
+    batch_id: str = Field(min_length=1)
+    locality: str = Field(min_length=1)
+    country: str = Field(min_length=2)
+    profile_set_id: str = Field(min_length=1)
+    profile_ids: tuple[str, ...]
+    work_item_ids: tuple[str, ...]
+    created_at: str = Field(min_length=1)
+
+
+class ReviewQueueItem(StrictModel):
+    review_item_id: str = Field(min_length=1)
+    run_file: str = Field(min_length=1)
+    status: ResultStatus
+    validation_valid: bool
+    validation_errors: tuple[str, ...] = ()
+    reason: str = Field(min_length=1)
+    source_url: str | None = None
+    supporting_quote: str | None = None
+    count: int | None = Field(default=None, ge=0)
+    place_name: str | None = None
+    georeference_status: str = Field(min_length=1)
+    ingested_at: str = Field(min_length=1)
+
+
+class DirectFetchResult(StrictModel):
+    url: str = Field(min_length=1)
+    canonical_url: str = Field(min_length=1)
+    source_url: str = Field(min_length=1)
+    title: str = ""
+    text: str
+    content_type: str
+    status_code: int = Field(ge=100, le=599)
+    content_sha256: str = Field(min_length=64, max_length=64)
+    fetched_at: str = Field(min_length=1)
+    discovered_urls: tuple[str, ...] = ()

@@ -4,7 +4,8 @@
 
 - The first vertical slice is intentionally bounded to one in-memory investigation run.
 - Offline demo mode is the primary proof of correctness and must never require `OPENAI_API_KEY`.
-- Codex-operated prompted or scheduled runs are the default subscription-backed workflow.
+- Codex-operated prompted, scheduled, and profile-batch runs are the default subscription-backed
+  workflow.
 - Agent mode uses the same domain models, mock service interfaces, and deterministic validator as
   offline mode, but is optional and explicit.
 - The repository is empty at start, so this project establishes the initial package structure and tooling.
@@ -18,7 +19,10 @@
 5. `validation.py` checks proposed observations against stored source and place records.
 6. `agent.py` contains agent instructions, tool wrappers, scripted offline demo logic, and the optional OpenAI Agents SDK runner.
 7. `cli.py` provides the `demo`, `validate`, `summarize`, and `investigate-api` commands.
-8. `prompts/` contains durable Codex prompts for prompted investigation, scheduled harvest, and candidate review.
+8. `workflow.py` and `profiles.py` provide file-backed batch/work/review orchestration.
+9. `web.py` provides no-key direct URL fetching and fixture-testable parsing.
+10. `prompts/` contains durable Codex prompts for prompted investigation, scheduled harvest,
+    building-type agents, and candidate review.
 9. Tests cover mock behavior, accepted-result validation, negative validation cases, review/not-found outcomes, model rules, and CLI JSON output.
 
 ## Planned File Tree
@@ -34,9 +38,12 @@ examples/
     milltown_task.json
     milltown_codex_run.json
 prompts/
+    building_type_agent.md
     prompted_investigation.md
     review_candidate.md
     scheduled_harvest.md
+profiles/
+    public_venues.json
 src/
     pdt_observer/
         __init__.py
@@ -60,6 +67,10 @@ tests/
 
 - `python -m pdt_observer demo` emits a validated accepted Blue Lantern JSON result with count `17`.
 - `python -m pdt_observer validate examples/milltown_codex_run.json` validates a Codex-produced run artifact without API access.
+- `python -m pdt_observer batch create --locality Milltown --country US --profiles public_venues`
+  creates profile-specific work items.
+- `python -m pdt_observer review ingest examples/milltown_codex_run.json` writes a review queue
+  item.
 - `python -m pdt_observer investigate-api examples/milltown_task.json` requires `OPENAI_API_KEY` before invoking the SDK.
 - The package installs in editable mode.
 - The ordinary test suite is deterministic, offline, and does not require an API key.
@@ -75,6 +86,8 @@ tests/
   17-person Blue Lantern observation as formatted JSON without an API key.
 - Codex-operated run validation is now the default no-API path: Codex writes an
   `InvestigationRun` JSON file and the CLI validates it locally.
+- Added no-key Codex orchestration artifacts: public-venue building profiles, batch creation,
+  work claiming, review queue ingestion/listing, JSONL export, and direct URL fetching/parsing.
 - Agent mode constructs an OpenAI Agents SDK `Agent` with three narrow function tools, centralizes
   the model name in settings, enforces `maximum_agent_turns`, and validates the model proposal
   before returning it.

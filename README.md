@@ -39,22 +39,53 @@ source control.
 
 ## Codex Subscription Workflow
 
-Use one of the prompts in `prompts/` from a Codex chat or automation. The prompt should produce an
-`InvestigationRun` JSON file shaped like `examples/milltown_codex_run.json`.
+Use one of the prompts in `prompts/` from a Codex chat or automation. For multi-agent harvesting,
+start with `prompts/building_type_agent.md` and the profile definitions in
+`profiles/public_venues.json`.
+
+Create a local batch of profile-specific work items:
+
+```powershell
+python -m pdt_observer batch create --locality Milltown --country US --profiles public_venues
+```
+
+Each Codex agent claims work for one profile:
+
+```powershell
+python -m pdt_observer work claim --profile restaurants_bars --claimed-by codex-restaurants
+```
+
+The agent performs web discovery using Codex web capabilities, writes an `InvestigationRun` JSON
+file shaped like `examples/milltown_codex_run.json`, then validates it.
 
 Validate that run locally:
 
 ```powershell
-python -m pdt_observer validate examples/milltown_codex_run.json
+python -m pdt_observer validate runs/<file>.json
+python -m pdt_observer review ingest runs/<file>.json
 ```
 
-Print a compact human summary:
+List and export review queue entries:
 
 ```powershell
-python -m pdt_observer summarize examples/milltown_codex_run.json
+python -m pdt_observer review list --status review
+python -m pdt_observer export --status accepted --format jsonl
 ```
 
-Ad-hoc run artifacts should go under `runs/`, which is ignored by git.
+Ad-hoc batch, work, run, review, and export artifacts are ignored by git.
+
+## Direct URL Fetching
+
+Python is not a general search engine here. It can fetch direct public URLs supplied by Codex or a
+user:
+
+```powershell
+python -m pdt_observer source fetch https://example.com/story --output runs/source.json
+```
+
+The fetcher uses GET-only requests, robots.txt checks, a custom user agent, content-type and size
+limits, timeouts, URL canonicalization, basic HTML text extraction, and RSS/sitemap URL extraction.
+It does not bypass logins, paywalls, CAPTCHAs, or site blocks.
 
 ## Offline Demo
 
@@ -67,8 +98,8 @@ python -m pdt_observer demo
 
 ## Optional API Mode
 
-The OpenAI Agents SDK path remains available for future deployment or comparison. It uses the same
-models, mock services, and validator:
+The OpenAI Agents SDK path remains available only for future comparison. It is not part of the
+recommended no-key workflow:
 
 ```powershell
 $env:OPENAI_API_KEY = "sk-..."
@@ -90,9 +121,9 @@ explicit marker and environment-variable gate.
 
 ## Replacing Mocks Later
 
-Real search and geocoding providers should implement the protocols in `ports.py`. For a
-Codex-operated workflow, Codex can also gather source and place records directly into an
-`InvestigationRun` artifact, then hand validation back to this package.
+Codex is expected to gather source and place records directly into an `InvestigationRun` artifact,
+then hand validation back to this package. If future deployments use real APIs, keep them behind
+typed ports and optional extras so the no-key Codex workflow remains intact.
 
 ## Outside This Proof Of Concept
 

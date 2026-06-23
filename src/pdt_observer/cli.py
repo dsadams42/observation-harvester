@@ -8,8 +8,18 @@ from pathlib import Path
 
 from pdt_observer.agent import load_task, run_agent_investigation, run_offline_demo
 from pdt_observer.config import MissingAPIKeyError
-from pdt_observer.models import InvestigationRun
+from pdt_observer.models import InvestigationRun, ResultStatus, WorkStatus
 from pdt_observer.validation import ObservationValidationException, validate_run
+from pdt_observer.web import DirectFetchError, DirectWebFetcher
+from pdt_observer.workflow import (
+    claim_work_item,
+    create_batch,
+    export_review_items,
+    ingest_review,
+    list_review_items,
+    list_work_items,
+    write_model,
+)
 
 
 def load_run(path: Path) -> InvestigationRun:
@@ -24,6 +34,27 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("demo", help="Run the deterministic offline Milltown demo.")
 
+    batch = subparsers.add_parser("batch", help="Manage Codex-operated harvest batches.")
+    batch_subparsers = batch.add_subparsers(dest="batch_command", required=True)
+    batch_create = batch_subparsers.add_parser("create", help="Create profile work items.")
+    batch_create.add_argument("--locality", required=True)
+    batch_create.add_argument("--country", required=True)
+    batch_create.add_argument("--profiles", default="public_venues")
+    batch_create.add_argument("--batch-id")
+    batch_create.add_argument("--source-hint", action="append", default=[])
+    batch_create.add_argument("--workspace", type=Path, default=Path("."))
+
+    work = subparsers.add_parser("work", help="List or claim Codex work items.")
+    work_subparsers = work.add_subparsers(dest="work_command", required=True)
+    work_list = work_subparsers.add_parser("list", help="List work items.")
+    work_list.add_argument("--workspace", type=Path, default=Path("."))
+    work_list.add_argument("--status", choices=[status.value for status in WorkStatus])
+    work_list.add_argument("--profile")
+    work_claim = work_subparsers.add_parser("claim", help="Claim the next open work item.")
+    work_claim.add_argument("--workspace", type=Path, default=Path("."))
+    work_claim.add_argument("--profile", required=True)
+    work_claim.add_argument("--claimed-by", default="codex")
+
     validate = subparsers.add_parser(
         "validate",
         help="Validate a Codex-produced investigation run JSON file without API access.",
@@ -35,6 +66,32 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print a short human-readable summary of an investigation run.",
     )
     summarize.add_argument("run_file", type=Path, help="Path to an InvestigationRun JSON file.")
+
+    review = subparsers.add_parser("review", help="Ingest and list review queue items.")
+    review_subparsers = review.add_subparsers(dest="review_command", required=True)
+    review_ingest = review_subparsers.add_parser("ingest", help="Ingest a validated run file.")
+    review_ingest.add_argument("run_file", type=Path)
+    review_ingest.add_argument("--workspace", type=Path, default=Path("."))
+    review_list = review_subparsers.add_parser("list", help="List review queue items.")
+    review_list.add_argument("--workspace", type=Path, default=Path("."))
+    review_list.add_argument("--status", choices=[status.value for status in ResultStatus])
+
+    export = subparsers.add_parser("export", help="Export review queue items.")
+    export.add_argument("--workspace", type=Path, default=Path("."))
+    export.add_argument(
+        "--status",
+        required=True,
+        choices=[status.value for status in ResultStatus],
+    )
+    export.add_argument("--format", default="jsonl", choices=["jsonl"])
+
+    source = subparsers.add_parser("source", help="Fetch direct URLs supplied by Codex or a user.")
+    source_subparsers = source.add_subparsers(dest="source_command", required=True)
+    source_fetch = source_subparsers.add_parser("fetch", help="Fetch one direct public URL.")
+    source_fetch.add_argument("url")
+    source_fetch.add_argument("--output", type=Path)
+    source_fetch.add_argument("--max-bytes", type=int, default=1_000_000)
+    source_fetch.add_argument("--timeout-seconds", type=float, default=10)
 
     investigate_api = subparsers.add_parser(
         "investigate-api",
@@ -56,6 +113,33 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "demo":
             result = run_offline_demo()
             print(result.model_dump_json(indent=2))
+            return 0
+        if args.command == "batch" and args.batch_command == "create":
+            batch = create_batch(
+                root=args.workspace,
+                locality=args.locality,
+                country=args.country,
+                profile_set_name=args.profiles,
+                batch_id=args.batch_id,
+                source_hints=tuple(args.source_hint),
+            )
+            print(batch.model_dump_json(indent=2))
+            return 0
+        if args.command == "work" and args.work_command == "list":
+            status = None if args.status is None else WorkStatus(args.status)
+            items = list_work_items(args.workspace, status=status, profile_id=args.profile)
+            print(json.dumps([item.model_dump(mode="json") for item in items], indent=2))
+            return 0
+        if args.command == "work" and args.work_command == "claim":
+            claimed_item = claim_work_item(
+                args.workspace,
+                profile_id=args.profile,
+                claimed_by=args.claimed_by,
+            )
+            if claimed_item is None:
+                print("No open work item matched the requested profile.", file=sys.stderr)
+                return 1
+            print(claimed_item.model_dump_json(indent=2))
             return 0
         if args.command == "validate":
             run = load_run(args.run_file)
@@ -81,6 +165,35 @@ def main(argv: Sequence[str] | None = None) -> int:
                 for error in report.errors:
                     print(f"- {error.code}: {error.message}")
             return 0 if report.valid else 1
+        if args.command == "review" and args.review_command == "ingest":
+            review_queue_item = ingest_review(args.run_file, root=args.workspace)
+            print(review_queue_item.model_dump_json(indent=2))
+            return 0
+        if args.command == "review" and args.review_command == "list":
+            review_status = None if args.status is None else ResultStatus(args.status)
+            review_items = list_review_items(args.workspace, status=review_status)
+            print(json.dumps([item.model_dump(mode="json") for item in review_items], indent=2))
+            return 0
+        if args.command == "export":
+            print(
+                export_review_items(
+                    args.workspace,
+                    status=ResultStatus(args.status),
+                    output_format=args.format,
+                ),
+                end="",
+            )
+            return 0
+        if args.command == "source" and args.source_command == "fetch":
+            fetcher = DirectWebFetcher(
+                max_bytes=args.max_bytes,
+                timeout_seconds=args.timeout_seconds,
+            )
+            fetch_result = fetcher.fetch(args.url)
+            if args.output is not None:
+                write_model(args.output, fetch_result)
+            print(fetch_result.model_dump_json(indent=2))
+            return 0
         if args.command == "investigate-api":
             task = load_task(args.task_file)
             result = run_agent_investigation(task)
@@ -93,6 +206,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     except ObservationValidationException as exc:
         print(f"Validation failed: {exc}", file=sys.stderr)
+        return 1
+    except (DirectFetchError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
         return 1
 
     return 0

@@ -11,7 +11,8 @@ Each run should:
 3. Create one `InvestigationRun` JSON artifact using the shape in
    `examples/milltown_codex_run.json`.
 4. Run `python -m pdt_observer validate <run-file>`.
-5. Report only meaningful findings:
+5. Run `python -m pdt_observer review ingest <run-file>`.
+6. Report only meaningful findings:
    - accepted observations,
    - review cases that need human geocoding/source review,
    - validator failures that indicate the prompt or source bundle needs adjustment.

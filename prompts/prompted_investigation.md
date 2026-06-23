@@ -28,3 +28,10 @@ Rules:
 
 Write the run artifact under `runs/` or another user-approved path. Keep raw source snapshots out
 of git unless the user explicitly asks to commit them.
+
+After writing the artifact, run:
+
+```powershell
+python -m pdt_observer validate runs/<file>.json
+python -m pdt_observer review ingest runs/<file>.json
+```

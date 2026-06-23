@@ -1,0 +1,63 @@
+{
+  "task": {
+    "task_id": "task-milltown-blue-lantern",
+    "locality": "Milltown",
+    "country": "US",
+    "observation_type": "people_present",
+    "maximum_agent_turns": 6
+  },
+  "source_bundle": {
+    "documents": [
+      {
+        "document_id": "milltown-blue-lantern-response",
+        "title": "Crews respond to Blue Lantern kitchen fire",
+        "source_url": "https://news.example.invalid/milltown/blue-lantern-response",
+        "locality": "Milltown",
+        "country": "US",
+        "text": "Emergency crews were dispatched to the Blue Lantern on Friday night. Officials said 17 people were inside the Blue Lantern restaurant when crews arrived at approximately 9:10 p.m. No serious injuries were reported, and the fire marshal said the cause remains under review.",
+        "tags": [
+          "milltown",
+          "people_present",
+          "blue_lantern"
+        ]
+      }
+    ],
+    "places": [
+      {
+        "place_id": "place-blue-lantern-milltown",
+        "name": "Blue Lantern",
+        "locality": "Milltown",
+        "country": "US",
+        "latitude": 41.24831,
+        "longitude": -72.67344,
+        "method": "mock_unique_name_locality"
+      }
+    ]
+  },
+  "candidate": {
+    "produced_by": "codex",
+    "notes": "Example of the JSON shape a Codex prompted or scheduled investigation should write before deterministic validation.",
+    "result": {
+      "status": "accepted",
+      "count": 17,
+      "observation_type": "people_present",
+      "place_name": "Blue Lantern",
+      "observed_time_text": "approximately 9:10 p.m.",
+      "evidence": {
+        "document_id": "milltown-blue-lantern-response",
+        "source_url": "https://news.example.invalid/milltown/blue-lantern-response",
+        "supporting_quote": "Officials said 17 people were inside the Blue Lantern restaurant when crews arrived at approximately 9:10 p.m."
+      },
+      "georeference": {
+        "place_id": "place-blue-lantern-milltown",
+        "place_name": "Blue Lantern",
+        "locality": "Milltown",
+        "country": "US",
+        "latitude": 41.24831,
+        "longitude": -72.67344,
+        "method": "mock_unique_name_locality"
+      },
+      "reason": "Accepted because the source states 17 people were physically inside Blue Lantern and the place match is unique."
+    }
+  }
+}

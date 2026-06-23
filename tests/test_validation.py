@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from pdt_observer.agent import build_result_from_document, run_offline_demo
 from pdt_observer.mock_data import DEFAULT_MILLTOWN_TASK
 from pdt_observer.mock_services import MockGeocoder, MockSourceService
-from pdt_observer.models import Evidence, GeoReference, InvestigationResult
-from pdt_observer.validation import ValidationCode, validate_result
+from pdt_observer.models import Evidence, GeoReference, InvestigationResult, InvestigationRun
+from pdt_observer.validation import ValidationCode, validate_result, validate_run
 
 
 def _services() -> tuple[MockSourceService, MockGeocoder]:
@@ -36,6 +38,16 @@ def test_successful_17_person_observation_validates() -> None:
     assert result.georeference is not None
     assert result.georeference.latitude == 41.24831
     assert result.georeference.longitude == -72.67344
+
+
+def test_codex_run_artifact_validates() -> None:
+    run = InvestigationRun.model_validate_json(
+        Path("examples/milltown_codex_run.json").read_text(encoding="utf-8")
+    )
+
+    report = validate_run(run)
+
+    assert report.valid
 
 
 def test_supporting_quote_is_exact_source_text() -> None:

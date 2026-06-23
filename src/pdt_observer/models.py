@@ -102,3 +102,20 @@ class PlaceRecord(StrictModel):
     latitude: float
     longitude: float
     method: str
+
+
+class CandidateObservation(StrictModel):
+    result: InvestigationResult
+    produced_by: str = Field(default="codex", min_length=1)
+    notes: str | None = None
+
+
+class SourceBundle(StrictModel):
+    documents: tuple[SourceDocument, ...]
+    places: tuple[PlaceRecord, ...]
+
+
+class InvestigationRun(StrictModel):
+    task: InvestigationTask
+    source_bundle: SourceBundle
+    candidate: CandidateObservation

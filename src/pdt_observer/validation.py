@@ -7,7 +7,13 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict
 
-from pdt_observer.models import InvestigationResult, InvestigationTask, ResultStatus
+from pdt_observer.mock_services import MockGeocoder, MockSourceService
+from pdt_observer.models import (
+    InvestigationResult,
+    InvestigationRun,
+    InvestigationTask,
+    ResultStatus,
+)
 from pdt_observer.ports import DocumentFetcher, Geocoder
 
 
@@ -160,3 +166,9 @@ def validate_result(
 def raise_for_invalid(report: ValidationReport) -> None:
     if not report.valid:
         raise ObservationValidationException(report.errors)
+
+
+def validate_run(run: InvestigationRun) -> ValidationReport:
+    source_service = MockSourceService(run.source_bundle.documents)
+    geocoder = MockGeocoder(run.source_bundle.places)
+    return validate_result(run.candidate.result, run.task, source_service, geocoder)

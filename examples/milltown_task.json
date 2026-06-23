@@ -1,0 +1,7 @@
+{
+  "task_id": "task-milltown-blue-lantern",
+  "locality": "Milltown",
+  "country": "US",
+  "observation_type": "people_present",
+  "maximum_agent_turns": 6
+}

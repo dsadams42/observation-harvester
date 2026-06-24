@@ -135,6 +135,50 @@ python -m pdt_observer leads summarize lead_runs/ph-commercial-001.json
 Use the lead output to choose which records deserve exact quote/source-text validation as
 `InvestigationRun` files.
 
+## Harvest Flow
+
+```text
+User chooses scope
+  |
+  |  country + optional locality + profile set + target count
+  v
+python -m pdt_observer harvest prepare
+  |
+  |  writes/reprints a reusable Codex prompt
+  v
+work/<country>-commercial-leads.md
+  |
+  |  Codex CLI/Desktop runs prompt with web search
+  v
+lead_runs/<country>-commercial-001.json
+  |
+  |  permissive lead schema:
+  |  - partial metadata allowed
+  |  - Unknown / Not provided allowed
+  |  - subgroup counts preserved
+  v
+python -m pdt_observer leads validate
+python -m pdt_observer leads summarize
+  |
+  |  human/Codex selects strong leads for audit-grade promotion
+  v
+runs/<specific-observation>.json
+  |
+  |  strict InvestigationRun schema:
+  |  - exact source text
+  |  - exact supporting quote
+  |  - count appears in quote
+  |  - source URL and place record included
+  v
+python -m pdt_observer validate
+python -m pdt_observer work record-run
+  |
+  |  deterministic validation and review queue ingestion
+  v
+review/<review-item>.json
+exports/*.jsonl
+```
+
 When a source supports a candidate, write an `InvestigationRun` JSON file shaped like
 `examples/milltown_codex_run.json`, then validate, ingest, and count it. Keep
 `observed_time_text` as the exact source phrase and use `time_context` for normalized values such

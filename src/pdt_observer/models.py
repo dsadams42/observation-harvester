@@ -39,6 +39,30 @@ class SourceOutcome(StrEnum):
     FAILED = "failed"
 
 
+class DayPart(StrEnum):
+    EARLY_MORNING = "early_morning"
+    MORNING = "morning"
+    AFTERNOON = "afternoon"
+    EVENING = "evening"
+    NIGHT = "night"
+    DAY = "day"
+    UNKNOWN = "unknown"
+
+
+class DaylightState(StrEnum):
+    DAYLIGHT = "daylight"
+    TWILIGHT = "twilight"
+    DARK = "dark"
+    UNKNOWN = "unknown"
+
+
+class TimePrecision(StrEnum):
+    EXACT = "exact"
+    APPROXIMATE = "approximate"
+    DAY_PART_ONLY = "day_part_only"
+    UNKNOWN = "unknown"
+
+
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -67,12 +91,24 @@ class GeoReference(StrictModel):
     method: str = Field(min_length=1)
 
 
+class TimeContext(StrictModel):
+    observed_time_local: str | None = Field(
+        default=None,
+        pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$",
+    )
+    time_precision: TimePrecision = TimePrecision.UNKNOWN
+    day_part: DayPart = DayPart.UNKNOWN
+    daylight_state: DaylightState = DaylightState.UNKNOWN
+    timezone: str | None = None
+
+
 class InvestigationResult(StrictModel):
     status: ResultStatus
     count: int | None = Field(default=None, ge=0)
     observation_type: ObservationType | None = None
     place_name: str | None = None
     observed_time_text: str | None = None
+    time_context: TimeContext | None = None
     evidence: Evidence | None = None
     georeference: GeoReference | None = None
     reason: str = Field(min_length=1)
@@ -231,6 +267,8 @@ class ReviewQueueItem(StrictModel):
     supporting_quote: str | None = None
     count: int | None = Field(default=None, ge=0)
     place_name: str | None = None
+    observed_time_text: str | None = None
+    time_context: TimeContext | None = None
     georeference_status: str = Field(min_length=1)
     ingested_at: str = Field(min_length=1)
 

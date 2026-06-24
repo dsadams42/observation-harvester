@@ -12,7 +12,7 @@ The app can still run an optional OpenAI Agents SDK path, but that is no longer 
 - Codex decides how to investigate when you run a prompted chat or scheduled Codex automation.
 - The JSON run artifact records the task, source bundle, geocoder bundle, and proposed result.
 - Python application code validates exact quotes, counts, document IDs, source URLs, place IDs,
-  coordinates, locality, and country.
+  coordinates, locality, country, and time-context consistency when time context is present.
 - The model output is only a proposal; accepted observations must pass deterministic validation.
 
 During one run, state exists as a task, source documents, place records, a candidate result, and a
@@ -71,7 +71,9 @@ python -m pdt_observer work record-source --work-item-id <work_item_id> --outcom
 ```
 
 When a source supports a candidate, write an `InvestigationRun` JSON file shaped like
-`examples/milltown_codex_run.json`, then validate, ingest, and count it:
+`examples/milltown_codex_run.json`, then validate, ingest, and count it. Keep
+`observed_time_text` as the exact source phrase and use `time_context` for normalized values such
+as `observed_time_local`, `time_precision`, `day_part`, and `daylight_state`:
 
 ```powershell
 python -m pdt_observer work record-run --work-item-id <work_item_id> --run-file runs/<file>.json
@@ -105,6 +107,25 @@ Override them during batch creation with flags such as `--target-accepted`,
 `--max-runtime-minutes`.
 
 Ad-hoc batch, work, run, review, and export artifacts are ignored by git.
+
+## Time Context
+
+The first-class observation remains `people_present`; time is supporting context. If a source says
+when the count was observed, store the exact phrase in `observed_time_text` and optionally add:
+
+```json
+{
+  "observed_time_local": "21:10",
+  "time_precision": "approximate",
+  "day_part": "night",
+  "daylight_state": "unknown",
+  "timezone": null
+}
+```
+
+Clock times are bucketed as `early_morning`, `morning`, `afternoon`, `evening`, or `night`.
+Broad phrases such as "Friday night" may be stored as `day_part_only`. Solar daylight is left
+`unknown` unless a future source or local place record gives enough deterministic evidence.
 
 ## Direct URL Fetching
 
@@ -160,5 +181,5 @@ typed ports and optional extras so the no-key Codex workflow remains intact.
 ## Outside This Proof Of Concept
 
 This project does not include continuous scraping, social-media integrations, databases, building
-footprints, floor counting, occupancy estimation, Docker, orchestration systems, multiple
-cooperating agents, or a graphical UI.
+footprints, floor counting, occupancy estimation, Docker, a hosted orchestration system, or a
+graphical UI.

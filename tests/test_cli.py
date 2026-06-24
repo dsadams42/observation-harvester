@@ -30,6 +30,7 @@ def test_cli_validate_codex_run_output_is_valid_json(capsys) -> None:
     assert payload["valid"] is True
     assert payload["status"] == "accepted"
     assert payload["result"]["count"] == 17
+    assert payload["result"]["time_context"]["day_part"] == "night"
     assert payload["errors"] == []
     assert captured.err == ""
 
@@ -330,3 +331,4 @@ def test_cli_review_ingest_list_and_export(tmp_path, capsys) -> None:
     assert exit_code == 0
     assert len(lines) == 1
     assert lines[0]["place_name"] == "Blue Lantern"
+    assert lines[0]["time_context"]["observed_time_local"] == "21:10"

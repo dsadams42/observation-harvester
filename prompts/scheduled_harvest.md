@@ -9,7 +9,8 @@ Each run should:
 2. Search for a recent source that may contain an explicit count of people physically present at a
    named place.
 3. Create one `InvestigationRun` JSON artifact using the shape in
-   `examples/milltown_codex_run.json`.
+   `examples/milltown_codex_run.json`. Preserve exact observation-time text and supported
+   `time_context` when available.
 4. Run `python -m pdt_observer validate <run-file>`.
 5. Run `python -m pdt_observer review ingest <run-file>`.
 6. Report only meaningful findings:

@@ -9,12 +9,14 @@ from pydantic import BaseModel, ConfigDict
 
 from pdt_observer.mock_services import MockGeocoder, MockSourceService
 from pdt_observer.models import (
+    DayPart,
     InvestigationResult,
     InvestigationRun,
     InvestigationTask,
     ResultStatus,
 )
 from pdt_observer.ports import DocumentFetcher, Geocoder
+from pdt_observer.time_context import day_part_for_local_time
 
 
 class ValidationCode(StrEnum):
@@ -27,6 +29,9 @@ class ValidationCode(StrEnum):
     COORDINATE_MISMATCH = "coordinate_mismatch"
     LOCALITY_COUNTRY_MISMATCH = "locality_country_mismatch"
     OBSERVATION_TYPE_MISMATCH = "observation_type_mismatch"
+    TIME_TEXT_NOT_IN_QUOTE = "time_text_not_in_quote"
+    TIME_CONTEXT_WITHOUT_SOURCE_TEXT = "time_context_without_source_text"
+    TIME_CONTEXT_DAY_PART_MISMATCH = "time_context_day_part_mismatch"
 
 
 class ObservationValidationError(BaseModel):
@@ -89,6 +94,33 @@ def validate_result(
     if result.evidence is None or result.georeference is None or result.count is None:
         return ValidationReport(valid=False, errors=tuple(errors))
 
+    time_context = result.time_context
+    if time_context is not None:
+        context_has_claim = (
+            time_context.observed_time_local is not None
+            or time_context.day_part != DayPart.UNKNOWN
+            or time_context.timezone is not None
+        )
+        if context_has_claim and result.observed_time_text is None:
+            errors.append(
+                _error(
+                    ValidationCode.TIME_CONTEXT_WITHOUT_SOURCE_TEXT,
+                    "time_context claims require observed_time_text copied from the source",
+                )
+            )
+        if time_context.observed_time_local is not None:
+            expected_day_part = day_part_for_local_time(time_context.observed_time_local)
+            if (
+                time_context.day_part != DayPart.UNKNOWN
+                and time_context.day_part != expected_day_part
+            ):
+                errors.append(
+                    _error(
+                        ValidationCode.TIME_CONTEXT_DAY_PART_MISMATCH,
+                        "time_context day_part does not match observed_time_local",
+                    )
+                )
+
     document = document_fetcher.fetch_source(result.evidence.document_id)
     if document is None:
         errors.append(
@@ -117,6 +149,16 @@ def validate_result(
                 _error(
                     ValidationCode.COUNT_NOT_IN_QUOTE,
                     "accepted count does not occur in the supporting quote",
+                )
+            )
+        if (
+            result.observed_time_text is not None
+            and result.observed_time_text not in result.evidence.supporting_quote
+        ):
+            errors.append(
+                _error(
+                    ValidationCode.TIME_TEXT_NOT_IN_QUOTE,
+                    "observed_time_text is not an exact substring of the supporting quote",
                 )
             )
 

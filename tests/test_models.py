@@ -21,6 +21,10 @@ def test_codex_run_model_loads_example() -> None:
     assert run.task.locality == "Milltown"
     assert run.candidate.produced_by == "codex"
     assert run.candidate.result.count == 17
+    assert run.candidate.result.observed_time_text == "approximately 9:10 p.m."
+    assert run.candidate.result.time_context is not None
+    assert run.candidate.result.time_context.observed_time_local == "21:10"
+    assert run.candidate.result.time_context.day_part == "night"
     assert run.source_bundle.documents
     assert run.source_bundle.places
 

@@ -16,14 +16,17 @@
 2. `ports.py` defines typed protocols for search, document fetching, and geocoding.
 3. `mock_data.py` stores source documents and place records.
 4. `mock_services.py` implements the protocols over the in-memory data.
-5. `validation.py` checks proposed observations against stored source and place records.
+5. `validation.py` checks proposed observations against stored source, place, and time-context
+   records.
 6. `agent.py` contains agent instructions, tool wrappers, scripted offline demo logic, and the optional OpenAI Agents SDK runner.
 7. `cli.py` provides the `demo`, `validate`, `summarize`, and `investigate-api` commands.
 8. `workflow.py` and `profiles.py` provide file-backed batch/work/review orchestration.
 9. `web.py` provides no-key direct URL fetching and fixture-testable parsing.
-10. `prompts/` contains durable Codex prompts for prompted investigation, scheduled harvest,
+10. `time_context.py` normalizes source time phrases into local clock time and day-part buckets.
+11. `prompts/` contains durable Codex prompts for prompted investigation, scheduled harvest,
     building-type agents, and candidate review.
-9. Tests cover mock behavior, accepted-result validation, negative validation cases, review/not-found outcomes, model rules, and CLI JSON output.
+12. Tests cover mock behavior, accepted-result validation, negative validation cases,
+    review/not-found outcomes, model rules, and CLI JSON output.
 
 ## Planned File Tree
 
@@ -55,7 +58,10 @@ src/
         mock_services.py
         models.py
         ports.py
+        time_context.py
         validation.py
+        web.py
+        workflow.py
 tests/
     test_cli.py
     test_mock_services.py
@@ -90,6 +96,8 @@ tests/
   work claiming, review queue ingestion/listing, JSONL export, and direct URL fetching/parsing.
 - Added quota-governed work progress: each work item tracks accepted/review/not_found counts,
   source outcomes, run files, runtime, and deterministic stop reasons.
+- Added optional time context: exact source time text can be normalized into local `HH:MM`,
+  precision, day-part, daylight-state, and review/export fields.
 - Agent mode constructs an OpenAI Agents SDK `Agent` with three narrow function tools, centralizes
   the model name in settings, enforces `maximum_agent_turns`, and validates the model proposal
   before returning it.

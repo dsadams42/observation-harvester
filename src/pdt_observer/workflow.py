@@ -355,6 +355,8 @@ def review_item_from_run(run_file: Path, report: ValidationReport) -> ReviewQueu
         supporting_quote=None if evidence is None else evidence.supporting_quote,
         count=result.count,
         place_name=result.place_name,
+        observed_time_text=result.observed_time_text,
+        time_context=result.time_context,
         georeference_status=georeference_status,
         ingested_at=utc_now_text(),
     )

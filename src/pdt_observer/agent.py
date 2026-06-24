@@ -18,8 +18,10 @@ from pdt_observer.models import (
     PlaceRecord,
     ResultStatus,
     SourceDocument,
+    TimeContext,
 )
 from pdt_observer.ports import Geocoder, SourceRepository
+from pdt_observer.time_context import normalize_observed_time_text
 from pdt_observer.validation import raise_for_invalid, validate_result
 
 AGENT_INSTRUCTIONS = """
@@ -31,6 +33,8 @@ Rules:
 - Fetch a complete source before extracting a result.
 - Use only counts explicitly stated in the fetched source.
 - Return an exact source quotation copied from the fetched source.
+- Preserve observed time text when the source gives it and normalize it into time_context when
+  possible.
 - Georeference the place governed by the count.
 - Return accepted only when the geographic match is unambiguous.
 - Return review when useful evidence exists but the place is ambiguous.
@@ -61,6 +65,7 @@ class ExtractedObservation:
     place_name: str
     supporting_quote: str
     observed_time_text: str | None
+    time_context: TimeContext | None
 
 
 def load_task(path: Path) -> InvestigationTask:
@@ -80,6 +85,7 @@ def extract_people_present(document: SourceDocument) -> ExtractedObservation | N
         place_name=" ".join(match.group("place").split()),
         supporting_quote=quote,
         observed_time_text=observed_time_text,
+        time_context=normalize_observed_time_text(observed_time_text),
     )
 
 
@@ -130,6 +136,7 @@ def build_result_from_document(
             observation_type=task.observation_type,
             place_name=extracted.place_name,
             observed_time_text=extracted.observed_time_text,
+            time_context=extracted.time_context,
             evidence=evidence,
             reason=(
                 f"Found explicit source evidence for {extracted.count} people at "
@@ -144,6 +151,7 @@ def build_result_from_document(
         observation_type=task.observation_type,
         place_name=place.name,
         observed_time_text=extracted.observed_time_text,
+        time_context=extracted.time_context,
         evidence=evidence,
         georeference=_georeference_for(place),
         reason=(

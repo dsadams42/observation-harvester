@@ -43,6 +43,13 @@
       "observation_type": "people_present",
       "place_name": "Blue Lantern",
       "observed_time_text": "approximately 9:10 p.m.",
+      "time_context": {
+        "observed_time_local": "21:10",
+        "time_precision": "approximate",
+        "day_part": "night",
+        "daylight_state": "unknown",
+        "timezone": null
+      },
       "evidence": {
         "document_id": "milltown-blue-lantern-response",
         "source_url": "https://news.example.invalid/milltown/blue-lantern-response",

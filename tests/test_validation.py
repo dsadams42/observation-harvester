@@ -5,7 +5,13 @@ from pathlib import Path
 from pdt_observer.agent import build_result_from_document, run_offline_demo
 from pdt_observer.mock_data import DEFAULT_MILLTOWN_TASK
 from pdt_observer.mock_services import MockGeocoder, MockSourceService
-from pdt_observer.models import Evidence, GeoReference, InvestigationResult, InvestigationRun
+from pdt_observer.models import (
+    DayPart,
+    Evidence,
+    GeoReference,
+    InvestigationResult,
+    InvestigationRun,
+)
 from pdt_observer.validation import ValidationCode, validate_result, validate_run
 
 
@@ -34,6 +40,10 @@ def test_successful_17_person_observation_validates() -> None:
     assert result.count == 17
     assert result.observation_type == "people_present"
     assert result.place_name == "Blue Lantern"
+    assert result.observed_time_text == "approximately 9:10 p.m."
+    assert result.time_context is not None
+    assert result.time_context.observed_time_local == "21:10"
+    assert result.time_context.day_part == DayPart.NIGHT
     assert result.evidence is not None
     assert result.georeference is not None
     assert result.georeference.latitude == 41.24831
@@ -90,6 +100,36 @@ def test_validation_rejects_count_absent_from_quote() -> None:
     )
 
     assert _has_code(bad, ValidationCode.COUNT_NOT_IN_QUOTE)
+
+
+def test_validation_rejects_time_text_absent_from_quote() -> None:
+    result, _source_service, _geocoder = _successful_result()
+
+    bad = result.model_copy(update={"observed_time_text": "around 8:00 p.m."})
+
+    assert _has_code(bad, ValidationCode.TIME_TEXT_NOT_IN_QUOTE)
+
+
+def test_validation_rejects_day_part_mismatch() -> None:
+    result, _source_service, _geocoder = _successful_result()
+    assert result.time_context is not None
+
+    bad = result.model_copy(
+        deep=True,
+        update={
+            "time_context": result.time_context.model_copy(update={"day_part": DayPart.MORNING})
+        },
+    )
+
+    assert _has_code(bad, ValidationCode.TIME_CONTEXT_DAY_PART_MISMATCH)
+
+
+def test_validation_rejects_time_context_without_source_text() -> None:
+    result, _source_service, _geocoder = _successful_result()
+
+    bad = result.model_copy(update={"observed_time_text": None})
+
+    assert _has_code(bad, ValidationCode.TIME_CONTEXT_WITHOUT_SOURCE_TEXT)
 
 
 def test_validation_rejects_unknown_place_id() -> None:

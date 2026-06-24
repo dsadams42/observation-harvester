@@ -87,12 +87,16 @@ def test_ingest_review_and_export_jsonl(tmp_path: Path) -> None:
 
     assert item.status == ResultStatus.ACCEPTED
     assert item.validation_valid
+    assert item.observed_time_text == "approximately 9:10 p.m."
+    assert item.time_context is not None
+    assert item.time_context.day_part == "night"
 
     items = list_review_items(tmp_path, status=ResultStatus.ACCEPTED)
     exported = export_review_items(tmp_path, status=ResultStatus.ACCEPTED, output_format="jsonl")
 
     assert len(items) == 1
     assert "Blue Lantern" in exported
+    assert '"day_part": "night"' in exported
 
 
 def test_record_source_outcomes_increment_counters(tmp_path: Path) -> None:

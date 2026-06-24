@@ -13,10 +13,26 @@ PUBLIC_VENUE_PROFILES = BuildingProfileSet(
             profile_id="restaurants_bars",
             label="Restaurants and bars",
             source_search_prompt=(
-                "Find incident reports mentioning an explicit count of people physically "
-                "inside a restaurant, bar, cafe, diner, brewery, or nightclub."
+                "Find incident reports with quoted count-bearing phrases such as "
+                '"people were inside", "customers were inside", "patrons were inside", '
+                '"people were evacuated", or "inside the restaurant when" for a restaurant, '
+                "bar, cafe, diner, brewery, or nightclub."
             ),
-            positive_evidence_patterns=("people inside", "patrons inside", "customers inside"),
+            positive_evidence_patterns=(
+                "people were inside",
+                "people were present",
+                "customers were inside",
+                "patrons were inside",
+                "guests were inside",
+                "people were evacuated",
+                "customers were evacuated",
+                "people were rescued",
+                "inside the restaurant when",
+                "inside the bar when",
+                "people inside",
+                "patrons inside",
+                "customers inside",
+            ),
             negative_evidence_patterns=("capacity", "seats", "address", "injured"),
             venue_aliases=("restaurant", "bar", "cafe", "diner", "brewery", "nightclub"),
             priority=10,
@@ -25,10 +41,22 @@ PUBLIC_VENUE_PROFILES = BuildingProfileSet(
             profile_id="schools_childcare",
             label="Schools and childcare",
             source_search_prompt=(
-                "Find incident reports mentioning an explicit count of people physically "
-                "inside a school, daycare, childcare center, preschool, or campus building."
+                "Find incident reports with quoted count-bearing phrases such as "
+                '"students were inside", "children were inside", "people were evacuated", '
+                '"students were rescued", or "inside the school when" for a school, daycare, '
+                "childcare center, preschool, or campus building."
             ),
-            positive_evidence_patterns=("students inside", "people inside", "children inside"),
+            positive_evidence_patterns=(
+                "students were inside",
+                "children were inside",
+                "people were evacuated",
+                "students were evacuated",
+                "students were rescued",
+                "inside the school when",
+                "students inside",
+                "people inside",
+                "children inside",
+            ),
             negative_evidence_patterns=("enrollment", "graduation year", "address"),
             venue_aliases=("school", "daycare", "childcare", "preschool", "campus"),
             priority=20,
@@ -37,10 +65,22 @@ PUBLIC_VENUE_PROFILES = BuildingProfileSet(
             profile_id="hospitals_care",
             label="Hospitals and care facilities",
             source_search_prompt=(
-                "Find incident reports mentioning an explicit count of people physically "
-                "inside a hospital, clinic, nursing home, assisted living facility, or care home."
+                "Find incident reports with quoted count-bearing phrases such as "
+                '"patients were inside", "residents were inside", "people were evacuated", '
+                '"patients were rescued", or "inside the hospital when" for a hospital, '
+                "clinic, nursing home, assisted living facility, or care home."
             ),
-            positive_evidence_patterns=("patients inside", "residents inside", "people inside"),
+            positive_evidence_patterns=(
+                "patients were inside",
+                "residents were inside",
+                "people were evacuated",
+                "patients were evacuated",
+                "patients were rescued",
+                "inside the hospital when",
+                "patients inside",
+                "residents inside",
+                "people inside",
+            ),
             negative_evidence_patterns=("beds", "staffed beds", "cost", "capacity"),
             venue_aliases=("hospital", "clinic", "nursing home", "assisted living", "care home"),
             priority=30,
@@ -49,10 +89,22 @@ PUBLIC_VENUE_PROFILES = BuildingProfileSet(
             profile_id="hotels_lodging",
             label="Hotels and lodging",
             source_search_prompt=(
-                "Find incident reports mentioning an explicit count of people physically "
-                "inside a hotel, motel, inn, shelter, or lodging property."
+                "Find incident reports with quoted count-bearing phrases such as "
+                '"guests were inside", "occupants were inside", "people were evacuated", '
+                '"guests were rescued", or "inside the hotel when" for a hotel, motel, inn, '
+                "shelter, or lodging property."
             ),
-            positive_evidence_patterns=("guests inside", "people inside", "occupants inside"),
+            positive_evidence_patterns=(
+                "guests were inside",
+                "occupants were inside",
+                "people were evacuated",
+                "guests were evacuated",
+                "guests were rescued",
+                "inside the hotel when",
+                "guests inside",
+                "people inside",
+                "occupants inside",
+            ),
             negative_evidence_patterns=("rooms", "room rate", "address", "built in"),
             venue_aliases=("hotel", "motel", "inn", "shelter", "lodge"),
             priority=40,
@@ -61,10 +113,23 @@ PUBLIC_VENUE_PROFILES = BuildingProfileSet(
             profile_id="retail_events",
             label="Retail and event venues",
             source_search_prompt=(
-                "Find incident reports mentioning an explicit count of people physically "
-                "inside a store, mall, market, theater, hall, arena, or event venue."
+                "Find incident reports with quoted count-bearing phrases such as "
+                '"people were inside", "shoppers were inside", "attendees were inside", '
+                '"people were evacuated", or "inside the mall when" for a store, mall, '
+                "market, theater, hall, arena, or event venue."
             ),
-            positive_evidence_patterns=("people inside", "shoppers inside", "attendees inside"),
+            positive_evidence_patterns=(
+                "people were inside",
+                "shoppers were inside",
+                "attendees were inside",
+                "people were evacuated",
+                "shoppers were evacuated",
+                "people were rescued",
+                "inside the mall when",
+                "people inside",
+                "shoppers inside",
+                "attendees inside",
+            ),
             negative_evidence_patterns=("capacity", "tickets sold", "construction cost"),
             venue_aliases=("store", "mall", "market", "theater", "hall", "arena", "venue"),
             priority=50,

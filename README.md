@@ -80,6 +80,10 @@ python -m pdt_observer work record-source --work-item-id <work_item_id> --outcom
 python -m pdt_observer work record-source --work-item-id <work_item_id> --outcome examined
 ```
 
+The building-type agent prompt uses evidence-first quoted searches such as
+`"<locality>" "people were inside" <venue>`, `"<locality>" "customers were evacuated" <venue>`,
+and `"<locality>" "inside the <venue> when"` before broad venue discovery.
+
 When a source supports a candidate, write an `InvestigationRun` JSON file shaped like
 `examples/milltown_codex_run.json`, then validate, ingest, and count it. Keep
 `observed_time_text` as the exact source phrase and use `time_context` for normalized values such

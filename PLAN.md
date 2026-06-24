@@ -98,6 +98,8 @@ tests/
   source outcomes, run files, runtime, and deterministic stop reasons.
 - Added job-pool claim controls: agents can claim by profile, locality/country, or exact work item,
   with a local file-backed claim lock.
+- Added evidence-first quoted search templates so Codex agents hunt for count-bearing source
+  phrases before broad venue discovery.
 - Added optional time context: exact source time text can be normalized into local `HH:MM`,
   precision, day-part, daylight-state, and review/export fields.
 - Agent mode constructs an OpenAI Agents SDK `Agent` with three narrow function tools, centralizes

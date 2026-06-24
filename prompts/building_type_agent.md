@@ -61,6 +61,47 @@ python -m pdt_observer work record-run --work-item-id <work_item_id> --run-file 
 Each `record-run` counts as one source examined. Stop immediately when the status report says
 `should_continue` is `false`.
 
+## Evidence-First Search
+
+Do not begin with broad venue discovery. Begin with quoted count-bearing phrases that are likely to
+contain a usable observation. Combine the locality/country, one venue alias, and one evidence phrase.
+
+Use query templates like these, replacing `<locality>` and `<venue>`:
+
+```text
+"<locality>" "people were inside" <venue>
+"<locality>" "people were present" <venue>
+"<locality>" "customers were inside" <venue>
+"<locality>" "patrons were inside" <venue>
+"<locality>" "guests were inside" <venue>
+"<locality>" "students were inside" <venue>
+"<locality>" "patients were inside" <venue>
+"<locality>" "people were evacuated" <venue>
+"<locality>" "customers were evacuated" <venue>
+"<locality>" "people were rescued" <venue>
+"<locality>" "inside the <venue> when"
+"<locality>" "at the <venue> when"
+```
+
+For restaurants and bars, bias searches toward incident contexts:
+
+```text
+"<locality>" "restaurant fire" "people"
+"<locality>" "bar raid" "people"
+"<locality>" "minors" "bar" "caught"
+"<locality>" "liquor violation" "bar"
+"<locality>" "curfew violation" "restaurant"
+```
+
+Quoted wildcard searches are optional and search-engine dependent, but can be useful after exact
+phrase searches:
+
+```text
+"<locality>" "* people were inside"
+"<locality>" "* customers were inside"
+"<locality>" "* patrons were inside"
+```
+
 ## Rules
 
 - Do not use API keys.

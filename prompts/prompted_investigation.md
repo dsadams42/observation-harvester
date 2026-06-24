@@ -15,6 +15,9 @@ Rules:
 
 - Find at most one observation.
 - Search before relying on a source.
+- Begin with quoted count-bearing searches, not broad venue discovery. Useful templates include
+  `"<locality>" "people were inside" <venue>`, `"<locality>" "people were evacuated" <venue>`,
+  and `"<locality>" "inside the <venue> when"`.
 - Fetch or inspect enough source text to preserve an exact supporting quotation.
 - Use only counts explicitly stated in the source as people physically present at a named place.
 - When the source gives observation time, copy the exact phrase into `observed_time_text` and add

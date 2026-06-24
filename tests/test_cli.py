@@ -73,6 +73,10 @@ def test_cli_batch_create_and_work_claim(tmp_path, capsys) -> None:
             "public_venues",
             "--batch-id",
             "batch-test",
+            "--target-accepted",
+            "2",
+            "--max-sources",
+            "7",
             "--workspace",
             str(tmp_path),
         ]
@@ -103,6 +107,193 @@ def test_cli_batch_create_and_work_claim(tmp_path, capsys) -> None:
     assert claimed["profile_id"] == "restaurants_bars"
     assert claimed["status"] == "claimed"
     assert claimed["claimed_by"] == "codex-restaurants"
+    assert claimed["quota"]["target_accepted_count"] == 2
+    assert claimed["quota"]["max_sources_examined"] == 7
+
+
+def test_cli_work_status_and_record_source(tmp_path, capsys) -> None:
+    main(
+        [
+            "batch",
+            "create",
+            "--locality",
+            "Milltown",
+            "--country",
+            "US",
+            "--profiles",
+            "public_venues",
+            "--batch-id",
+            "batch-test",
+            "--workspace",
+            str(tmp_path),
+        ]
+    )
+    capsys.readouterr()
+    main(
+        [
+            "work",
+            "claim",
+            "--profile",
+            "restaurants_bars",
+            "--workspace",
+            str(tmp_path),
+        ]
+    )
+    capsys.readouterr()
+
+    exit_code = main(
+        [
+            "work",
+            "record-source",
+            "--work-item-id",
+            "batch-test-restaurants_bars",
+            "--outcome",
+            "empty",
+            "--workspace",
+            str(tmp_path),
+        ]
+    )
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+
+    assert exit_code == 0
+    assert report["progress"]["sources_examined"] == 1
+    assert report["progress"]["empty_sources"] == 1
+    assert report["should_continue"] is True
+
+    exit_code = main(
+        [
+            "work",
+            "status",
+            "--work-item-id",
+            "batch-test-restaurants_bars",
+            "--workspace",
+            str(tmp_path),
+        ]
+    )
+    captured = capsys.readouterr()
+    status = json.loads(captured.out)
+
+    assert exit_code == 0
+    assert status["remaining"]["sources_remaining"] == 39
+
+
+def test_cli_record_run_completes_and_rejects_more_progress(tmp_path, capsys) -> None:
+    main(
+        [
+            "batch",
+            "create",
+            "--locality",
+            "Milltown",
+            "--country",
+            "US",
+            "--profiles",
+            "public_venues",
+            "--batch-id",
+            "batch-test",
+            "--target-accepted",
+            "1",
+            "--workspace",
+            str(tmp_path),
+        ]
+    )
+    capsys.readouterr()
+    main(
+        [
+            "work",
+            "claim",
+            "--profile",
+            "restaurants_bars",
+            "--workspace",
+            str(tmp_path),
+        ]
+    )
+    capsys.readouterr()
+
+    exit_code = main(
+        [
+            "work",
+            "record-run",
+            "--work-item-id",
+            "batch-test-restaurants_bars",
+            "--run-file",
+            "examples/milltown_codex_run.json",
+            "--workspace",
+            str(tmp_path),
+        ]
+    )
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+
+    assert exit_code == 0
+    assert report["status"] == "completed"
+    assert report["stop_reason"] == "target_met"
+
+    exit_code = main(
+        [
+            "work",
+            "record-source",
+            "--work-item-id",
+            "batch-test-restaurants_bars",
+            "--outcome",
+            "examined",
+            "--workspace",
+            str(tmp_path),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "already completed" in captured.err
+
+
+def test_cli_work_complete_marks_manual_stop(tmp_path, capsys) -> None:
+    main(
+        [
+            "batch",
+            "create",
+            "--locality",
+            "Milltown",
+            "--country",
+            "US",
+            "--profiles",
+            "public_venues",
+            "--batch-id",
+            "batch-test",
+            "--workspace",
+            str(tmp_path),
+        ]
+    )
+    capsys.readouterr()
+    main(
+        [
+            "work",
+            "claim",
+            "--profile",
+            "restaurants_bars",
+            "--workspace",
+            str(tmp_path),
+        ]
+    )
+    capsys.readouterr()
+
+    exit_code = main(
+        [
+            "work",
+            "complete",
+            "--work-item-id",
+            "batch-test-restaurants_bars",
+            "--workspace",
+            str(tmp_path),
+        ]
+    )
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+
+    assert exit_code == 0
+    assert report["status"] == "completed"
+    assert report["stop_reason"] == "manual_complete"
+    assert report["should_continue"] is False
 
 
 def test_cli_review_ingest_list_and_export(tmp_path, capsys) -> None:

@@ -55,15 +55,30 @@ Each Codex agent claims work for one profile:
 python -m pdt_observer work claim --profile restaurants_bars --claimed-by codex-restaurants
 ```
 
-The agent performs web discovery using Codex web capabilities, writes an `InvestigationRun` JSON
-file shaped like `examples/milltown_codex_run.json`, then validates it.
-
-Validate that run locally:
+Each work item has quotas and progress counters. Check whether to continue:
 
 ```powershell
-python -m pdt_observer validate runs/<file>.json
-python -m pdt_observer review ingest runs/<file>.json
+python -m pdt_observer work status --work-item-id <work_item_id>
 ```
+
+The agent performs web discovery using Codex web capabilities, inspects one source at a time, and
+records progress:
+
+```powershell
+python -m pdt_observer work record-source --work-item-id <work_item_id> --outcome empty
+python -m pdt_observer work record-source --work-item-id <work_item_id> --outcome failed
+python -m pdt_observer work record-source --work-item-id <work_item_id> --outcome examined
+```
+
+When a source supports a candidate, write an `InvestigationRun` JSON file shaped like
+`examples/milltown_codex_run.json`, then validate, ingest, and count it:
+
+```powershell
+python -m pdt_observer work record-run --work-item-id <work_item_id> --run-file runs/<file>.json
+```
+
+`record-run` counts as one examined source and increments accepted/review/not_found counters.
+Python marks the work item completed when it reaches its accepted target or an early-stop limit.
 
 List and export review queue entries:
 
@@ -71,6 +86,23 @@ List and export review queue entries:
 python -m pdt_observer review list --status review
 python -m pdt_observer export --status accepted --format jsonl
 ```
+
+Quota defaults per work item are:
+
+```json
+{
+  "target_accepted_count": 5,
+  "max_review_count": 10,
+  "max_sources_examined": 40,
+  "max_failed_sources": 20,
+  "max_empty_sources": 15,
+  "max_runtime_minutes": 60
+}
+```
+
+Override them during batch creation with flags such as `--target-accepted`,
+`--max-sources`, `--max-failed-sources`, `--max-empty-sources`, `--max-review`, and
+`--max-runtime-minutes`.
 
 Ad-hoc batch, work, run, review, and export artifacts are ignored by git.
 

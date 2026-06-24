@@ -23,6 +23,22 @@ class WorkStatus(StrEnum):
     FAILED = "failed"
 
 
+class StopReason(StrEnum):
+    TARGET_MET = "target_met"
+    REVIEW_LIMIT_REACHED = "review_limit_reached"
+    SOURCE_LIMIT_REACHED = "source_limit_reached"
+    FAILED_SOURCE_LIMIT_REACHED = "failed_source_limit_reached"
+    EMPTY_SOURCE_LIMIT_REACHED = "empty_source_limit_reached"
+    RUNTIME_LIMIT_REACHED = "runtime_limit_reached"
+    MANUAL_COMPLETE = "manual_complete"
+
+
+class SourceOutcome(StrEnum):
+    EXAMINED = "examined"
+    EMPTY = "empty"
+    FAILED = "failed"
+
+
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -145,6 +161,28 @@ class BuildingProfileSet(StrictModel):
     profiles: tuple[BuildingTypeProfile, ...]
 
 
+class WorkQuota(StrictModel):
+    target_accepted_count: int = Field(default=5, ge=1)
+    max_review_count: int = Field(default=10, ge=0)
+    max_sources_examined: int = Field(default=40, ge=0)
+    max_failed_sources: int = Field(default=20, ge=0)
+    max_empty_sources: int = Field(default=15, ge=0)
+    max_runtime_minutes: int = Field(default=60, ge=0)
+
+
+class WorkProgress(StrictModel):
+    accepted_count: int = Field(default=0, ge=0)
+    review_count: int = Field(default=0, ge=0)
+    not_found_count: int = Field(default=0, ge=0)
+    sources_examined: int = Field(default=0, ge=0)
+    failed_sources: int = Field(default=0, ge=0)
+    empty_sources: int = Field(default=0, ge=0)
+    run_files: tuple[str, ...] = ()
+    started_at: str | None = None
+    last_activity_at: str | None = None
+    stop_reason: StopReason | None = None
+
+
 class WorkItem(StrictModel):
     work_item_id: str = Field(min_length=1)
     batch_id: str = Field(min_length=1)
@@ -156,8 +194,20 @@ class WorkItem(StrictModel):
     claimed_by: str | None = None
     source_hints: tuple[str, ...] = ()
     run_artifact_path: str | None = None
+    quota: WorkQuota = Field(default_factory=WorkQuota)
+    progress: WorkProgress = Field(default_factory=WorkProgress)
     created_at: str = Field(min_length=1)
     updated_at: str = Field(min_length=1)
+
+
+class WorkStatusReport(StrictModel):
+    work_item_id: str = Field(min_length=1)
+    status: WorkStatus
+    should_continue: bool
+    quota: WorkQuota
+    progress: WorkProgress
+    stop_reason: StopReason | None = None
+    remaining: dict[str, int]
 
 
 class HarvestBatch(StrictModel):

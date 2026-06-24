@@ -11,22 +11,46 @@ capabilities and the local Python harness in this repository.
 python -m pdt_observer work claim --profile <profile_id> --claimed-by <your-name>
 ```
 
-2. Use the work item locality, country, source hints, and profile prompt to search the web.
-3. Inspect sources that appear likely to mention explicit people physically present at named
-   venues.
-4. Preserve enough source text for exact quote validation.
-5. Write one or more `InvestigationRun` JSON files under `runs/`.
-6. Validate each file:
+2. Check the quota status before each search step:
 
 ```powershell
-python -m pdt_observer validate runs/<file>.json
+python -m pdt_observer work status --work-item-id <work_item_id>
 ```
 
-7. Ingest each result into the review queue:
+3. Continue only while `should_continue` is `true`.
+4. Use the work item locality, country, source hints, and profile prompt to search the web.
+5. Inspect one source at a time.
+6. If the source has no qualifying evidence, record an empty inspection:
 
 ```powershell
-python -m pdt_observer review ingest runs/<file>.json
+python -m pdt_observer work record-source --work-item-id <work_item_id> --outcome empty
 ```
+
+7. If the source cannot be inspected because of a fetch/access/parsing failure, record a failure:
+
+```powershell
+python -m pdt_observer work record-source --work-item-id <work_item_id> --outcome failed
+```
+
+8. If the source was inspected but produced only context or was handled outside a run artifact,
+   record it as examined:
+
+```powershell
+python -m pdt_observer work record-source --work-item-id <work_item_id> --outcome examined
+```
+
+9. If the source supports a candidate, preserve enough source text for exact quote validation and
+   write one `InvestigationRun` JSON file under `runs/`.
+10. Validate and ingest the run with one command:
+
+```powershell
+python -m pdt_observer work record-run --work-item-id <work_item_id> --run-file runs/<file>.json
+```
+
+11. Check status again and repeat only while `should_continue` remains `true`.
+
+Each `record-run` counts as one source examined. Stop immediately when the status report says
+`should_continue` is `false`.
 
 ## Rules
 

@@ -88,6 +88,8 @@ tests/
   `InvestigationRun` JSON file and the CLI validates it locally.
 - Added no-key Codex orchestration artifacts: public-venue building profiles, batch creation,
   work claiming, review queue ingestion/listing, JSONL export, and direct URL fetching/parsing.
+- Added quota-governed work progress: each work item tracks accepted/review/not_found counts,
+  source outcomes, run files, runtime, and deterministic stop reasons.
 - Agent mode constructs an OpenAI Agents SDK `Agent` with three narrow function tools, centralizes
   the model name in settings, enforces `maximum_agent_turns`, and validates the model proposal
   before returning it.

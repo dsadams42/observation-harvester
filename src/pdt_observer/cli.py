@@ -8,16 +8,26 @@ from pathlib import Path
 
 from pdt_observer.agent import load_task, run_agent_investigation, run_offline_demo
 from pdt_observer.config import MissingAPIKeyError
-from pdt_observer.models import InvestigationRun, ResultStatus, WorkStatus
+from pdt_observer.models import (
+    InvestigationRun,
+    ResultStatus,
+    SourceOutcome,
+    WorkQuota,
+    WorkStatus,
+)
 from pdt_observer.validation import ObservationValidationException, validate_run
 from pdt_observer.web import DirectFetchError, DirectWebFetcher
 from pdt_observer.workflow import (
     claim_work_item,
+    complete_work_item,
     create_batch,
     export_review_items,
+    get_work_status,
     ingest_review,
     list_review_items,
     list_work_items,
+    record_run,
+    record_source_outcome,
     write_model,
 )
 
@@ -43,6 +53,12 @@ def build_parser() -> argparse.ArgumentParser:
     batch_create.add_argument("--batch-id")
     batch_create.add_argument("--source-hint", action="append", default=[])
     batch_create.add_argument("--workspace", type=Path, default=Path("."))
+    batch_create.add_argument("--target-accepted", type=int, default=5)
+    batch_create.add_argument("--max-review", type=int, default=10)
+    batch_create.add_argument("--max-sources", type=int, default=40)
+    batch_create.add_argument("--max-failed-sources", type=int, default=20)
+    batch_create.add_argument("--max-empty-sources", type=int, default=15)
+    batch_create.add_argument("--max-runtime-minutes", type=int, default=60)
 
     work = subparsers.add_parser("work", help="List or claim Codex work items.")
     work_subparsers = work.add_subparsers(dest="work_command", required=True)
@@ -54,6 +70,30 @@ def build_parser() -> argparse.ArgumentParser:
     work_claim.add_argument("--workspace", type=Path, default=Path("."))
     work_claim.add_argument("--profile", required=True)
     work_claim.add_argument("--claimed-by", default="codex")
+    work_status = work_subparsers.add_parser("status", help="Show quota progress for a work item.")
+    work_status.add_argument("--workspace", type=Path, default=Path("."))
+    work_status.add_argument("--work-item-id", required=True)
+    work_record_source = work_subparsers.add_parser(
+        "record-source",
+        help="Record one source inspection outcome.",
+    )
+    work_record_source.add_argument("--workspace", type=Path, default=Path("."))
+    work_record_source.add_argument("--work-item-id", required=True)
+    work_record_source.add_argument(
+        "--outcome",
+        required=True,
+        choices=[outcome.value for outcome in SourceOutcome],
+    )
+    work_record_run = work_subparsers.add_parser(
+        "record-run",
+        help="Validate, ingest, and count one InvestigationRun file.",
+    )
+    work_record_run.add_argument("--workspace", type=Path, default=Path("."))
+    work_record_run.add_argument("--work-item-id", required=True)
+    work_record_run.add_argument("--run-file", type=Path, required=True)
+    work_complete = work_subparsers.add_parser("complete", help="Manually complete a work item.")
+    work_complete.add_argument("--workspace", type=Path, default=Path("."))
+    work_complete.add_argument("--work-item-id", required=True)
 
     validate = subparsers.add_parser(
         "validate",
@@ -115,6 +155,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(result.model_dump_json(indent=2))
             return 0
         if args.command == "batch" and args.batch_command == "create":
+            quota = WorkQuota(
+                target_accepted_count=args.target_accepted,
+                max_review_count=args.max_review,
+                max_sources_examined=args.max_sources,
+                max_failed_sources=args.max_failed_sources,
+                max_empty_sources=args.max_empty_sources,
+                max_runtime_minutes=args.max_runtime_minutes,
+            )
             batch = create_batch(
                 root=args.workspace,
                 locality=args.locality,
@@ -122,6 +170,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 profile_set_name=args.profiles,
                 batch_id=args.batch_id,
                 source_hints=tuple(args.source_hint),
+                quota=quota,
             )
             print(batch.model_dump_json(indent=2))
             return 0
@@ -141,30 +190,54 @@ def main(argv: Sequence[str] | None = None) -> int:
                 return 1
             print(claimed_item.model_dump_json(indent=2))
             return 0
+        if args.command == "work" and args.work_command == "status":
+            work_report = get_work_status(args.workspace, args.work_item_id)
+            print(work_report.model_dump_json(indent=2))
+            return 0
+        if args.command == "work" and args.work_command == "record-source":
+            work_report = record_source_outcome(
+                args.workspace,
+                work_item_id=args.work_item_id,
+                outcome=SourceOutcome(args.outcome),
+            )
+            print(work_report.model_dump_json(indent=2))
+            return 0
+        if args.command == "work" and args.work_command == "record-run":
+            work_report = record_run(
+                args.workspace,
+                work_item_id=args.work_item_id,
+                run_file=args.run_file,
+            )
+            print(work_report.model_dump_json(indent=2))
+            return 0
+        if args.command == "work" and args.work_command == "complete":
+            work_report = complete_work_item(args.workspace, args.work_item_id)
+            print(work_report.model_dump_json(indent=2))
+            return 0
         if args.command == "validate":
             run = load_run(args.run_file)
-            report = validate_run(run)
+            validation_report = validate_run(run)
             payload = {
-                "valid": report.valid,
+                "valid": validation_report.valid,
                 "status": run.candidate.result.status,
-                "errors": [error.model_dump(mode="json") for error in report.errors],
+                "errors": [error.model_dump(mode="json") for error in validation_report.errors],
                 "result": run.candidate.result.model_dump(mode="json"),
             }
             print(json.dumps(payload, indent=2))
-            return 0 if report.valid else 1
+            return 0 if validation_report.valid else 1
         if args.command == "summarize":
             run = load_run(args.run_file)
-            report = validate_run(run)
+            validation_report = validate_run(run)
             result = run.candidate.result
             count_text = "no count" if result.count is None else f"{result.count} people"
             place_text = result.place_name or "no place"
             print(f"{result.status}: {count_text} at {place_text}")
-            print(f"validation: {'valid' if report.valid else 'invalid'}")
+            print(f"validation: {'valid' if validation_report.valid else 'invalid'}")
             print(f"reason: {result.reason}")
-            if report.errors:
-                for error in report.errors:
+            if validation_report.errors:
+                for error in validation_report.errors:
                     print(f"- {error.code}: {error.message}")
-            return 0 if report.valid else 1
+            return 0 if validation_report.valid else 1
         if args.command == "review" and args.review_command == "ingest":
             review_queue_item = ingest_review(args.run_file, root=args.workspace)
             print(review_queue_item.model_dump_json(indent=2))

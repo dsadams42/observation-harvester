@@ -61,6 +61,28 @@ python -m pdt_observer work record-run --work-item-id <work_item_id> --run-file 
 Each `record-run` counts as one source examined. Stop immediately when the status report says
 `should_continue` is `false`.
 
+## Source Suitability
+
+Prefer sources that are likely to contain a verifiable people-present observation:
+
+- Local or national news articles.
+- Wire-service articles.
+- Official emergency, police, fire, public-safety, government, or regulator reports.
+- Official venue, organizer, or event attendance announcements.
+- Official press releases with count-bearing event or incident details.
+
+Treat these as context only, not qualifying evidence for an accepted observation:
+
+- Wikipedia or other encyclopedia pages.
+- Generic directories, travel guides, listicles, map listings, and venue profile pages.
+- Venue marketing or about pages without a count-bearing event or incident.
+- Capacity pages, seating charts, annual reports, statistics tables, and background summaries.
+- Social media reposts that do not point to an original authoritative source.
+
+Use context-only sources only to discover a lead or support a `review` georeference. Do not create
+an `accepted` observation from them. When a search result is clearly context-only, prefer moving to a
+better source instead of spending the work item's source quota on it.
+
 ## Evidence-First Search
 
 Do not begin with broad venue discovery. Begin with quoted count-bearing phrases that are likely to

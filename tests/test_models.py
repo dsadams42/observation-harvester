@@ -5,7 +5,13 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from pdt_observer.models import InvestigationResult, InvestigationRun, ResultStatus, WorkItem
+from pdt_observer.models import (
+    BuildingTypeProfile,
+    InvestigationResult,
+    InvestigationRun,
+    ResultStatus,
+    WorkItem,
+)
 
 
 def test_accepted_result_cannot_omit_required_fields() -> None:
@@ -46,3 +52,16 @@ def test_work_item_defaults_are_backward_compatible() -> None:
     assert item.quota.max_sources_examined == 40
     assert item.progress.accepted_count == 0
     assert item.progress.run_files == ()
+
+
+def test_building_type_profile_source_type_defaults_are_backward_compatible() -> None:
+    profile = BuildingTypeProfile.model_validate(
+        {
+            "profile_id": "legacy",
+            "label": "Legacy",
+            "source_search_prompt": "Find useful sources.",
+        }
+    )
+
+    assert profile.preferred_source_types == ()
+    assert profile.context_only_source_types == ()

@@ -5,6 +5,23 @@ from pathlib import Path
 
 from pdt_observer.models import BuildingProfileSet, BuildingTypeProfile
 
+_PREFERRED_SOURCE_TYPES = (
+    "local or national news article",
+    "wire-service article",
+    "official emergency or public-safety incident report",
+    "official government or regulator enforcement report",
+    "official venue, organizer, or event attendance announcement",
+    "official press release with a count-bearing event or incident detail",
+)
+
+_CONTEXT_ONLY_SOURCE_TYPES = (
+    "Wikipedia or encyclopedia page",
+    "generic directory, travel guide, listicle, or map listing",
+    "venue marketing or about page without a count-bearing event or incident",
+    "capacity, seating-chart, annual-report, or statistics page",
+    "social media repost without an original authoritative source",
+)
+
 PUBLIC_VENUE_PROFILES = BuildingProfileSet(
     profile_set_id="public_venues",
     label="Public venues",
@@ -16,8 +33,12 @@ PUBLIC_VENUE_PROFILES = BuildingProfileSet(
                 "Find incident reports with quoted count-bearing phrases such as "
                 '"people were inside", "customers were inside", "patrons were inside", '
                 '"people were evacuated", or "inside the restaurant when" for a restaurant, '
-                "bar, cafe, diner, brewery, or nightclub."
+                "bar, cafe, diner, brewery, or nightclub. Prioritize news articles, official "
+                "reports, and official attendance announcements; treat encyclopedia, directory, "
+                "map, and generic venue pages as context only."
             ),
+            preferred_source_types=_PREFERRED_SOURCE_TYPES,
+            context_only_source_types=_CONTEXT_ONLY_SOURCE_TYPES,
             positive_evidence_patterns=(
                 "people were inside",
                 "people were present",
@@ -44,8 +65,12 @@ PUBLIC_VENUE_PROFILES = BuildingProfileSet(
                 "Find incident reports with quoted count-bearing phrases such as "
                 '"students were inside", "children were inside", "people were evacuated", '
                 '"students were rescued", or "inside the school when" for a school, daycare, '
-                "childcare center, preschool, or campus building."
+                "childcare center, preschool, or campus building. Prioritize news articles, "
+                "official reports, and official attendance announcements; treat encyclopedia, "
+                "directory, map, and generic venue pages as context only."
             ),
+            preferred_source_types=_PREFERRED_SOURCE_TYPES,
+            context_only_source_types=_CONTEXT_ONLY_SOURCE_TYPES,
             positive_evidence_patterns=(
                 "students were inside",
                 "children were inside",
@@ -68,8 +93,12 @@ PUBLIC_VENUE_PROFILES = BuildingProfileSet(
                 "Find incident reports with quoted count-bearing phrases such as "
                 '"patients were inside", "residents were inside", "people were evacuated", '
                 '"patients were rescued", or "inside the hospital when" for a hospital, '
-                "clinic, nursing home, assisted living facility, or care home."
+                "clinic, nursing home, assisted living facility, or care home. Prioritize news "
+                "articles, official reports, and official attendance announcements; treat "
+                "encyclopedia, directory, map, and generic venue pages as context only."
             ),
+            preferred_source_types=_PREFERRED_SOURCE_TYPES,
+            context_only_source_types=_CONTEXT_ONLY_SOURCE_TYPES,
             positive_evidence_patterns=(
                 "patients were inside",
                 "residents were inside",
@@ -92,8 +121,12 @@ PUBLIC_VENUE_PROFILES = BuildingProfileSet(
                 "Find incident reports with quoted count-bearing phrases such as "
                 '"guests were inside", "occupants were inside", "people were evacuated", '
                 '"guests were rescued", or "inside the hotel when" for a hotel, motel, inn, '
-                "shelter, or lodging property."
+                "shelter, or lodging property. Prioritize news articles, official reports, and "
+                "official attendance announcements; treat encyclopedia, directory, map, and "
+                "generic venue pages as context only."
             ),
+            preferred_source_types=_PREFERRED_SOURCE_TYPES,
+            context_only_source_types=_CONTEXT_ONLY_SOURCE_TYPES,
             positive_evidence_patterns=(
                 "guests were inside",
                 "occupants were inside",
@@ -116,8 +149,12 @@ PUBLIC_VENUE_PROFILES = BuildingProfileSet(
                 "Find incident reports with quoted count-bearing phrases such as "
                 '"people were inside", "shoppers were inside", "attendees were inside", '
                 '"people were evacuated", or "inside the mall when" for a store, mall, '
-                "market, theater, hall, arena, or event venue."
+                "market, theater, hall, arena, or event venue. Prioritize news articles, official "
+                "reports, and official attendance announcements; treat encyclopedia, directory, "
+                "map, and generic venue pages as context only."
             ),
+            preferred_source_types=_PREFERRED_SOURCE_TYPES,
+            context_only_source_types=_CONTEXT_ONLY_SOURCE_TYPES,
             positive_evidence_patterns=(
                 "people were inside",
                 "shoppers were inside",

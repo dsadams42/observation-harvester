@@ -84,6 +84,12 @@ The building-type agent prompt uses evidence-first quoted searches such as
 `"<locality>" "people were inside" <venue>`, `"<locality>" "customers were evacuated" <venue>`,
 and `"<locality>" "inside the <venue> when"` before broad venue discovery.
 
+Qualifying evidence should come from source types that can plausibly document a count-bearing
+event or incident: news articles, wire-service stories, official public-safety or government
+reports, official venue/event attendance announcements, and official press releases. Wikipedia,
+encyclopedias, directories, travel guides, map listings, venue profile pages, capacity pages, and
+unsourced social reposts are context only; they may provide leads, but not accepted observations.
+
 When a source supports a candidate, write an `InvestigationRun` JSON file shaped like
 `examples/milltown_codex_run.json`, then validate, ingest, and count it. Keep
 `observed_time_text` as the exact source phrase and use `time_context` for normalized values such

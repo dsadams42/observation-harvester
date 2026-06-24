@@ -184,6 +184,8 @@ class BuildingTypeProfile(StrictModel):
     profile_id: str = Field(min_length=1)
     label: str = Field(min_length=1)
     source_search_prompt: str = Field(min_length=1)
+    preferred_source_types: tuple[str, ...] = ()
+    context_only_source_types: tuple[str, ...] = ()
     positive_evidence_patterns: tuple[str, ...] = ()
     negative_evidence_patterns: tuple[str, ...] = ()
     venue_aliases: tuple[str, ...] = ()

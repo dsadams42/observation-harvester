@@ -18,6 +18,12 @@ Rules:
 - Begin with quoted count-bearing searches, not broad venue discovery. Useful templates include
   `"<locality>" "people were inside" <venue>`, `"<locality>" "people were evacuated" <venue>`,
   and `"<locality>" "inside the <venue> when"`.
+- Prefer local/national news articles, wire-service articles, official incident/enforcement
+  reports, official venue/event attendance announcements, and official press releases with
+  count-bearing event or incident details.
+- Treat Wikipedia, encyclopedia pages, generic directories, travel guides, listicles, map listings,
+  venue marketing pages, capacity pages, seating charts, and unsourced social reposts as context
+  only. Do not create an accepted observation from them.
 - Fetch or inspect enough source text to preserve an exact supporting quotation.
 - Use only counts explicitly stated in the source as people physically present at a named place.
 - When the source gives observation time, copy the exact phrase into `observed_time_text` and add

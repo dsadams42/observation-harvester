@@ -46,3 +46,15 @@ def test_public_venue_profiles_include_evidence_first_phrases() -> None:
     assert "people were inside" in restaurants.positive_evidence_patterns
     assert "customers were inside" in restaurants.source_search_prompt
     assert "inside the restaurant when" in restaurants.positive_evidence_patterns
+
+
+def test_public_venue_profiles_include_source_type_guidance() -> None:
+    profile_set = get_profile_set("public_venues")
+
+    for profile in profile_set.profiles:
+        assert "local or national news article" in profile.preferred_source_types
+        assert "official venue, organizer, or event attendance announcement" in (
+            profile.preferred_source_types
+        )
+        assert "Wikipedia or encyclopedia page" in profile.context_only_source_types
+        assert "context only" in profile.source_search_prompt

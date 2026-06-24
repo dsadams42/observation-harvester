@@ -5,7 +5,22 @@
     {
       "profile_id": "restaurants_bars",
       "label": "Restaurants and bars",
-      "source_search_prompt": "Find incident reports with quoted count-bearing phrases such as \"people were inside\", \"customers were inside\", \"patrons were inside\", \"people were evacuated\", or \"inside the restaurant when\" for a restaurant, bar, cafe, diner, brewery, or nightclub.",
+      "source_search_prompt": "Find incident reports with quoted count-bearing phrases such as \"people were inside\", \"customers were inside\", \"patrons were inside\", \"people were evacuated\", or \"inside the restaurant when\" for a restaurant, bar, cafe, diner, brewery, or nightclub. Prioritize news articles, official reports, and official attendance announcements; treat encyclopedia, directory, map, and generic venue pages as context only.",
+      "preferred_source_types": [
+        "local or national news article",
+        "wire-service article",
+        "official emergency or public-safety incident report",
+        "official government or regulator enforcement report",
+        "official venue, organizer, or event attendance announcement",
+        "official press release with a count-bearing event or incident detail"
+      ],
+      "context_only_source_types": [
+        "Wikipedia or encyclopedia page",
+        "generic directory, travel guide, listicle, or map listing",
+        "venue marketing or about page without a count-bearing event or incident",
+        "capacity, seating-chart, annual-report, or statistics page",
+        "social media repost without an original authoritative source"
+      ],
       "positive_evidence_patterns": [
         "people were inside",
         "people were present",
@@ -41,7 +56,22 @@
     {
       "profile_id": "schools_childcare",
       "label": "Schools and childcare",
-      "source_search_prompt": "Find incident reports with quoted count-bearing phrases such as \"students were inside\", \"children were inside\", \"people were evacuated\", \"students were rescued\", or \"inside the school when\" for a school, daycare, childcare center, preschool, or campus building.",
+      "source_search_prompt": "Find incident reports with quoted count-bearing phrases such as \"students were inside\", \"children were inside\", \"people were evacuated\", \"students were rescued\", or \"inside the school when\" for a school, daycare, childcare center, preschool, or campus building. Prioritize news articles, official reports, and official attendance announcements; treat encyclopedia, directory, map, and generic venue pages as context only.",
+      "preferred_source_types": [
+        "local or national news article",
+        "wire-service article",
+        "official emergency or public-safety incident report",
+        "official government or regulator enforcement report",
+        "official venue, organizer, or event attendance announcement",
+        "official press release with a count-bearing event or incident detail"
+      ],
+      "context_only_source_types": [
+        "Wikipedia or encyclopedia page",
+        "generic directory, travel guide, listicle, or map listing",
+        "venue marketing or about page without a count-bearing event or incident",
+        "capacity, seating-chart, annual-report, or statistics page",
+        "social media repost without an original authoritative source"
+      ],
       "positive_evidence_patterns": [
         "students were inside",
         "children were inside",
@@ -71,7 +101,22 @@
     {
       "profile_id": "hospitals_care",
       "label": "Hospitals and care facilities",
-      "source_search_prompt": "Find incident reports with quoted count-bearing phrases such as \"patients were inside\", \"residents were inside\", \"people were evacuated\", \"patients were rescued\", or \"inside the hospital when\" for a hospital, clinic, nursing home, assisted living facility, or care home.",
+      "source_search_prompt": "Find incident reports with quoted count-bearing phrases such as \"patients were inside\", \"residents were inside\", \"people were evacuated\", \"patients were rescued\", or \"inside the hospital when\" for a hospital, clinic, nursing home, assisted living facility, or care home. Prioritize news articles, official reports, and official attendance announcements; treat encyclopedia, directory, map, and generic venue pages as context only.",
+      "preferred_source_types": [
+        "local or national news article",
+        "wire-service article",
+        "official emergency or public-safety incident report",
+        "official government or regulator enforcement report",
+        "official venue, organizer, or event attendance announcement",
+        "official press release with a count-bearing event or incident detail"
+      ],
+      "context_only_source_types": [
+        "Wikipedia or encyclopedia page",
+        "generic directory, travel guide, listicle, or map listing",
+        "venue marketing or about page without a count-bearing event or incident",
+        "capacity, seating-chart, annual-report, or statistics page",
+        "social media repost without an original authoritative source"
+      ],
       "positive_evidence_patterns": [
         "patients were inside",
         "residents were inside",
@@ -102,7 +147,22 @@
     {
       "profile_id": "hotels_lodging",
       "label": "Hotels and lodging",
-      "source_search_prompt": "Find incident reports with quoted count-bearing phrases such as \"guests were inside\", \"occupants were inside\", \"people were evacuated\", \"guests were rescued\", or \"inside the hotel when\" for a hotel, motel, inn, shelter, or lodging property.",
+      "source_search_prompt": "Find incident reports with quoted count-bearing phrases such as \"guests were inside\", \"occupants were inside\", \"people were evacuated\", \"guests were rescued\", or \"inside the hotel when\" for a hotel, motel, inn, shelter, or lodging property. Prioritize news articles, official reports, and official attendance announcements; treat encyclopedia, directory, map, and generic venue pages as context only.",
+      "preferred_source_types": [
+        "local or national news article",
+        "wire-service article",
+        "official emergency or public-safety incident report",
+        "official government or regulator enforcement report",
+        "official venue, organizer, or event attendance announcement",
+        "official press release with a count-bearing event or incident detail"
+      ],
+      "context_only_source_types": [
+        "Wikipedia or encyclopedia page",
+        "generic directory, travel guide, listicle, or map listing",
+        "venue marketing or about page without a count-bearing event or incident",
+        "capacity, seating-chart, annual-report, or statistics page",
+        "social media repost without an original authoritative source"
+      ],
       "positive_evidence_patterns": [
         "guests were inside",
         "occupants were inside",
@@ -133,7 +193,22 @@
     {
       "profile_id": "retail_events",
       "label": "Retail and event venues",
-      "source_search_prompt": "Find incident reports with quoted count-bearing phrases such as \"people were inside\", \"shoppers were inside\", \"attendees were inside\", \"people were evacuated\", or \"inside the mall when\" for a store, mall, market, theater, hall, arena, or event venue.",
+      "source_search_prompt": "Find incident reports with quoted count-bearing phrases such as \"people were inside\", \"shoppers were inside\", \"attendees were inside\", \"people were evacuated\", or \"inside the mall when\" for a store, mall, market, theater, hall, arena, or event venue. Prioritize news articles, official reports, and official attendance announcements; treat encyclopedia, directory, map, and generic venue pages as context only.",
+      "preferred_source_types": [
+        "local or national news article",
+        "wire-service article",
+        "official emergency or public-safety incident report",
+        "official government or regulator enforcement report",
+        "official venue, organizer, or event attendance announcement",
+        "official press release with a count-bearing event or incident detail"
+      ],
+      "context_only_source_types": [
+        "Wikipedia or encyclopedia page",
+        "generic directory, travel guide, listicle, or map listing",
+        "venue marketing or about page without a count-bearing event or incident",
+        "capacity, seating-chart, annual-report, or statistics page",
+        "social media repost without an original authoritative source"
+      ],
       "positive_evidence_patterns": [
         "people were inside",
         "shoppers were inside",

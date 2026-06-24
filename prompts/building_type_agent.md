@@ -11,6 +11,13 @@ capabilities and the local Python harness in this repository.
 python -m pdt_observer work claim --profile <profile_id> --claimed-by <your-name>
 ```
 
+For locality-scoped or assigned work, claim more narrowly:
+
+```powershell
+python -m pdt_observer work claim --profile <profile_id> --locality <locality> --country <country> --claimed-by <your-name>
+python -m pdt_observer work claim --work-item-id <work_item_id> --claimed-by <your-name>
+```
+
 2. Check the quota status before each search step:
 
 ```powershell

@@ -82,6 +82,121 @@ def test_claim_work_item_marks_one_profile_item(tmp_path: Path) -> None:
     assert claim_work_item(tmp_path, profile_id="restaurants_bars", claimed_by="again") is None
 
 
+def test_claim_work_item_can_filter_by_locality_and_country(tmp_path: Path) -> None:
+    create_batch(
+        root=tmp_path,
+        locality="Manila",
+        country="PH",
+        profile_set_name="public_venues",
+        batch_id="ph-manila",
+    )
+    create_batch(
+        root=tmp_path,
+        locality="Cebu City",
+        country="PH",
+        profile_set_name="public_venues",
+        batch_id="ph-cebu-city",
+    )
+
+    claimed = claim_work_item(
+        tmp_path,
+        profile_id="restaurants_bars",
+        locality="Cebu City",
+        country="PH",
+        claimed_by="codex-cebu",
+    )
+
+    assert claimed is not None
+    assert claimed.work_item_id == "ph-cebu-city-restaurants_bars"
+    assert claimed.status == WorkStatus.CLAIMED
+    assert claimed.claimed_by == "codex-cebu"
+    manila_item = load_work_item_by_id(tmp_path, "ph-manila-restaurants_bars")
+    assert manila_item.status == WorkStatus.OPEN
+
+
+def test_claim_work_item_can_claim_exact_id(tmp_path: Path) -> None:
+    create_batch(
+        root=tmp_path,
+        locality="Manila",
+        country="PH",
+        profile_set_name="public_venues",
+        batch_id="ph-manila",
+    )
+
+    claimed = claim_work_item(
+        tmp_path,
+        work_item_id="ph-manila-schools_childcare",
+        claimed_by="codex-schools",
+    )
+    second_claim = claim_work_item(
+        tmp_path,
+        work_item_id="ph-manila-schools_childcare",
+        claimed_by="codex-schools-2",
+    )
+
+    assert claimed is not None
+    assert claimed.work_item_id == "ph-manila-schools_childcare"
+    assert claimed.profile_id == "schools_childcare"
+    assert claimed.status == WorkStatus.CLAIMED
+    assert second_claim is None
+
+
+def test_claim_work_item_exact_id_honors_optional_filters(tmp_path: Path) -> None:
+    create_batch(
+        root=tmp_path,
+        locality="Manila",
+        country="PH",
+        profile_set_name="public_venues",
+        batch_id="ph-manila",
+    )
+
+    claimed = claim_work_item(
+        tmp_path,
+        work_item_id="ph-manila-restaurants_bars",
+        locality="Cebu City",
+        claimed_by="codex",
+    )
+
+    assert claimed is None
+    item = load_work_item_by_id(tmp_path, "ph-manila-restaurants_bars")
+    assert item.status == WorkStatus.OPEN
+
+
+def test_claim_work_item_requires_profile_or_exact_id(tmp_path: Path) -> None:
+    try:
+        claim_work_item(tmp_path, claimed_by="codex")
+    except ValueError as exc:
+        assert "provide profile_id or work_item_id" in str(exc)
+    else:
+        raise AssertionError("expected claim without filters to fail")
+
+
+def test_claim_work_item_respects_claim_lock(tmp_path: Path) -> None:
+    create_batch(
+        root=tmp_path,
+        locality="Manila",
+        country="PH",
+        profile_set_name="public_venues",
+        batch_id="ph-manila",
+    )
+    lock_dir = tmp_path / ".locks" / "work-claim.lock"
+    lock_dir.mkdir(parents=True)
+
+    try:
+        claim_work_item(
+            tmp_path,
+            profile_id="restaurants_bars",
+            claimed_by="codex",
+            lock_timeout_seconds=0,
+        )
+    except ValueError as exc:
+        assert "work claim lock is busy" in str(exc)
+    else:
+        raise AssertionError("expected busy claim lock to fail")
+    finally:
+        lock_dir.rmdir()
+
+
 def test_ingest_review_and_export_jsonl(tmp_path: Path) -> None:
     item = ingest_review(Path("examples/milltown_codex_run.json"), root=tmp_path)
 

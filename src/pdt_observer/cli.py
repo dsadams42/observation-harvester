@@ -66,9 +66,14 @@ def build_parser() -> argparse.ArgumentParser:
     work_list.add_argument("--workspace", type=Path, default=Path("."))
     work_list.add_argument("--status", choices=[status.value for status in WorkStatus])
     work_list.add_argument("--profile")
+    work_list.add_argument("--locality")
+    work_list.add_argument("--country")
     work_claim = work_subparsers.add_parser("claim", help="Claim the next open work item.")
     work_claim.add_argument("--workspace", type=Path, default=Path("."))
-    work_claim.add_argument("--profile", required=True)
+    work_claim.add_argument("--profile")
+    work_claim.add_argument("--locality")
+    work_claim.add_argument("--country")
+    work_claim.add_argument("--work-item-id")
     work_claim.add_argument("--claimed-by", default="codex")
     work_status = work_subparsers.add_parser("status", help="Show quota progress for a work item.")
     work_status.add_argument("--workspace", type=Path, default=Path("."))
@@ -176,17 +181,26 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         if args.command == "work" and args.work_command == "list":
             status = None if args.status is None else WorkStatus(args.status)
-            items = list_work_items(args.workspace, status=status, profile_id=args.profile)
+            items = list_work_items(
+                args.workspace,
+                status=status,
+                profile_id=args.profile,
+                locality=args.locality,
+                country=args.country,
+            )
             print(json.dumps([item.model_dump(mode="json") for item in items], indent=2))
             return 0
         if args.command == "work" and args.work_command == "claim":
             claimed_item = claim_work_item(
                 args.workspace,
                 profile_id=args.profile,
+                locality=args.locality,
+                country=args.country,
+                work_item_id=args.work_item_id,
                 claimed_by=args.claimed_by,
             )
             if claimed_item is None:
-                print("No open work item matched the requested profile.", file=sys.stderr)
+                print("No open work item matched the requested claim filters.", file=sys.stderr)
                 return 1
             print(claimed_item.model_dump_json(indent=2))
             return 0

@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 import math
 import re
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -25,6 +28,7 @@ from pdt_observer.profiles import get_profile_set
 from pdt_observer.validation import ValidationReport, validate_run
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
+_CLAIM_LOCK_NAME = "work-claim.lock"
 
 
 def utc_now_text() -> str:
@@ -46,6 +50,29 @@ def artifact_dir(root: Path, name: str) -> Path:
     path = root / name
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+@contextmanager
+def claim_lock(root: Path, *, timeout_seconds: float = 10.0) -> Iterator[None]:
+    locks_dir = root / ".locks"
+    locks_dir.mkdir(parents=True, exist_ok=True)
+    lock_dir = locks_dir / _CLAIM_LOCK_NAME
+    deadline = time.monotonic() + timeout_seconds
+
+    while True:
+        try:
+            lock_dir.mkdir()
+        except FileExistsError as exc:
+            if time.monotonic() >= deadline:
+                raise ValueError("work claim lock is busy; retry shortly") from exc
+            time.sleep(0.05)
+        else:
+            break
+
+    try:
+        yield
+    finally:
+        lock_dir.rmdir()
 
 
 def write_model(path: Path, model: object) -> None:
@@ -131,6 +158,8 @@ def list_work_items(
     *,
     status: WorkStatus | None = None,
     profile_id: str | None = None,
+    locality: str | None = None,
+    country: str | None = None,
 ) -> list[WorkItem]:
     directory = root / "work_items"
     if not directory.exists():
@@ -140,14 +169,34 @@ def list_work_items(
         items = [item for item in items if item.status == status]
     if profile_id is not None:
         items = [item for item in items if item.profile_id == profile_id]
+    if locality is not None:
+        items = [item for item in items if item.locality.casefold() == locality.casefold()]
+    if country is not None:
+        items = [item for item in items if item.country.casefold() == country.casefold()]
     return items
 
 
-def claim_work_item(root: Path, *, profile_id: str, claimed_by: str) -> WorkItem | None:
-    open_items = list_work_items(root, status=WorkStatus.OPEN, profile_id=profile_id)
-    if not open_items:
+def _claimable_exact_item(
+    root: Path,
+    *,
+    work_item_id: str,
+    profile_id: str | None,
+    locality: str | None,
+    country: str | None,
+) -> WorkItem | None:
+    item = load_work_item_by_id(root, work_item_id)
+    if item.status != WorkStatus.OPEN:
         return None
-    item = sorted(open_items, key=lambda candidate: candidate.created_at)[0]
+    if profile_id is not None and item.profile_id != profile_id:
+        return None
+    if locality is not None and item.locality.casefold() != locality.casefold():
+        return None
+    if country is not None and item.country.casefold() != country.casefold():
+        return None
+    return item
+
+
+def _mark_claimed(item: WorkItem, *, claimed_by: str) -> WorkItem:
     now = utc_now_text()
     progress = item.progress.model_copy(
         update={
@@ -163,9 +212,50 @@ def claim_work_item(root: Path, *, profile_id: str, claimed_by: str) -> WorkItem
             "updated_at": now,
         }
     )
-    claimed = _apply_stop_conditions(claimed)
-    save_work_item(root, claimed)
-    return claimed
+    return _apply_stop_conditions(claimed)
+
+
+def claim_work_item(
+    root: Path,
+    *,
+    claimed_by: str,
+    profile_id: str | None = None,
+    locality: str | None = None,
+    country: str | None = None,
+    work_item_id: str | None = None,
+    lock_timeout_seconds: float = 10.0,
+) -> WorkItem | None:
+    if profile_id is None and work_item_id is None:
+        raise ValueError("provide profile_id or work_item_id to claim work")
+
+    with claim_lock(root, timeout_seconds=lock_timeout_seconds):
+        if work_item_id is not None:
+            item = _claimable_exact_item(
+                root,
+                work_item_id=work_item_id,
+                profile_id=profile_id,
+                locality=locality,
+                country=country,
+            )
+            if item is None:
+                return None
+            claimed = _mark_claimed(item, claimed_by=claimed_by)
+            save_work_item(root, claimed)
+            return claimed
+
+        open_items = list_work_items(
+            root,
+            status=WorkStatus.OPEN,
+            profile_id=profile_id,
+            locality=locality,
+            country=country,
+        )
+        if not open_items:
+            return None
+        item = sorted(open_items, key=lambda candidate: candidate.created_at)[0]
+        claimed = _mark_claimed(item, claimed_by=claimed_by)
+        save_work_item(root, claimed)
+        return claimed
 
 
 def _remaining_minutes(item: WorkItem) -> int:

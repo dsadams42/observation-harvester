@@ -112,6 +112,94 @@ def test_cli_batch_create_and_work_claim(tmp_path, capsys) -> None:
     assert claimed["quota"]["max_sources_examined"] == 7
 
 
+def test_cli_work_claim_by_locality_and_exact_id(tmp_path, capsys) -> None:
+    main(
+        [
+            "batch",
+            "create",
+            "--locality",
+            "Manila",
+            "--country",
+            "PH",
+            "--profiles",
+            "public_venues",
+            "--batch-id",
+            "ph-manila",
+            "--workspace",
+            str(tmp_path),
+        ]
+    )
+    capsys.readouterr()
+    main(
+        [
+            "batch",
+            "create",
+            "--locality",
+            "Cebu City",
+            "--country",
+            "PH",
+            "--profiles",
+            "public_venues",
+            "--batch-id",
+            "ph-cebu-city",
+            "--workspace",
+            str(tmp_path),
+        ]
+    )
+    capsys.readouterr()
+
+    exit_code = main(
+        [
+            "work",
+            "claim",
+            "--profile",
+            "restaurants_bars",
+            "--locality",
+            "Cebu City",
+            "--country",
+            "PH",
+            "--claimed-by",
+            "codex-cebu",
+            "--workspace",
+            str(tmp_path),
+        ]
+    )
+    captured = capsys.readouterr()
+    claimed = json.loads(captured.out)
+
+    assert exit_code == 0
+    assert claimed["work_item_id"] == "ph-cebu-city-restaurants_bars"
+    assert claimed["claimed_by"] == "codex-cebu"
+
+    exit_code = main(
+        [
+            "work",
+            "claim",
+            "--work-item-id",
+            "ph-manila-schools_childcare",
+            "--claimed-by",
+            "codex-schools",
+            "--workspace",
+            str(tmp_path),
+        ]
+    )
+    captured = capsys.readouterr()
+    exact = json.loads(captured.out)
+
+    assert exit_code == 0
+    assert exact["work_item_id"] == "ph-manila-schools_childcare"
+    assert exact["profile_id"] == "schools_childcare"
+
+
+def test_cli_work_claim_requires_profile_or_exact_id(tmp_path, capsys) -> None:
+    exit_code = main(["work", "claim", "--workspace", str(tmp_path)])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "provide profile_id or work_item_id" in captured.err
+
+
 def test_cli_work_status_and_record_source(tmp_path, capsys) -> None:
     main(
         [

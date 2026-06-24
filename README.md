@@ -55,6 +55,16 @@ Each Codex agent claims work for one profile:
 python -m pdt_observer work claim --profile restaurants_bars --claimed-by codex-restaurants
 ```
 
+For country pilots, claims can be narrowed to a locality or exact work item:
+
+```powershell
+python -m pdt_observer work claim --profile restaurants_bars --locality Manila --country PH --claimed-by codex-restaurants
+python -m pdt_observer work claim --work-item-id ph-manila-pilot-001-restaurants_bars --claimed-by codex-restaurants
+```
+
+Claiming is protected by a local file-backed lock so two agents do not intentionally receive the
+same open work item during normal file-backed operation.
+
 Each work item has quotas and progress counters. Check whether to continue:
 
 ```powershell

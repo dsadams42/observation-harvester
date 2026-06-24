@@ -1,0 +1,237 @@
+{
+  "profile_set_id": "commercial_business",
+  "label": "Commercial and business facilities",
+  "profiles": [
+    {
+      "profile_id": "malls_retail_markets",
+      "label": "Malls, retail, and markets",
+      "source_search_prompt": "Find incident reports with explicit headcounts for people physically present, trapped, rescued, or evacuated from malls, shopping centers, markets, supermarkets, groceries, stores, or retail buildings. Prioritize news articles, official emergency reports, regulator reports, and official press releases; treat directories, mall guides, map listings, capacity pages, and generic venue profiles as context only.",
+      "preferred_source_types": [
+        "local or national news article",
+        "wire-service article",
+        "official emergency or public-safety incident report",
+        "official government or regulator enforcement report",
+        "official venue, organizer, or event attendance announcement",
+        "official press release with a count-bearing event or incident detail"
+      ],
+      "context_only_source_types": [
+        "Wikipedia or encyclopedia page",
+        "generic directory, travel guide, listicle, or map listing",
+        "venue marketing or about page without a count-bearing event or incident",
+        "capacity, seating-chart, annual-report, or statistics page",
+        "social media repost without an original authoritative source",
+        "residential building report",
+        "outdoor public open-space report without a named commercial facility"
+      ],
+      "positive_evidence_patterns": [
+        "people were inside",
+        "customers were inside",
+        "shoppers were inside",
+        "occupants were inside",
+        "people were evacuated",
+        "customers were evacuated",
+        "shoppers were evacuated",
+        "people were rescued",
+        "trapped inside",
+        "inside the mall when",
+        "inside the market when",
+        "inside the store when",
+        "evacuated from the mall",
+        "evacuated from the supermarket"
+      ],
+      "negative_evidence_patterns": [
+        "capacity",
+        "parking slots",
+        "floor area",
+        "address",
+        "injured",
+        "residential",
+        "open space"
+      ],
+      "venue_aliases": [
+        "mall",
+        "shopping center",
+        "market",
+        "supermarket",
+        "grocery",
+        "store",
+        "retail"
+      ],
+      "priority": 10,
+      "enabled": true
+    },
+    {
+      "profile_id": "offices_bpo_call_centers",
+      "label": "Offices, BPOs, and call centers",
+      "source_search_prompt": "Find incident reports with explicit headcounts for employees, workers, call center agents, or occupants physically present, trapped, rescued, or evacuated from corporate offices, BPO offices, call centers, office towers, or business parks. Prioritize news articles, official emergency reports, labor/regulator reports, and official press releases; treat company profile pages, job listings, directories, and office leasing pages as context only.",
+      "preferred_source_types": [
+        "local or national news article",
+        "wire-service article",
+        "official emergency or public-safety incident report",
+        "official government or regulator enforcement report",
+        "official venue, organizer, or event attendance announcement",
+        "official press release with a count-bearing event or incident detail"
+      ],
+      "context_only_source_types": [
+        "Wikipedia or encyclopedia page",
+        "generic directory, travel guide, listicle, or map listing",
+        "venue marketing or about page without a count-bearing event or incident",
+        "capacity, seating-chart, annual-report, or statistics page",
+        "social media repost without an original authoritative source",
+        "job listing or company profile without incident evidence",
+        "office leasing page without incident evidence"
+      ],
+      "positive_evidence_patterns": [
+        "employees were inside",
+        "workers were inside",
+        "call center agents were inside",
+        "occupants were inside",
+        "employees were evacuated",
+        "workers were evacuated",
+        "call center agents were evacuated",
+        "employees were trapped",
+        "workers were trapped",
+        "people were rescued",
+        "inside the office when",
+        "inside the call center when",
+        "evacuated from the office",
+        "evacuated from the BPO"
+      ],
+      "negative_evidence_patterns": [
+        "number of employees worldwide",
+        "headcount target",
+        "hiring",
+        "seats",
+        "office space",
+        "address",
+        "residential"
+      ],
+      "venue_aliases": [
+        "office",
+        "BPO",
+        "call center",
+        "office tower",
+        "business park",
+        "corporate building"
+      ],
+      "priority": 20,
+      "enabled": true
+    },
+    {
+      "profile_id": "factories_warehouses",
+      "label": "Factories and warehouses",
+      "source_search_prompt": "Find incident reports with explicit headcounts for workers, employees, laborers, or occupants physically present, trapped, rescued, or evacuated from factories, warehouses, industrial plants, logistics facilities, or manufacturing buildings. Prioritize news articles, official emergency reports, labor/regulator reports, and official press releases; treat company profiles, industrial directories, capacity pages, and background summaries as context only.",
+      "preferred_source_types": [
+        "local or national news article",
+        "wire-service article",
+        "official emergency or public-safety incident report",
+        "official government or regulator enforcement report",
+        "official venue, organizer, or event attendance announcement",
+        "official press release with a count-bearing event or incident detail"
+      ],
+      "context_only_source_types": [
+        "Wikipedia or encyclopedia page",
+        "generic directory, travel guide, listicle, or map listing",
+        "venue marketing or about page without a count-bearing event or incident",
+        "capacity, seating-chart, annual-report, or statistics page",
+        "social media repost without an original authoritative source",
+        "industrial directory without incident evidence",
+        "company profile without incident evidence"
+      ],
+      "positive_evidence_patterns": [
+        "workers were inside",
+        "employees were inside",
+        "laborers were inside",
+        "occupants were inside",
+        "workers were evacuated",
+        "employees were evacuated",
+        "workers were trapped",
+        "employees were trapped",
+        "workers were rescued",
+        "people were rescued",
+        "inside the factory when",
+        "inside the warehouse when",
+        "evacuated from the factory",
+        "evacuated from the warehouse"
+      ],
+      "negative_evidence_patterns": [
+        "production capacity",
+        "storage capacity",
+        "workforce size",
+        "jobs",
+        "cost",
+        "address",
+        "residential"
+      ],
+      "venue_aliases": [
+        "factory",
+        "warehouse",
+        "industrial plant",
+        "manufacturing facility",
+        "logistics facility",
+        "processing plant"
+      ],
+      "priority": 30,
+      "enabled": true
+    },
+    {
+      "profile_id": "hotels_restaurants",
+      "label": "Hotels, restaurants, and hospitality",
+      "source_search_prompt": "Find incident reports with explicit headcounts for guests, patrons, customers, employees, workers, or occupants physically present, trapped, rescued, or evacuated from hotels, restaurants, bars, cafes, nightclubs, or hospitality facilities. Prioritize news articles, official emergency reports, regulator reports, and official press releases; treat travel guides, booking pages, directories, capacity pages, and generic venue profiles as context only.",
+      "preferred_source_types": [
+        "local or national news article",
+        "wire-service article",
+        "official emergency or public-safety incident report",
+        "official government or regulator enforcement report",
+        "official venue, organizer, or event attendance announcement",
+        "official press release with a count-bearing event or incident detail"
+      ],
+      "context_only_source_types": [
+        "Wikipedia or encyclopedia page",
+        "generic directory, travel guide, listicle, or map listing",
+        "venue marketing or about page without a count-bearing event or incident",
+        "capacity, seating-chart, annual-report, or statistics page",
+        "social media repost without an original authoritative source",
+        "booking page without incident evidence",
+        "restaurant menu or review page without incident evidence"
+      ],
+      "positive_evidence_patterns": [
+        "guests were inside",
+        "patrons were inside",
+        "customers were inside",
+        "employees were inside",
+        "occupants were inside",
+        "guests were evacuated",
+        "patrons were evacuated",
+        "customers were evacuated",
+        "employees were evacuated",
+        "people were rescued",
+        "inside the hotel when",
+        "inside the restaurant when",
+        "inside the bar when",
+        "evacuated from the hotel",
+        "evacuated from the restaurant"
+      ],
+      "negative_evidence_patterns": [
+        "rooms",
+        "room rate",
+        "seating capacity",
+        "menu",
+        "address",
+        "reviews",
+        "residential"
+      ],
+      "venue_aliases": [
+        "hotel",
+        "restaurant",
+        "bar",
+        "cafe",
+        "nightclub",
+        "resort",
+        "inn"
+      ],
+      "priority": 40,
+      "enabled": true
+    }
+  ]
+}

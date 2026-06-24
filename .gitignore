@@ -11,6 +11,8 @@ dist/
 build/
 batches/
 exports/
+lead_runs/
 review/
 runs/
+work/
 work_items/

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,7 @@ from pdt_observer.models import (
     BuildingTypeProfile,
     InvestigationResult,
     InvestigationRun,
+    OccupancyLead,
     ResultStatus,
     WorkItem,
 )
@@ -33,6 +35,15 @@ def test_codex_run_model_loads_example() -> None:
     assert run.candidate.result.time_context.day_part == "night"
     assert run.source_bundle.documents
     assert run.source_bundle.places
+
+
+def test_occupancy_lead_model_loads_example_array() -> None:
+    payload = json.loads(Path("examples/ph_commercial_leads.json").read_text(encoding="utf-8"))
+    lead = OccupancyLead.model_validate(payload[0])
+
+    assert lead.is_valid_occupancy_report
+    assert lead.occupancy_data[0].count == 83
+    assert lead.location.country == "PH"
 
 
 def test_work_item_defaults_are_backward_compatible() -> None:

@@ -8,6 +8,12 @@ from pathlib import Path
 
 from pdt_observer.agent import load_task, run_agent_investigation, run_offline_demo
 from pdt_observer.config import MissingAPIKeyError
+from pdt_observer.leads import (
+    leads_to_json,
+    load_leads,
+    render_lead_harvest_prompt,
+    summarize_leads,
+)
 from pdt_observer.models import (
     InvestigationRun,
     ResultStatus,
@@ -15,6 +21,8 @@ from pdt_observer.models import (
     WorkQuota,
     WorkStatus,
 )
+from pdt_observer.profiles import get_builtin_profile
+from pdt_observer.prompting import render_work_prompt
 from pdt_observer.validation import ObservationValidationException, validate_run
 from pdt_observer.web import DirectFetchError, DirectWebFetcher
 from pdt_observer.workflow import (
@@ -78,6 +86,12 @@ def build_parser() -> argparse.ArgumentParser:
     work_status = work_subparsers.add_parser("status", help="Show quota progress for a work item.")
     work_status.add_argument("--workspace", type=Path, default=Path("."))
     work_status.add_argument("--work-item-id", required=True)
+    work_prompt = work_subparsers.add_parser(
+        "prompt",
+        help="Render a profile-specific Codex prompt for a work item.",
+    )
+    work_prompt.add_argument("--workspace", type=Path, default=Path("."))
+    work_prompt.add_argument("--work-item-id", required=True)
     work_record_source = work_subparsers.add_parser(
         "record-source",
         help="Record one source inspection outcome.",
@@ -137,6 +151,26 @@ def build_parser() -> argparse.ArgumentParser:
     source_fetch.add_argument("--output", type=Path)
     source_fetch.add_argument("--max-bytes", type=int, default=1_000_000)
     source_fetch.add_argument("--timeout-seconds", type=float, default=10)
+
+    harvest = subparsers.add_parser("harvest", help="Prepare broad Codex lead-harvest prompts.")
+    harvest_subparsers = harvest.add_subparsers(dest="harvest_command", required=True)
+    harvest_prepare = harvest_subparsers.add_parser(
+        "prepare",
+        help="Render a broad country/profile lead-harvest prompt.",
+    )
+    harvest_prepare.add_argument("--country", required=True)
+    harvest_prepare.add_argument("--profiles", default="commercial_business")
+    harvest_prepare.add_argument("--target", type=int, default=20)
+    harvest_prepare.add_argument("--locality")
+    harvest_prepare.add_argument("--output", type=Path)
+
+    leads = subparsers.add_parser("leads", help="Validate and summarize broad lead JSON arrays.")
+    leads_subparsers = leads.add_subparsers(dest="leads_command", required=True)
+    leads_validate = leads_subparsers.add_parser("validate", help="Validate a lead JSON array.")
+    leads_validate.add_argument("lead_file", type=Path)
+    leads_validate.add_argument("--pretty", action="store_true")
+    leads_summarize = leads_subparsers.add_parser("summarize", help="Summarize a lead JSON array.")
+    leads_summarize.add_argument("lead_file", type=Path)
 
     investigate_api = subparsers.add_parser(
         "investigate-api",
@@ -207,6 +241,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "work" and args.work_command == "status":
             work_report = get_work_status(args.workspace, args.work_item_id)
             print(work_report.model_dump_json(indent=2))
+            return 0
+        if args.command == "work" and args.work_command == "prompt":
+            work_report = get_work_status(args.workspace, args.work_item_id)
+            matching_items = list_work_items(args.workspace)
+            item = next(
+                (
+                    candidate
+                    for candidate in matching_items
+                    if candidate.work_item_id == args.work_item_id
+                ),
+                None,
+            )
+            if item is None:
+                raise ValueError(f"work item not found: {args.work_item_id}")
+            profile = get_builtin_profile(item.profile_id)
+            print(render_work_prompt(item=item, profile=profile, status=work_report))
             return 0
         if args.command == "work" and args.work_command == "record-source":
             work_report = record_source_outcome(
@@ -280,6 +330,28 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.output is not None:
                 write_model(args.output, fetch_result)
             print(fetch_result.model_dump_json(indent=2))
+            return 0
+        if args.command == "harvest" and args.harvest_command == "prepare":
+            prompt = render_lead_harvest_prompt(
+                country=args.country,
+                profile_set_name=args.profiles,
+                target=args.target,
+                locality=args.locality,
+            )
+            if args.output is not None:
+                args.output.parent.mkdir(parents=True, exist_ok=True)
+                args.output.write_text(prompt, encoding="utf-8")
+            print(prompt, end="" if prompt.endswith("\n") else "\n")
+            return 0
+        if args.command == "leads" and args.leads_command == "validate":
+            lead_items = load_leads(args.lead_file)
+            if args.pretty:
+                print(leads_to_json(lead_items))
+            else:
+                print(json.dumps({"valid": True, "lead_count": len(lead_items)}, indent=2))
+            return 0
+        if args.command == "leads" and args.leads_command == "summarize":
+            print(json.dumps(summarize_leads(load_leads(args.lead_file)), indent=2))
             return 0
         if args.command == "investigate-api":
             task = load_task(args.task_file)

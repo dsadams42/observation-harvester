@@ -1,0 +1,25 @@
+[
+  {
+    "is_valid_occupancy_report": true,
+    "source_url": "https://newsinfo.inquirer.net/955656/davao-city-mall-fire-38th-victim-died-after-saving-783",
+    "incident_date": "2017-12-23",
+    "incident_time": "09:35 AM",
+    "occupancy_data": [
+      {
+        "count": 83,
+        "group_type": "Survey Sampling International call-center employees evacuated"
+      },
+      {
+        "count": 700,
+        "group_type": "mall workers and shoppers evacuated"
+      }
+    ],
+    "location": {
+      "facility_name": "NCCC Mall Ma-a",
+      "specific_address_or_landmark": "MacArthur Highway corner Ma-a Road",
+      "city_or_region": "Davao City, Davao del Sur",
+      "country": "PH"
+    },
+    "review_notes": "Lead example only; promote to InvestigationRun after exact quote and source text review."
+  }
+]

@@ -112,6 +112,105 @@ def test_cli_batch_create_and_work_claim(tmp_path, capsys) -> None:
     assert claimed["quota"]["max_sources_examined"] == 7
 
 
+def test_cli_work_prompt_renders_profile_specific_guidance(tmp_path, capsys) -> None:
+    main(
+        [
+            "batch",
+            "create",
+            "--locality",
+            "Makati",
+            "--country",
+            "PH",
+            "--profiles",
+            "commercial_business",
+            "--batch-id",
+            "ph-makati",
+            "--workspace",
+            str(tmp_path),
+        ]
+    )
+    capsys.readouterr()
+    main(
+        [
+            "work",
+            "claim",
+            "--profile",
+            "offices_bpo_call_centers",
+            "--claimed-by",
+            "codex-bpo",
+            "--workspace",
+            str(tmp_path),
+        ]
+    )
+    capsys.readouterr()
+
+    exit_code = main(
+        [
+            "work",
+            "prompt",
+            "--work-item-id",
+            "ph-makati-offices_bpo_call_centers",
+            "--workspace",
+            str(tmp_path),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "Profile-Driven Occupancy Harvest Prompt" in captured.out
+    assert "Country: Philippines (`PH`)" in captured.out
+    assert "barangay" in captured.out
+    assert "call center agents were evacuated" in captured.out
+    assert '"Makati" Philippines "employees were inside" office' in captured.out
+    assert "Accepted observations require exact source URL" in captured.out
+
+
+def test_cli_harvest_prepare_renders_broad_lead_prompt(tmp_path, capsys) -> None:
+    output = tmp_path / "ph-commercial-leads.md"
+
+    exit_code = main(
+        [
+            "harvest",
+            "prepare",
+            "--country",
+            "PH",
+            "--profiles",
+            "commercial_business",
+            "--target",
+            "20",
+            "--output",
+            str(output),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert output.is_file()
+    assert "Broad Occupancy Lead Harvest" in captured.out
+    assert "Target: 20 lead records." in captured.out
+    assert "Country: Philippines (`PH`)." in captured.out
+    assert '"city_or_region": "String"' in captured.out
+    assert "DO NOT" not in captured.err
+
+
+def test_cli_leads_validate_and_summarize(capsys) -> None:
+    exit_code = main(["leads", "validate", "examples/ph_commercial_leads.json"])
+    captured = capsys.readouterr()
+    validated = json.loads(captured.out)
+
+    assert exit_code == 0
+    assert validated == {"valid": True, "lead_count": 1}
+
+    exit_code = main(["leads", "summarize", "examples/ph_commercial_leads.json"])
+    captured = capsys.readouterr()
+    summary = json.loads(captured.out)
+
+    assert exit_code == 0
+    assert summary["lead_count"] == 1
+    assert summary["occupancy_count_rows"] == 2
+    assert summary["countries"] == ["PH"]
+
+
 def test_cli_work_claim_by_locality_and_exact_id(tmp_path, capsys) -> None:
     main(
         [

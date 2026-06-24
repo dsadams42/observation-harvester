@@ -37,6 +37,50 @@ def test_builtin_public_venue_profiles_match_json() -> None:
     assert builtin == from_json
 
 
+def test_commercial_business_profile_set_loads_from_builtin() -> None:
+    profile_set = get_profile_set("commercial_business")
+
+    assert profile_set.profile_set_id == "commercial_business"
+    assert [profile.profile_id for profile in profile_set.profiles] == [
+        "malls_retail_markets",
+        "offices_bpo_call_centers",
+        "factories_warehouses",
+        "hotels_restaurants",
+    ]
+
+
+def test_builtin_commercial_business_profiles_match_json() -> None:
+    builtin = get_profile_set("commercial_business")
+    from_json = BuildingProfileSet.model_validate_json(
+        Path("profiles/commercial_business.json").read_text(encoding="utf-8")
+    )
+
+    assert builtin == from_json
+
+
+def test_legacy_philippines_commercial_business_name_aliases_generic_profile_set() -> None:
+    assert get_profile_set("philippines_commercial_business") == get_profile_set(
+        "commercial_business"
+    )
+
+
+def test_commercial_business_profiles_include_facility_specific_proxy_phrases() -> None:
+    profile_set = get_profile_set("commercial_business")
+    offices = next(
+        profile
+        for profile in profile_set.profiles
+        if profile.profile_id == "offices_bpo_call_centers"
+    )
+    factories = next(
+        profile for profile in profile_set.profiles if profile.profile_id == "factories_warehouses"
+    )
+
+    assert "call center agents were evacuated" in offices.positive_evidence_patterns
+    assert "BPO" in offices.venue_aliases
+    assert "workers were trapped" in factories.positive_evidence_patterns
+    assert "workforce size" in factories.negative_evidence_patterns
+
+
 def test_public_venue_profiles_include_evidence_first_phrases() -> None:
     profile_set = get_profile_set("public_venues")
     restaurants = next(

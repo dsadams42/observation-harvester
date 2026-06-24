@@ -180,6 +180,28 @@ class InvestigationRun(StrictModel):
     candidate: CandidateObservation
 
 
+class LeadOccupancyDatum(StrictModel):
+    count: int = Field(ge=0)
+    group_type: str = Field(min_length=1)
+
+
+class LeadLocation(StrictModel):
+    facility_name: str = Field(min_length=1)
+    specific_address_or_landmark: str = Field(min_length=1)
+    city_or_region: str = Field(min_length=1)
+    country: str = Field(min_length=2)
+
+
+class OccupancyLead(StrictModel):
+    is_valid_occupancy_report: bool
+    source_url: str = Field(min_length=1)
+    incident_date: str = Field(min_length=1)
+    incident_time: str = Field(min_length=1)
+    occupancy_data: tuple[LeadOccupancyDatum, ...] = Field(min_length=1)
+    location: LeadLocation
+    review_notes: str | None = None
+
+
 class BuildingTypeProfile(StrictModel):
     profile_id: str = Field(min_length=1)
     label: str = Field(min_length=1)

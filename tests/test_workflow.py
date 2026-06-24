@@ -265,7 +265,7 @@ def test_record_run_ingests_review_and_stops_when_target_met(tmp_path: Path) -> 
 
     assert report.progress.accepted_count == 1
     assert report.progress.sources_examined == 1
-    assert report.progress.run_files == ("examples\\milltown_codex_run.json",)
+    assert report.progress.run_files == (str(Path("examples/milltown_codex_run.json")),)
     assert report.status == WorkStatus.COMPLETED
     assert report.stop_reason == StopReason.TARGET_MET
     assert not report.should_continue

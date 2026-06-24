@@ -347,9 +347,11 @@ def status_report(item: WorkItem) -> WorkStatusReport:
 
 
 def get_work_status(root: Path, work_item_id: str) -> WorkStatusReport:
-    item = _apply_stop_conditions(load_work_item_by_id(root, work_item_id))
-    save_work_item(root, item)
-    return status_report(item)
+    item = load_work_item_by_id(root, work_item_id)
+    updated = _apply_stop_conditions(item)
+    if updated != item:
+        save_work_item(root, updated)
+    return status_report(updated)
 
 
 def record_source_outcome(

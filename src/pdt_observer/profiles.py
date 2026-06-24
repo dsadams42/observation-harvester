@@ -174,14 +174,34 @@ PUBLIC_VENUE_PROFILES = BuildingProfileSet(
     ),
 )
 
+COMMERCIAL_BUSINESS_PROFILES = BuildingProfileSet.model_validate_json(
+    (Path(__file__).resolve().parents[2] / "profiles" / "commercial_business.json").read_text(
+        encoding="utf-8"
+    )
+)
+
+BUILTIN_PROFILE_SETS = {
+    PUBLIC_VENUE_PROFILES.profile_set_id: PUBLIC_VENUE_PROFILES,
+    COMMERCIAL_BUSINESS_PROFILES.profile_set_id: COMMERCIAL_BUSINESS_PROFILES,
+    "philippines_commercial_business": COMMERCIAL_BUSINESS_PROFILES,
+}
+
 
 def get_profile_set(name: str) -> BuildingProfileSet:
-    if name == PUBLIC_VENUE_PROFILES.profile_set_id:
-        return PUBLIC_VENUE_PROFILES
+    if name in BUILTIN_PROFILE_SETS:
+        return BUILTIN_PROFILE_SETS[name]
     path = Path(name)
     if path.is_file():
         return BuildingProfileSet.model_validate_json(path.read_text(encoding="utf-8"))
     raise ValueError(f"unknown profile set: {name}")
+
+
+def get_builtin_profile(profile_id: str) -> BuildingTypeProfile:
+    for profile_set in BUILTIN_PROFILE_SETS.values():
+        for profile in profile_set.profiles:
+            if profile.profile_id == profile_id:
+                return profile
+    raise ValueError(f"unknown builtin profile: {profile_id}")
 
 
 def write_profile_set(profile_set: BuildingProfileSet, path: Path) -> None:

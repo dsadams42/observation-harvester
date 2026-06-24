@@ -40,8 +40,8 @@ source control.
 ## Codex Subscription Workflow
 
 Use one of the prompts in `prompts/` from a Codex chat or automation. For multi-agent harvesting,
-start with `prompts/building_type_agent.md` and the profile definitions in
-`profiles/public_venues.json`.
+start with `prompts/building_type_agent.md` and a profile definition such as
+`profiles/public_venues.json` or `profiles/commercial_business.json`.
 
 Create a local batch of profile-specific work items:
 
@@ -53,6 +53,12 @@ Each Codex agent claims work for one profile:
 
 ```powershell
 python -m pdt_observer work claim --profile restaurants_bars --claimed-by codex-restaurants
+```
+
+Render a profile-specific working prompt for the claimed item:
+
+```powershell
+python -m pdt_observer work prompt --work-item-id <work_item_id>
 ```
 
 For country pilots, claims can be narrowed to a locality or exact work item:
@@ -84,11 +90,50 @@ The building-type agent prompt uses evidence-first quoted searches such as
 `"<locality>" "people were inside" <venue>`, `"<locality>" "customers were evacuated" <venue>`,
 and `"<locality>" "inside the <venue> when"` before broad venue discovery.
 
+Facility profiles tailor those searches by facility type, while the work item country scopes where
+to harvest. For example, `--profiles commercial_business --country PH` uses malls/retail/markets,
+offices/BPOs/call centers, factories/warehouses, and hotels/restaurants in the Philippines. It
+treats source-tied phrases such as evacuated employees, trapped workers, rescued guests, and
+evacuated shoppers as acceptable real-time occupancy proxies while keeping accepted observations
+gated by exact URL, exact quote, count, facility identity, locality/country, and georeference
+validation.
+
 Qualifying evidence should come from source types that can plausibly document a count-bearing
 event or incident: news articles, wire-service stories, official public-safety or government
 reports, official venue/event attendance announcements, and official press releases. Wikipedia,
 encyclopedias, directories, travel guides, map listings, venue profile pages, capacity pages, and
 unsourced social reposts are context only; they may provide leads, but not accepted observations.
+
+## Broad Lead Harvest
+
+For country-wide discovery, start with a permissive lead harvest. This mirrors a broad ChatGPT-style
+extraction prompt: collect many commercial/business occupancy leads, allow missing metadata as
+`Unknown` or `Not provided`, and keep subgroup counts when a source breaks them out. Lead harvests
+are not final accepted observations; they are reviewable candidates that can later be promoted into
+strict `InvestigationRun` artifacts.
+
+Prepare a broad lead prompt:
+
+```powershell
+python -m pdt_observer harvest prepare --country PH --profiles commercial_business --target 20 --output work/ph-commercial-leads.md
+```
+
+Run that prompt through Codex CLI with web search:
+
+```powershell
+codex --search exec --sandbox workspace-write --cd . -o lead_runs/ph-commercial-001.json - < work/ph-commercial-leads.md
+```
+
+Codex should return only the JSON array, and `-o` writes the final response to
+`lead_runs/ph-commercial-001.json`. Validate and summarize it:
+
+```powershell
+python -m pdt_observer leads validate lead_runs/ph-commercial-001.json
+python -m pdt_observer leads summarize lead_runs/ph-commercial-001.json
+```
+
+Use the lead output to choose which records deserve exact quote/source-text validation as
+`InvestigationRun` files.
 
 When a source supports a candidate, write an `InvestigationRun` JSON file shaped like
 `examples/milltown_codex_run.json`, then validate, ingest, and count it. Keep

@@ -1,0 +1,143 @@
+{
+  "profile_set_id": "residential",
+  "label": "Residential facilities",
+  "profiles": [
+    {
+      "profile_id": "apartments_condominiums",
+      "label": "Apartments and condominiums",
+      "source_search_prompt": "Find incident reports with explicit headcounts for residents, occupants, tenants, families, or people physically present, trapped, rescued, displaced, or evacuated from apartments, condominiums, flats, high-rise residential towers, or mixed-use residential buildings. Prioritize news articles, official emergency reports, LGU reports, and public-safety reports; treat real-estate listings, property profiles, unit counts, and amenity pages as context only.",
+      "preferred_source_types": [
+        "local or national news article",
+        "wire-service article",
+        "official emergency or public-safety incident report",
+        "official government or regulator enforcement report",
+        "official disaster response or social welfare report",
+        "official press release with a count-bearing incident detail"
+      ],
+      "context_only_source_types": [
+        "Wikipedia or encyclopedia page",
+        "generic directory, real-estate listing, listicle, or map listing",
+        "property marketing or about page without a count-bearing event or incident",
+        "unit-count, floor-area, valuation, amenities, or leasing page",
+        "social media repost without an original authoritative source",
+        "commercial-only facility report without residential occupancy evidence",
+        "outdoor public open-space report without a named residential facility"
+      ],
+      "positive_evidence_patterns": [
+        "residents were inside",
+        "occupants were inside",
+        "tenants were inside",
+        "families were inside",
+        "people were inside",
+        "residents were evacuated",
+        "occupants were evacuated",
+        "tenants were evacuated",
+        "families were evacuated",
+        "people were evacuated",
+        "residents were rescued",
+        "people were rescued",
+        "trapped inside",
+        "inside the apartment when",
+        "inside the condominium when",
+        "evacuated from the condominium",
+        "evacuated from the apartment",
+        "families displaced",
+        "residents displaced"
+      ],
+      "negative_evidence_patterns": [
+        "units",
+        "number of units",
+        "floor area",
+        "parking slots",
+        "amenities",
+        "rental rate",
+        "sale price",
+        "property value",
+        "address",
+        "injured",
+        "commercial",
+        "office space"
+      ],
+      "venue_aliases": [
+        "apartment",
+        "condominium",
+        "condo",
+        "residential tower",
+        "residential building",
+        "mixed-use building",
+        "flat",
+        "tenement"
+      ],
+      "priority": 10,
+      "enabled": true
+    },
+    {
+      "profile_id": "houses_informal_settlements",
+      "label": "Houses and informal settlements",
+      "source_search_prompt": "Find incident reports with explicit headcounts for residents, occupants, families, households, or people physically present, trapped, rescued, displaced, or evacuated from houses, homes, boarding houses, dormitories, row houses, subdivisions, compounds, or informal settlements. Prioritize news articles, official emergency reports, LGU reports, disaster response reports, and public-safety reports; treat census figures, neighborhood population totals, property pages, and general settlement profiles as context only.",
+      "preferred_source_types": [
+        "local or national news article",
+        "wire-service article",
+        "official emergency or public-safety incident report",
+        "official government or regulator enforcement report",
+        "official disaster response or social welfare report",
+        "official press release with a count-bearing incident detail"
+      ],
+      "context_only_source_types": [
+        "Wikipedia or encyclopedia page",
+        "generic directory, real-estate listing, listicle, or map listing",
+        "property marketing or about page without a count-bearing event or incident",
+        "census, population, household, or annual statistics page without incident evidence",
+        "social media repost without an original authoritative source",
+        "commercial-only facility report without residential occupancy evidence",
+        "outdoor public open-space report without a named residential place"
+      ],
+      "positive_evidence_patterns": [
+        "residents were inside",
+        "occupants were inside",
+        "families were inside",
+        "people were inside",
+        "residents were evacuated",
+        "families were evacuated",
+        "people were evacuated",
+        "residents were rescued",
+        "families were rescued",
+        "people were rescued",
+        "trapped inside",
+        "inside the house when",
+        "inside the boarding house when",
+        "evacuated from their homes",
+        "families displaced",
+        "residents displaced",
+        "families affected",
+        "households affected"
+      ],
+      "negative_evidence_patterns": [
+        "population",
+        "households",
+        "number of houses",
+        "number of structures",
+        "floor area",
+        "property value",
+        "sale price",
+        "address",
+        "injured",
+        "commercial",
+        "office space"
+      ],
+      "venue_aliases": [
+        "house",
+        "home",
+        "boarding house",
+        "dormitory",
+        "row house",
+        "subdivision",
+        "compound",
+        "informal settlement",
+        "residential area"
+      ],
+      "priority": 20,
+      "enabled": true
+    }
+  ]
+}

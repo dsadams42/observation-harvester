@@ -160,6 +160,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     harvest_prepare.add_argument("--country", required=True)
     harvest_prepare.add_argument("--profiles", default="commercial_business")
+    harvest_prepare.add_argument("--profile")
     harvest_prepare.add_argument("--target", type=int, default=20)
     harvest_prepare.add_argument("--locality")
     harvest_prepare.add_argument("--output", type=Path)
@@ -337,6 +338,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 profile_set_name=args.profiles,
                 target=args.target,
                 locality=args.locality,
+                profile_id=args.profile,
             )
             if args.output is not None:
                 args.output.parent.mkdir(parents=True, exist_ok=True)

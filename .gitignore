@@ -4,6 +4,7 @@
 .pytest_cache/
 .ruff_cache/
 .locks/
+.DS_Store
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -11,6 +12,7 @@ dist/
 build/
 batches/
 exports/
+harvest_runs/
 lead_runs/
 review/
 runs/

@@ -180,9 +180,16 @@ COMMERCIAL_BUSINESS_PROFILES = BuildingProfileSet.model_validate_json(
     )
 )
 
+RESIDENTIAL_PROFILES = BuildingProfileSet.model_validate_json(
+    (Path(__file__).resolve().parents[2] / "profiles" / "residential.json").read_text(
+        encoding="utf-8"
+    )
+)
+
 BUILTIN_PROFILE_SETS = {
     PUBLIC_VENUE_PROFILES.profile_set_id: PUBLIC_VENUE_PROFILES,
     COMMERCIAL_BUSINESS_PROFILES.profile_set_id: COMMERCIAL_BUSINESS_PROFILES,
+    RESIDENTIAL_PROFILES.profile_set_id: RESIDENTIAL_PROFILES,
     "philippines_commercial_business": COMMERCIAL_BUSINESS_PROFILES,
 }
 
@@ -194,6 +201,17 @@ def get_profile_set(name: str) -> BuildingProfileSet:
     if path.is_file():
         return BuildingProfileSet.model_validate_json(path.read_text(encoding="utf-8"))
     raise ValueError(f"unknown profile set: {name}")
+
+
+def narrow_profile_set(profile_set: BuildingProfileSet, profile_id: str) -> BuildingProfileSet:
+    matching_profiles = tuple(
+        profile for profile in profile_set.profiles if profile.profile_id == profile_id
+    )
+    if not matching_profiles:
+        raise ValueError(
+            f"profile {profile_id!r} not found in profile set {profile_set.profile_set_id!r}"
+        )
+    return profile_set.model_copy(update={"profiles": matching_profiles})
 
 
 def get_builtin_profile(profile_id: str) -> BuildingTypeProfile:

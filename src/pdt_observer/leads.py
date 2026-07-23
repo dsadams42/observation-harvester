@@ -6,7 +6,7 @@ from pathlib import Path
 from pydantic import TypeAdapter
 
 from pdt_observer.models import BuildingProfileSet, OccupancyLead
-from pdt_observer.profiles import get_profile_set
+from pdt_observer.profiles import get_profile_set, narrow_profile_set
 from pdt_observer.prompting import country_search_context
 
 LEAD_LIST_ADAPTER: TypeAdapter[tuple[OccupancyLead, ...]] = TypeAdapter(
@@ -52,14 +52,35 @@ def _bullet_list(values: tuple[str, ...]) -> str:
     return "\n".join(f"- {value}" for value in values)
 
 
+def _profile_scope_guidance(profile_set: BuildingProfileSet) -> str:
+    if profile_set.profile_set_id == "commercial_business":
+        return (
+            "Do not extract residential buildings or outdoor public open spaces unless the source "
+            "ties the count to a named commercial/business facility."
+        )
+    if profile_set.profile_set_id == "residential":
+        return (
+            "Do not extract commercial-only facilities, workplaces, or outdoor public open spaces "
+            "unless the source ties the count to a named residential facility, home, settlement, "
+            "or residential portion of a mixed-use building."
+        )
+    return (
+        "Do not extract records outside this profile set unless the source ties the count to a "
+        "matching named facility."
+    )
+
+
 def render_lead_harvest_prompt(
     *,
     country: str,
     profile_set_name: str,
     target: int,
     locality: str | None = None,
+    profile_id: str | None = None,
 ) -> str:
     profile_set = get_profile_set(profile_set_name)
+    if profile_id is not None:
+        profile_set = narrow_profile_set(profile_set, profile_id)
     country_context = country_search_context(country)
     country_name = country_context["name"]
     locality_scope = (
@@ -74,12 +95,13 @@ def render_lead_harvest_prompt(
     negative_patterns = _unique_profile_values(profile_set, "negative_evidence_patterns")
     preferred_sources = _unique_profile_values(profile_set, "preferred_source_types")
     context_only_sources = _unique_profile_values(profile_set, "context_only_source_types")
+    scope_guidance = _profile_scope_guidance(profile_set)
 
     return f"""# Broad Occupancy Lead Harvest
 
 You are a specialized geospatial data extraction engine. Your objective is to search online news
 and public incident sources, inspect unstructured article text, and extract real-time occupancy
-lead records for commercial, retail, hospitality, workplace, and business facilities.
+lead records for facilities matching the selected profile set.
 
 Target: {target} lead records.
 Country: {country_name} (`{country}`).
@@ -94,8 +116,7 @@ Only extract records for facilities matching this profile set:
 Facility aliases and examples:
 {_bullet_list(aliases)}
 
-Do not extract residential buildings or outdoor public open spaces unless the source ties the
-count to a named commercial/business facility.
+{scope_guidance}
 
 ## Occupancy Extraction
 
@@ -111,9 +132,10 @@ Avoid treating these alone as occupancy observations:
 {_bullet_list(negative_patterns)}
 
 If the source breaks down subgroups, capture each subgroup separately. If only a total is given,
-use a generic group type such as patrons, employees, workers, guests, shoppers, occupants, or
-people based on context. Evacuated employees, trapped workers, rescued guests, and similar
-incident-tied groups are acceptable occupancy proxies.
+use a generic group type such as residents, occupants, tenants, families, patrons, employees,
+workers, guests, shoppers, or people based on context. Evacuated residents, trapped occupants,
+displaced families, rescued guests, and similar incident-tied groups are acceptable occupancy
+proxies.
 
 Do not discard a lead because minor metadata is missing. Use "Unknown" or "Not provided" for
 missing metadata, and add a short `review_notes` value when the lead needs human review.

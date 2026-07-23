@@ -193,6 +193,38 @@ def test_cli_harvest_prepare_renders_broad_lead_prompt(tmp_path, capsys) -> None
     assert "DO NOT" not in captured.err
 
 
+def test_cli_harvest_prepare_can_focus_one_profile(tmp_path, capsys) -> None:
+    output = tmp_path / "tn-factories.md"
+
+    exit_code = main(
+        [
+            "harvest",
+            "prepare",
+            "--country",
+            "US",
+            "--locality",
+            "Tennessee",
+            "--profiles",
+            "commercial_business",
+            "--profile",
+            "factories_warehouses",
+            "--target",
+            "5",
+            "--output",
+            str(output),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert output.is_file()
+    assert "Scope: Focus on Tennessee, United States" in captured.out
+    assert "- Factories and warehouses" in captured.out
+    assert "- Malls, retail, and markets" not in captured.out
+    assert "workers were trapped" in captured.out
+    assert "shopping center" not in captured.out
+
+
 def test_cli_leads_validate_and_summarize(capsys) -> None:
     exit_code = main(["leads", "validate", "examples/ph_commercial_leads.json"])
     captured = capsys.readouterr()

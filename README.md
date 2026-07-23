@@ -34,8 +34,50 @@ For the optional API-backed agent command, install:
 .\.venv\Scripts\python -m pip install -e ".[api-agent,dev]"
 ```
 
+For the local browser app, install:
+
+```powershell
+.\.venv\Scripts\python -m pip install -e ".[app]"
+```
+
 Copy `.env.example` only if you want to run the optional API mode. Do not store a real key in
 source control.
+
+## Local Browser App
+
+The local app gives a browser-based workflow without a hosted backend or app-owned API key. It
+runs on your machine and uses your locally authenticated Codex CLI session.
+
+One-time requirements:
+
+- Python 3.12 or newer
+- Codex CLI installed and authenticated
+- This repository cloned locally
+
+On macOS, double-click:
+
+```text
+Observation Harvester.command
+```
+
+The launcher creates `.venv` if needed, installs `.[app]`, checks that `codex` is on `PATH`,
+starts the local server, and opens:
+
+```text
+http://127.0.0.1:8765
+```
+
+Manual fallback:
+
+```powershell
+python -m pip install -e ".[app]"
+python -m pdt_observer app
+```
+
+The first screen is the tool itself: enter a country, optional region/locality, profile set,
+optional facility type, and target count. The app writes the same runtime artifacts as the CLI:
+`work/`, `lead_runs/`, `harvest_runs/`, `exports/`, and `runs/`. Results are displayed as
+copyable JSON, with CSV and JSONL export buttons.
 
 ## Codex Subscription Workflow
 

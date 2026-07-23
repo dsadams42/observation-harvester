@@ -55,6 +55,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("demo", help="Run the deterministic offline Milltown demo.")
+    app = subparsers.add_parser("app", help="Run the local browser app.")
+    app.add_argument("--host", default="127.0.0.1")
+    app.add_argument("--port", type=int, default=8765)
+    app.add_argument("--workspace", type=Path, default=Path("."))
+    app.add_argument("--codex-bin", default="codex")
+    app.add_argument("--no-open", action="store_true")
 
     batch = subparsers.add_parser("batch", help="Manage Codex-operated harvest batches.")
     batch_subparsers = batch.add_subparsers(dest="batch_command", required=True)
@@ -232,6 +238,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "demo":
             result = run_offline_demo()
             print(result.model_dump_json(indent=2))
+            return 0
+        if args.command == "app":
+            from pdt_observer.app import serve_app
+
+            serve_app(
+                workspace=args.workspace,
+                host=args.host,
+                port=args.port,
+                codex_bin=args.codex_bin,
+                open_browser=not args.no_open,
+            )
             return 0
         if args.command == "batch" and args.batch_command == "create":
             quota = WorkQuota(

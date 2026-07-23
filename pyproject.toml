@@ -16,11 +16,17 @@ dependencies = [
 api-agent = [
     "openai-agents>=0.6.0",
 ]
+app = [
+    "starlette>=0.40",
+    "uvicorn>=0.30",
+]
 dev = [
     "mypy>=1.13",
     "openai-agents>=0.6.0",
     "pytest>=8.3",
     "ruff>=0.8",
+    "starlette>=0.40",
+    "uvicorn>=0.30",
 ]
 
 [project.scripts]

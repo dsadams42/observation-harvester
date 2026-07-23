@@ -1,13 +1,28 @@
 from __future__ import annotations
 
+import csv
+import io
 import json
 from pathlib import Path
 
 from pydantic import TypeAdapter
 
-from pdt_observer.models import BuildingProfileSet, OccupancyLead
+from pdt_observer.models import (
+    BuildingProfileSet,
+    CandidateObservation,
+    Evidence,
+    InvestigationResult,
+    InvestigationRun,
+    InvestigationTask,
+    ObservationType,
+    OccupancyLead,
+    ResultStatus,
+    SourceBundle,
+    SourceDocument,
+)
 from pdt_observer.profiles import get_profile_set, narrow_profile_set
 from pdt_observer.prompting import country_search_context
+from pdt_observer.workflow import slugify
 
 LEAD_LIST_ADAPTER: TypeAdapter[tuple[OccupancyLead, ...]] = TypeAdapter(
     tuple[OccupancyLead, ...]
@@ -28,13 +43,145 @@ def summarize_leads(leads: tuple[OccupancyLead, ...]) -> dict[str, object]:
     counts = sum(len(lead.occupancy_data) for lead in valid)
     countries = sorted({lead.location.country for lead in valid})
     cities = sorted({lead.location.city_or_region for lead in valid})
+    facility_level_count = sum(1 for lead in valid if lead.is_facility_level is True)
+    aggregate_count = sum(1 for lead in valid if lead.is_regional_aggregate is True)
     return {
         "lead_count": len(leads),
         "valid_occupancy_reports": len(valid),
         "occupancy_count_rows": counts,
         "countries": countries,
         "cities_or_regions": cities,
+        "facility_level_count": facility_level_count,
+        "regional_aggregate_count": aggregate_count,
     }
+
+
+def leads_to_jsonl(leads: tuple[OccupancyLead, ...]) -> str:
+    lines = [json.dumps(lead.model_dump(mode="json"), sort_keys=True) for lead in leads]
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
+def leads_to_csv(leads: tuple[OccupancyLead, ...]) -> str:
+    fieldnames = (
+        "lead_index",
+        "source_url",
+        "source_title",
+        "source_type",
+        "evidence_quote",
+        "incident_date",
+        "incident_time",
+        "count",
+        "group_type",
+        "facility_name",
+        "specific_address_or_landmark",
+        "city_or_region",
+        "country",
+        "confidence",
+        "is_facility_level",
+        "is_regional_aggregate",
+        "review_flags",
+        "review_notes",
+    )
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+    for lead_index, lead in enumerate(leads):
+        for datum in lead.occupancy_data:
+            writer.writerow(
+                {
+                    "lead_index": lead_index,
+                    "source_url": lead.source_url,
+                    "source_title": lead.source_title,
+                    "source_type": lead.source_type.value,
+                    "evidence_quote": lead.evidence_quote or "",
+                    "incident_date": lead.incident_date,
+                    "incident_time": lead.incident_time,
+                    "count": datum.count,
+                    "group_type": datum.group_type,
+                    "facility_name": lead.location.facility_name,
+                    "specific_address_or_landmark": lead.location.specific_address_or_landmark,
+                    "city_or_region": lead.location.city_or_region,
+                    "country": lead.location.country,
+                    "confidence": lead.confidence.value,
+                    "is_facility_level": (
+                        "" if lead.is_facility_level is None else lead.is_facility_level
+                    ),
+                    "is_regional_aggregate": (
+                        "" if lead.is_regional_aggregate is None else lead.is_regional_aggregate
+                    ),
+                    "review_flags": ";".join(lead.review_flags),
+                    "review_notes": lead.review_notes or "",
+                }
+            )
+    return output.getvalue()
+
+
+def export_leads(leads: tuple[OccupancyLead, ...], *, output_format: str) -> str:
+    if output_format == "jsonl":
+        return leads_to_jsonl(leads)
+    if output_format == "csv":
+        return leads_to_csv(leads)
+    raise ValueError("lead export format must be csv or jsonl")
+
+
+def promote_lead_to_run(
+    lead: OccupancyLead,
+    *,
+    task_id: str | None = None,
+) -> InvestigationRun:
+    resolved_task_id = task_id or slugify(
+        f"{lead.location.country}-{lead.location.city_or_region}-{lead.location.facility_name}"
+    )
+    document_id = f"{resolved_task_id}-source"
+    has_source = lead.source_url != "Not provided"
+    has_quote = lead.evidence_quote is not None and bool(lead.evidence_quote.strip())
+    evidence = (
+        Evidence(
+            document_id=document_id,
+            source_url=lead.source_url,
+            supporting_quote=lead.evidence_quote or "",
+        )
+        if has_source and has_quote
+        else None
+    )
+    documents = (
+        (
+            SourceDocument(
+                document_id=document_id,
+                title=lead.source_title,
+                source_url=lead.source_url,
+                locality=lead.location.city_or_region,
+                country=lead.location.country,
+                text=lead.evidence_quote or "",
+                tags=("lead-promotion",),
+            ),
+        )
+        if has_source and has_quote
+        else ()
+    )
+    first_count = lead.occupancy_data[0].count if lead.occupancy_data else None
+    group_labels = ", ".join(datum.group_type for datum in lead.occupancy_data)
+    result = InvestigationResult(
+        status=ResultStatus.REVIEW,
+        count=first_count,
+        observation_type=ObservationType.PEOPLE_PRESENT,
+        place_name=lead.location.facility_name,
+        evidence=evidence,
+        reason=(
+            "Draft promoted from broad lead harvest; needs exact source text and georeference "
+            f"review before acceptance. Lead groups: {group_labels}."
+        ),
+    )
+    return InvestigationRun(
+        task=InvestigationTask(
+            task_id=resolved_task_id,
+            locality=lead.location.city_or_region,
+            country=lead.location.country,
+            observation_type=ObservationType.PEOPLE_PRESENT,
+        ),
+        source_bundle=SourceBundle(documents=documents, places=()),
+        candidate=CandidateObservation(result=result, produced_by="lead-promotion"),
+    )
 
 
 def _unique_profile_values(profile_set: BuildingProfileSet, attr: str) -> tuple[str, ...]:
@@ -165,10 +312,20 @@ source URL.
 Return strictly a single valid JSON array. Do not wrap the JSON in markdown or prose. Use this
 exact schema. Use raw URLs, not Markdown links, in `source_url`.
 
+Set `source_type` to one of: news, official, wire, encyclopedia, social, directory, unknown.
+Set `confidence` to one of: high, medium, low, unknown.
+Set `is_facility_level` to true only when the count is tied to a specific facility or named
+residential place. Set `is_regional_aggregate` to true for broad city/province/region/country
+disaster totals. Add short machine-readable `review_flags` such as "missing_quote",
+"context_only_source", "regional_aggregate", "needs_source_upgrade", or "duplicate_incident".
+
 [
   {{
     "is_valid_occupancy_report": true,
     "source_url": "String or 'Not provided'",
+    "source_title": "String or ''",
+    "source_type": "news | official | wire | encyclopedia | social | directory | unknown",
+    "evidence_quote": "Exact source quote containing the count, or null",
     "incident_date": "YYYY-MM-DD or 'Unknown'",
     "incident_time": "HH:MM AM/PM or 'Unknown'",
     "occupancy_data": [
@@ -183,6 +340,10 @@ exact schema. Use raw URLs, not Markdown links, in `source_url`.
       "city_or_region": "String",
       "country": "{country}"
     }},
+    "confidence": "high | medium | low | unknown",
+    "is_facility_level": true,
+    "is_regional_aggregate": false,
+    "review_flags": ["String"],
     "review_notes": "String or null"
   }}
 ]

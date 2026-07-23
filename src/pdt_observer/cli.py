@@ -8,13 +8,17 @@ from pathlib import Path
 
 from pdt_observer.agent import load_task, run_agent_investigation, run_offline_demo
 from pdt_observer.config import MissingAPIKeyError
+from pdt_observer.harvest import run_harvest, run_harvest_batch
 from pdt_observer.leads import (
+    export_leads,
     leads_to_json,
     load_leads,
+    promote_lead_to_run,
     render_lead_harvest_prompt,
     summarize_leads,
 )
 from pdt_observer.models import (
+    HarvestRunStatus,
     InvestigationRun,
     ResultStatus,
     SourceOutcome,
@@ -164,6 +168,29 @@ def build_parser() -> argparse.ArgumentParser:
     harvest_prepare.add_argument("--target", type=int, default=20)
     harvest_prepare.add_argument("--locality")
     harvest_prepare.add_argument("--output", type=Path)
+    harvest_run = harvest_subparsers.add_parser(
+        "run",
+        help="Render and execute one broad lead harvest through Codex CLI.",
+    )
+    harvest_run.add_argument("--country", required=True)
+    harvest_run.add_argument("--profiles", default="commercial_business")
+    harvest_run.add_argument("--profile")
+    harvest_run.add_argument("--target", type=int, default=20)
+    harvest_run.add_argument("--locality")
+    harvest_run.add_argument("--workspace", type=Path, default=Path("."))
+    harvest_run.add_argument("--run-id")
+    harvest_run.add_argument("--codex-bin", default="codex")
+    harvest_batch_run = harvest_subparsers.add_parser(
+        "batch-run",
+        help="Run one focused harvest per enabled profile in a profile set.",
+    )
+    harvest_batch_run.add_argument("--country", required=True)
+    harvest_batch_run.add_argument("--profiles", default="commercial_business")
+    harvest_batch_run.add_argument("--target", type=int, default=20)
+    harvest_batch_run.add_argument("--locality")
+    harvest_batch_run.add_argument("--workspace", type=Path, default=Path("."))
+    harvest_batch_run.add_argument("--batch-id")
+    harvest_batch_run.add_argument("--codex-bin", default="codex")
 
     leads = subparsers.add_parser("leads", help="Validate and summarize broad lead JSON arrays.")
     leads_subparsers = leads.add_subparsers(dest="leads_command", required=True)
@@ -172,6 +199,18 @@ def build_parser() -> argparse.ArgumentParser:
     leads_validate.add_argument("--pretty", action="store_true")
     leads_summarize = leads_subparsers.add_parser("summarize", help="Summarize a lead JSON array.")
     leads_summarize.add_argument("lead_file", type=Path)
+    leads_export = leads_subparsers.add_parser("export", help="Export leads as csv or jsonl.")
+    leads_export.add_argument("lead_file", type=Path)
+    leads_export.add_argument("--format", default="csv", choices=["csv", "jsonl"])
+    leads_export.add_argument("--output", type=Path)
+    leads_promote = leads_subparsers.add_parser(
+        "promote",
+        help="Promote one broad lead into a draft InvestigationRun.",
+    )
+    leads_promote.add_argument("lead_file", type=Path)
+    leads_promote.add_argument("--index", type=int, required=True)
+    leads_promote.add_argument("--output", type=Path, required=True)
+    leads_promote.add_argument("--task-id")
 
     investigate_api = subparsers.add_parser(
         "investigate-api",
@@ -345,6 +384,31 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.output.write_text(prompt, encoding="utf-8")
             print(prompt, end="" if prompt.endswith("\n") else "\n")
             return 0
+        if args.command == "harvest" and args.harvest_command == "run":
+            run_manifest = run_harvest(
+                root=args.workspace,
+                country=args.country,
+                profile_set_name=args.profiles,
+                target=args.target,
+                locality=args.locality,
+                profile_id=args.profile,
+                run_id=args.run_id,
+                codex_bin=args.codex_bin,
+            )
+            print(run_manifest.model_dump_json(indent=2))
+            return 0 if run_manifest.status == HarvestRunStatus.COMPLETED else 1
+        if args.command == "harvest" and args.harvest_command == "batch-run":
+            batch_run_manifest = run_harvest_batch(
+                root=args.workspace,
+                country=args.country,
+                profile_set_name=args.profiles,
+                target=args.target,
+                locality=args.locality,
+                batch_id=args.batch_id,
+                codex_bin=args.codex_bin,
+            )
+            print(batch_run_manifest.model_dump_json(indent=2))
+            return 0 if batch_run_manifest.status == HarvestRunStatus.COMPLETED else 1
         if args.command == "leads" and args.leads_command == "validate":
             lead_items = load_leads(args.lead_file)
             if args.pretty:
@@ -354,6 +418,21 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         if args.command == "leads" and args.leads_command == "summarize":
             print(json.dumps(summarize_leads(load_leads(args.lead_file)), indent=2))
+            return 0
+        if args.command == "leads" and args.leads_command == "export":
+            exported_payload = export_leads(load_leads(args.lead_file), output_format=args.format)
+            if args.output is not None:
+                args.output.parent.mkdir(parents=True, exist_ok=True)
+                args.output.write_text(exported_payload, encoding="utf-8")
+            print(exported_payload, end="" if exported_payload.endswith("\n") else "\n")
+            return 0
+        if args.command == "leads" and args.leads_command == "promote":
+            leads = load_leads(args.lead_file)
+            if args.index < 0 or args.index >= len(leads):
+                raise ValueError(f"lead index out of range: {args.index}")
+            run = promote_lead_to_run(leads[args.index], task_id=args.task_id)
+            write_model(args.output, run)
+            print(run.model_dump_json(indent=2))
             return 0
         if args.command == "investigate-api":
             task = load_task(args.task_file)

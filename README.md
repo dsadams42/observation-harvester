@@ -118,7 +118,24 @@ Prepare a broad lead prompt:
 python -m pdt_observer harvest prepare --country PH --profiles commercial_business --target 20 --output work/ph-commercial-leads.md
 ```
 
-Run that prompt through Codex CLI with web search:
+Or run the harvest end-to-end through Codex CLI without manual shell piping:
+
+```powershell
+python -m pdt_observer harvest run --country PH --profiles commercial_business --target 20
+```
+
+For region-specific or facility-specific pilots, add `--locality` and `--profile`:
+
+```powershell
+python -m pdt_observer harvest run --country US --locality Tennessee --profiles commercial_business --profile factories_warehouses --target 5
+```
+
+`harvest run` writes the rendered prompt under `work/`, the JSON lead output under `lead_runs/`,
+and a run manifest under `harvest_runs/`. The manifest records the run ID, scope, profile,
+Codex command, output paths, exit code, validation result, summary, and failure message when
+applicable.
+
+If you prefer to run Codex manually, pass the prepared prompt through Codex CLI with web search:
 
 ```powershell
 codex --search exec --sandbox workspace-write --cd . -o lead_runs/ph-commercial-001.json - < work/ph-commercial-leads.md
@@ -132,8 +149,27 @@ python -m pdt_observer leads validate lead_runs/ph-commercial-001.json
 python -m pdt_observer leads summarize lead_runs/ph-commercial-001.json
 ```
 
-Use the lead output to choose which records deserve exact quote/source-text validation as
-`InvestigationRun` files.
+Run one harvest per enabled facility profile in a profile set:
+
+```powershell
+python -m pdt_observer harvest batch-run --country US --locality Tennessee --profiles profiles/initial_facility_types.json --target 10
+```
+
+Export lead outputs for review:
+
+```powershell
+python -m pdt_observer leads export lead_runs/us-tennessee-factories.json --format csv --output exports/us-tennessee-factories.csv
+python -m pdt_observer leads export lead_runs/us-tennessee-factories.json --format jsonl --output exports/us-tennessee-factories.jsonl
+```
+
+Promote a promising lead into a draft strict run:
+
+```powershell
+python -m pdt_observer leads promote lead_runs/us-tennessee-factories.json --index 0 --output runs/us-tennessee-factories-001.json
+```
+
+Promoted runs are intentionally marked `review` until exact source text, exact supporting quote,
+and georeference details are completed well enough for strict validation.
 
 ## Harvest Flow
 
@@ -152,10 +188,15 @@ work/<country>-commercial-leads.md
   v
 lead_runs/<country>-commercial-001.json
   |
+  |  run metadata and validation summary
+  v
+harvest_runs/<country>-commercial-001.json
+  |
   |  permissive lead schema:
   |  - partial metadata allowed
   |  - Unknown / Not provided allowed
   |  - subgroup counts preserved
+  |  - source/quote/quality flags captured when available
   v
 python -m pdt_observer leads validate
 python -m pdt_observer leads summarize

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import stat
 from pathlib import Path
 
 from pdt_observer.cli import main
@@ -241,6 +242,179 @@ def test_cli_leads_validate_and_summarize(capsys) -> None:
     assert summary["lead_count"] == 1
     assert summary["occupancy_count_rows"] == 2
     assert summary["countries"] == ["PH"]
+
+
+def test_cli_harvest_run_invokes_codex_and_writes_manifest(tmp_path, capsys) -> None:
+    fake_codex = tmp_path / "fake_codex.py"
+    fake_codex.write_text(
+        """#!/usr/bin/env python3
+import json
+import pathlib
+import sys
+
+output = pathlib.Path(sys.argv[sys.argv.index("-o") + 1])
+sys.stdin.read()
+output.parent.mkdir(parents=True, exist_ok=True)
+output.write_text(json.dumps([
+  {
+    "is_valid_occupancy_report": True,
+    "source_url": "https://example.test/story",
+    "source_title": "Workers evacuated",
+    "source_type": "news",
+    "evidence_quote": "Officials said 12 workers were evacuated from the warehouse.",
+    "incident_date": "2026-01-02",
+    "incident_time": "03:30 PM",
+    "occupancy_data": [{"count": 12, "group_type": "workers evacuated"}],
+    "location": {
+      "facility_name": "Example Warehouse",
+      "specific_address_or_landmark": "Industrial Drive",
+      "city_or_region": "Tennessee",
+      "country": "US"
+    },
+    "confidence": "high",
+    "is_facility_level": True,
+    "is_regional_aggregate": False,
+    "review_flags": [],
+    "review_notes": None
+  }
+]))
+""",
+        encoding="utf-8",
+    )
+    fake_codex.chmod(fake_codex.stat().st_mode | stat.S_IXUSR)
+
+    exit_code = main(
+        [
+            "harvest",
+            "run",
+            "--country",
+            "US",
+            "--locality",
+            "Tennessee",
+            "--profiles",
+            "commercial_business",
+            "--profile",
+            "factories_warehouses",
+            "--target",
+            "5",
+            "--workspace",
+            str(tmp_path),
+            "--run-id",
+            "us-tn-factories",
+            "--codex-bin",
+            str(fake_codex),
+        ]
+    )
+    captured = capsys.readouterr()
+    manifest = json.loads(captured.out)
+
+    assert exit_code == 0
+    assert manifest["status"] == "completed"
+    assert manifest["summary"]["lead_count"] == 1
+    assert (tmp_path / "work/us-tn-factories.md").is_file()
+    assert (tmp_path / "lead_runs/us-tn-factories.json").is_file()
+    assert (tmp_path / "harvest_runs/us-tn-factories.json").is_file()
+
+
+def test_cli_leads_export_csv_and_jsonl(tmp_path, capsys) -> None:
+    lead_file = tmp_path / "leads.json"
+    lead_file.write_text(
+        json.dumps(
+            [
+                {
+                    "is_valid_occupancy_report": True,
+                    "source_url": "https://example.test/story",
+                    "source_title": "Workers evacuated",
+                    "source_type": "news",
+                    "evidence_quote": "Officials said 12 workers were evacuated.",
+                    "incident_date": "2026-01-02",
+                    "incident_time": "03:30 PM",
+                    "occupancy_data": [{"count": 12, "group_type": "workers"}],
+                    "location": {
+                        "facility_name": "Example Warehouse",
+                        "specific_address_or_landmark": "Industrial Drive",
+                        "city_or_region": "Tennessee",
+                        "country": "US",
+                    },
+                    "confidence": "high",
+                    "is_facility_level": True,
+                    "is_regional_aggregate": False,
+                    "review_flags": ["needs_geocode"],
+                    "review_notes": "Review geocode.",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = main(["leads", "export", str(lead_file), "--format", "csv"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "lead_index,source_url" in captured.out
+    assert "Example Warehouse" in captured.out
+    assert "needs_geocode" in captured.out
+
+    exit_code = main(["leads", "export", str(lead_file), "--format", "jsonl"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert json.loads(captured.out)["source_type"] == "news"
+
+
+def test_cli_leads_promote_writes_draft_investigation_run(tmp_path, capsys) -> None:
+    lead_file = tmp_path / "leads.json"
+    output = tmp_path / "runs/promoted.json"
+    lead_file.write_text(
+        json.dumps(
+            [
+                {
+                    "is_valid_occupancy_report": True,
+                    "source_url": "https://example.test/story",
+                    "source_title": "Workers evacuated",
+                    "source_type": "news",
+                    "evidence_quote": "Officials said 12 workers were evacuated.",
+                    "incident_date": "2026-01-02",
+                    "incident_time": "03:30 PM",
+                    "occupancy_data": [{"count": 12, "group_type": "workers"}],
+                    "location": {
+                        "facility_name": "Example Warehouse",
+                        "specific_address_or_landmark": "Industrial Drive",
+                        "city_or_region": "Tennessee",
+                        "country": "US",
+                    },
+                    "confidence": "high",
+                    "is_facility_level": True,
+                    "is_regional_aggregate": False,
+                    "review_flags": [],
+                    "review_notes": None,
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = main(
+        [
+            "leads",
+            "promote",
+            str(lead_file),
+            "--index",
+            "0",
+            "--output",
+            str(output),
+            "--task-id",
+            "promoted-example",
+        ]
+    )
+    captured = capsys.readouterr()
+    promoted = json.loads(captured.out)
+
+    assert exit_code == 0
+    assert output.is_file()
+    assert promoted["candidate"]["result"]["status"] == "review"
+    assert promoted["candidate"]["result"]["count"] == 12
+    assert promoted["source_bundle"]["documents"][0]["source_url"] == "https://example.test/story"
 
 
 def test_cli_work_claim_by_locality_and_exact_id(tmp_path, capsys) -> None:

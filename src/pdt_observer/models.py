@@ -39,6 +39,30 @@ class SourceOutcome(StrEnum):
     FAILED = "failed"
 
 
+class SourceType(StrEnum):
+    NEWS = "news"
+    OFFICIAL = "official"
+    WIRE = "wire"
+    ENCYCLOPEDIA = "encyclopedia"
+    SOCIAL = "social"
+    DIRECTORY = "directory"
+    UNKNOWN = "unknown"
+
+
+class LeadConfidence(StrEnum):
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+    UNKNOWN = "unknown"
+
+
+class HarvestRunStatus(StrEnum):
+    PREPARED = "prepared"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
 class DayPart(StrEnum):
     EARLY_MORNING = "early_morning"
     MORNING = "morning"
@@ -195,10 +219,17 @@ class LeadLocation(StrictModel):
 class OccupancyLead(StrictModel):
     is_valid_occupancy_report: bool
     source_url: str = Field(min_length=1)
+    source_title: str = ""
+    source_type: SourceType = SourceType.UNKNOWN
+    evidence_quote: str | None = None
     incident_date: str = Field(min_length=1)
     incident_time: str = Field(min_length=1)
     occupancy_data: tuple[LeadOccupancyDatum, ...] = Field(min_length=1)
     location: LeadLocation
+    confidence: LeadConfidence = LeadConfidence.UNKNOWN
+    is_facility_level: bool | None = None
+    is_regional_aggregate: bool | None = None
+    review_flags: tuple[str, ...] = ()
     review_notes: str | None = None
 
 
@@ -278,6 +309,40 @@ class HarvestBatch(StrictModel):
     profile_ids: tuple[str, ...]
     work_item_ids: tuple[str, ...]
     created_at: str = Field(min_length=1)
+
+
+class HarvestRunManifest(StrictModel):
+    run_id: str = Field(min_length=1)
+    status: HarvestRunStatus
+    country: str = Field(min_length=2)
+    locality: str | None = None
+    profile_set: str = Field(min_length=1)
+    profile_id: str | None = None
+    target: int = Field(ge=1)
+    prompt_path: str = Field(min_length=1)
+    lead_path: str = Field(min_length=1)
+    started_at: str = Field(min_length=1)
+    completed_at: str | None = None
+    codex_command: tuple[str, ...] = ()
+    exit_code: int | None = None
+    validation_valid: bool | None = None
+    summary: dict[str, object] | None = None
+    error_message: str | None = None
+
+
+class HarvestBatchRunManifest(StrictModel):
+    batch_id: str = Field(min_length=1)
+    status: HarvestRunStatus
+    country: str = Field(min_length=2)
+    locality: str | None = None
+    profile_set: str = Field(min_length=1)
+    target: int = Field(ge=1)
+    child_run_ids: tuple[str, ...]
+    child_manifest_paths: tuple[str, ...]
+    started_at: str = Field(min_length=1)
+    completed_at: str | None = None
+    summary: dict[str, object] | None = None
+    error_message: str | None = None
 
 
 class ReviewQueueItem(StrictModel):

@@ -69,13 +69,17 @@ def test_index_page_contains_local_app_controls(tmp_path: Path) -> None:
     assert "Regions or Localities" in response.text
     assert "Run Harvest" in response.text
     assert "Copy JSON" in response.text
+    assert "Copy QAQC Prompt" in response.text
     assert "Download CSV" in response.text
+    assert "Clear All" in response.text
     assert "Agent Activity" in response.text
     assert "Cancel Run" in response.text
     assert "Exit Application" in response.text
     assert "/api/runs/${runId}/log" in response.text
     assert "/api/runs/${state.currentRunId}/status" in response.text
     assert "/api/runs/${state.currentRunId}/cancel" in response.text
+    assert "/api/runs/${state.currentRunId}/qaqc-prompt" in response.text
+    assert "/api/runs/clear" in response.text
     assert "/api/app/exit" in response.text
 
 
@@ -192,15 +196,72 @@ def test_run_detail_leads_export_and_promote_endpoints(tmp_path: Path) -> None:
     leads = client.get(f"/api/runs/{run_id}/leads")
     csv_export = client.get(f"/api/runs/{run_id}/export.csv")
     jsonl_export = client.get(f"/api/runs/{run_id}/export.jsonl")
+    qaqc_prompt = client.get(f"/api/runs/{run_id}/qaqc-prompt")
     promoted = client.post(f"/api/runs/{run_id}/promote", json={"index": 0})
 
     assert detail.status_code == 200
     assert leads.json()["leads"][0]["location"]["facility_name"] == "Example Warehouse"
     assert "Example Warehouse" in csv_export.text
     assert json.loads(jsonl_export.text)["source_url"] == "https://example.test/story"
+    assert qaqc_prompt.status_code == 200
+    assert "Occupancy Lead QAQC Verification" in qaqc_prompt.text
+    assert "https://example.test/story" in qaqc_prompt.text
+    assert "Example Warehouse" in qaqc_prompt.text
     assert promoted.status_code == 200
     assert promoted.json()["run"]["candidate"]["result"]["status"] == "review"
     assert Path(promoted.json()["run_file"]).is_file()
+
+
+def test_qaqc_prompt_endpoint_rejects_grouped_parent_manifest(tmp_path: Path) -> None:
+    client = TestClient(create_app(workspace=tmp_path, runner=successful_runner, background=False))
+    created = client.post(
+        "/api/harvest/campaign-run",
+        json={
+            "country": "US",
+            "localities": ["Tennessee"],
+            "facility_types": ["schools", "manufacturing"],
+            "target": 3,
+        },
+    ).json()
+    campaign_id = created["manifest"]["campaign_id"]
+
+    response = client.get(f"/api/runs/{campaign_id}/qaqc-prompt")
+
+    assert response.status_code == 400
+    assert "child harvest runs" in response.text
+
+
+def test_clear_runs_endpoint_removes_history_without_promoted_runs_or_exports(
+    tmp_path: Path,
+) -> None:
+    client = TestClient(create_app(workspace=tmp_path, runner=successful_runner, background=False))
+    created = client.post(
+        "/api/harvest/run",
+        json={
+            "country": "US",
+            "locality": "Tennessee",
+            "profiles": "commercial_business",
+            "profile": "factories_warehouses",
+            "target": 5,
+        },
+    ).json()
+    run_id = created["manifest"]["run_id"]
+    promoted = client.post(f"/api/runs/{run_id}/promote", json={"index": 0}).json()
+    export_file = tmp_path / "exports/report.csv"
+    export_file.parent.mkdir()
+    export_file.write_text("kept", encoding="utf-8")
+
+    response = client.post("/api/runs/clear")
+
+    assert response.status_code == 200
+    assert response.json()["cleared"] is True
+    assert client.get("/api/runs").json()["runs"] == []
+    assert not any((tmp_path / "harvest_runs").glob("*.json"))
+    assert not any((tmp_path / "lead_runs").glob("*.json"))
+    assert not any((tmp_path / "harvest_logs").glob("*.log"))
+    assert not any((tmp_path / "work").glob("*.md"))
+    assert Path(promoted["run_file"]).is_file()
+    assert export_file.is_file()
 
 
 def test_harvest_run_endpoint_returns_failed_manifest_for_codex_error(tmp_path: Path) -> None:
@@ -256,6 +317,7 @@ output.write_text("[]")
     run_id = created.json()["manifest"]["run_id"]
     status = client.get(f"/api/runs/{run_id}/status")
     log = client.get(f"/api/runs/{run_id}/log")
+    clear = client.post("/api/runs/clear")
     cancelled = client.post(f"/api/runs/{run_id}/cancel")
 
     for _ in range(40):
@@ -270,6 +332,8 @@ output.write_text("[]")
     assert created.json()["manifest"]["status"] == "running"
     assert status.json()["active"] is True
     assert "Launching Codex command" in log.text
+    assert clear.status_code == 409
+    assert "Cannot clear history" in clear.json()["error"]
     assert cancelled.json()["cancelled"] is True
     assert final_status["manifest"]["status"] == "cancelled"
     assert exited.json()["shutting_down"] is True
@@ -282,4 +346,6 @@ def test_launcher_references_bootstrap_steps() -> None:
     assert ".venv" in launcher
     assert '.[app]' in launcher
     assert "command -v codex" in launcher
+    assert "APP_PORT" in launcher
+    assert "8771" in launcher
     assert "python -m pdt_observer app" in launcher

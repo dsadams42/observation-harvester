@@ -13,6 +13,9 @@ from pdt_observer.models import (
     InvestigationResult,
     InvestigationRun,
     LeadConfidence,
+    LeadQaqcRecommendedAction,
+    LeadQaqcReview,
+    LeadQaqcVerificationStatus,
     OccupancyLead,
     ResultStatus,
     SourceType,
@@ -82,6 +85,36 @@ def test_occupancy_lead_model_accepts_quality_fields() -> None:
     assert lead.confidence == LeadConfidence.HIGH
     assert lead.evidence_quote is not None
     assert lead.review_flags == ("needs_geocode",)
+
+
+def test_lead_qaqc_review_model_accepts_verification_fields() -> None:
+    review = LeadQaqcReview.model_validate(
+        {
+            "lead_index": 0,
+            "source_url": "https://example.test/story",
+            "verification_status": "verified",
+            "source_reachable": True,
+            "facility_match": True,
+            "location_match": True,
+            "count_checks": [
+                {
+                    "count": 12,
+                    "group_type": "workers",
+                    "reported_count_found": True,
+                    "quote_found": True,
+                    "supporting_quote": "Officials said 12 workers were evacuated.",
+                    "notes": None,
+                }
+            ],
+            "supporting_quote": "Officials said 12 workers were evacuated.",
+            "recommended_action": "keep",
+            "review_notes": "Count, facility, and location are supported.",
+        }
+    )
+
+    assert review.verification_status == LeadQaqcVerificationStatus.VERIFIED
+    assert review.recommended_action == LeadQaqcRecommendedAction.KEEP
+    assert review.count_checks[0].reported_count_found is True
 
 
 def test_harvest_run_manifest_model() -> None:

@@ -64,7 +64,7 @@ The launcher creates `.venv` if needed, installs `.[app]`, checks that `codex` i
 starts the local server, and opens:
 
 ```text
-http://127.0.0.1:8765
+http://127.0.0.1:8771
 ```
 
 Manual fallback:
@@ -76,14 +76,19 @@ python -m pdt_observer app
 
 The first screen is the tool itself: enter a country, optional region/locality, facility type,
 optional subtype, and target count. The app writes the same runtime artifacts as the CLI:
-`work/`, `lead_runs/`, `harvest_runs/`, `harvest_logs/`, `exports/`, and `runs/`. Results are
-displayed as copyable JSON, with CSV and JSONL export buttons.
+`work/`, `lead_runs/`, `harvest_runs/`, `harvest_logs/`, `qaqc_runs/`, `exports/`, and `runs/`.
+Results are displayed as copyable JSON, with CSV and JSONL export buttons.
 
 The app includes an Agent Activity panel while a harvest runs. It polls the run manifest and log
 file so the user can see prompt rendering, Codex launch, validation, completion, failure, or
 cancellation. Cancel Run stops active Codex harvest subprocesses launched by the current app
 session. Exit Application cancels active harvest children and shuts down this local app server; it
 does not kill unrelated Python or Codex processes elsewhere on the machine.
+
+The Recent Runs panel can reopen completed runs. **Clear All** removes generated harvest history
+from `harvest_runs/`, `harvest_logs/`, `lead_runs/`, and generated `work/` prompts. It does not
+delete promoted observations in `runs/`, exported files in `exports/`, profiles, or source code.
+The app refuses to clear history while it is tracking an active Codex harvest process.
 
 ## Codex Subscription Workflow
 
@@ -236,12 +241,27 @@ python -m pdt_observer leads export lead_runs/us-tennessee-factories.json --form
 python -m pdt_observer leads export lead_runs/us-tennessee-factories.json --format jsonl --output exports/us-tennessee-factories.jsonl
 ```
 
+Generate a QAQC verifier prompt for a harvested lead file:
+
+```powershell
+python -m pdt_observer leads qaqc-prompt lead_runs/us-tennessee-factories.json --output work/us-tennessee-factories-qaqc.md
+```
+
+Run that prompt through Codex CLI or Codex chat with web search. The QAQC agent should open each
+`source_url`, verify that the reported count appears in the source, check facility/location match,
+and return a separate review JSON array. Validate that review output:
+
+```powershell
+python -m pdt_observer leads qaqc-validate qaqc_runs/us-tennessee-factories-qaqc.json --pretty
+```
+
 Promote a promising lead into a draft strict run:
 
 ```powershell
 python -m pdt_observer leads promote lead_runs/us-tennessee-factories.json --index 0 --output runs/us-tennessee-factories-001.json
 ```
 
+Use QAQC results to choose whether each lead should be kept, reviewed, rejected, or retried.
 Promoted runs are intentionally marked `review` until exact source text, exact supporting quote,
 and georeference details are completed well enough for strict validation.
 
@@ -293,7 +313,13 @@ harvest_runs/<country>-<facility-type>-001.json
 python -m pdt_observer leads validate
 python -m pdt_observer leads summarize
   |
-  |  human/Codex selects strong leads for audit-grade promotion
+  |  optional second pass checks source URLs, counts, facility, and location
+  v
+python -m pdt_observer leads qaqc-prompt
+Codex/web-search QAQC agent
+python -m pdt_observer leads qaqc-validate
+  |
+  |  human/Codex selects verified or reviewable leads for audit-grade promotion
   v
 runs/<specific-observation>.json
   |

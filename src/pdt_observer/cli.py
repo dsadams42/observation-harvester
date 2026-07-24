@@ -13,8 +13,11 @@ from pdt_observer.leads import (
     export_leads,
     leads_to_json,
     load_leads,
+    load_qaqc_reviews,
     promote_lead_to_run,
+    qaqc_reviews_to_json,
     render_lead_harvest_prompt,
+    render_lead_qaqc_prompt,
     summarize_leads,
 )
 from pdt_observer.models import (
@@ -267,6 +270,18 @@ def build_parser() -> argparse.ArgumentParser:
     leads_promote.add_argument("--index", type=int, required=True)
     leads_promote.add_argument("--output", type=Path, required=True)
     leads_promote.add_argument("--task-id")
+    leads_qaqc_prompt = leads_subparsers.add_parser(
+        "qaqc-prompt",
+        help="Render a Codex prompt that verifies harvested leads against their source URLs.",
+    )
+    leads_qaqc_prompt.add_argument("lead_file", type=Path)
+    leads_qaqc_prompt.add_argument("--output", type=Path)
+    leads_qaqc_validate = leads_subparsers.add_parser(
+        "qaqc-validate",
+        help="Validate a QAQC review JSON array.",
+    )
+    leads_qaqc_validate.add_argument("qaqc_file", type=Path)
+    leads_qaqc_validate.add_argument("--pretty", action="store_true")
 
     investigate_api = subparsers.add_parser(
         "investigate-api",
@@ -512,6 +527,23 @@ def main(argv: Sequence[str] | None = None) -> int:
             run = promote_lead_to_run(leads[args.index], task_id=args.task_id)
             write_model(args.output, run)
             print(run.model_dump_json(indent=2))
+            return 0
+        if args.command == "leads" and args.leads_command == "qaqc-prompt":
+            prompt = render_lead_qaqc_prompt(
+                load_leads(args.lead_file),
+                source_label=str(args.lead_file),
+            )
+            if args.output is not None:
+                args.output.parent.mkdir(parents=True, exist_ok=True)
+                args.output.write_text(prompt, encoding="utf-8")
+            print(prompt, end="" if prompt.endswith("\n") else "\n")
+            return 0
+        if args.command == "leads" and args.leads_command == "qaqc-validate":
+            reviews = load_qaqc_reviews(args.qaqc_file)
+            if args.pretty:
+                print(qaqc_reviews_to_json(reviews))
+            else:
+                print(json.dumps({"valid": True, "review_count": len(reviews)}, indent=2))
             return 0
         if args.command == "investigate-api":
             task = load_task(args.task_file)

@@ -50,8 +50,10 @@ if ! command -v codex >/dev/null 2>&1; then
 fi
 
 echo
-echo "Starting Observation Harvester at http://127.0.0.1:8765"
+APP_PORT="${OBSERVATION_HARVESTER_PORT:-8771}"
+
+echo "Starting Observation Harvester at http://127.0.0.1:$APP_PORT"
 echo "Keep this Terminal window open while using the app."
 echo
 
-python -m pdt_observer app --workspace "$APP_DIR"
+python -m pdt_observer app --workspace "$APP_DIR" --port "$APP_PORT"

@@ -14,6 +14,7 @@ from pdt_observer.models import (
     InvestigationResult,
     InvestigationRun,
     InvestigationTask,
+    LeadQaqcReview,
     ObservationType,
     OccupancyLead,
     ResultStatus,
@@ -27,14 +28,26 @@ from pdt_observer.workflow import slugify
 LEAD_LIST_ADAPTER: TypeAdapter[tuple[OccupancyLead, ...]] = TypeAdapter(
     tuple[OccupancyLead, ...]
 )
+QAQC_REVIEW_LIST_ADAPTER: TypeAdapter[tuple[LeadQaqcReview, ...]] = TypeAdapter(
+    tuple[LeadQaqcReview, ...]
+)
 
 
 def load_leads(path: Path) -> tuple[OccupancyLead, ...]:
     return LEAD_LIST_ADAPTER.validate_json(path.read_text(encoding="utf-8"))
 
 
+def load_qaqc_reviews(path: Path) -> tuple[LeadQaqcReview, ...]:
+    return QAQC_REVIEW_LIST_ADAPTER.validate_json(path.read_text(encoding="utf-8"))
+
+
 def leads_to_json(leads: tuple[OccupancyLead, ...]) -> str:
     payload = [lead.model_dump(mode="json") for lead in leads]
+    return json.dumps(payload, indent=2)
+
+
+def qaqc_reviews_to_json(reviews: tuple[LeadQaqcReview, ...]) -> str:
+    payload = [review.model_dump(mode="json") for review in reviews]
     return json.dumps(payload, indent=2)
 
 
@@ -182,6 +195,85 @@ def promote_lead_to_run(
         source_bundle=SourceBundle(documents=documents, places=()),
         candidate=CandidateObservation(result=result, produced_by="lead-promotion"),
     )
+
+
+def render_lead_qaqc_prompt(
+    leads: tuple[OccupancyLead, ...],
+    *,
+    source_label: str = "lead JSON",
+) -> str:
+    lead_payload = json.dumps([lead.model_dump(mode="json") for lead in leads], indent=2)
+    return f"""# Occupancy Lead QAQC Verification
+
+You are a careful QAQC verification agent for harvested occupancy leads. Your job is to inspect
+the source URL for each lead, verify whether the source supports the reported occupancy values,
+and return review JSON only.
+
+Input source: {source_label}
+
+## Verification Tasks
+
+For each lead in the input array:
+- Open the `source_url` when it is a usable URL. If the URL is missing, broken, paywalled, or
+  unavailable, use `source_unreachable` and recommend `retry` or `review`.
+- Search within the page/source text for each reported `occupancy_data[].count`.
+- Confirm whether the count is tied to the reported facility and incident, not merely a capacity,
+  enrollment, workforce size, regional disaster total, or unrelated statistic.
+- Confirm whether the facility name and city/region/country match the harvested lead.
+- Capture an exact supporting quote when the source text supports the count. Keep quotes short
+  and limited to the sentence or phrase needed to support the count.
+- Do not invent support. If the source does not clearly support the lead, mark it for review or
+  rejection.
+
+## Status And Action Rules
+
+Set `verification_status` to one of:
+- `verified`: source is reachable and supports the count, facility, and location.
+- `ambiguous`: source partially supports the lead, but one important detail is unclear.
+- `count_not_found`: source is reachable, but the reported count is not found.
+- `facility_mismatch`: count appears, but it is tied to a different facility/location.
+- `source_unreachable`: source cannot be reached or inspected.
+- `reject`: source clearly disproves the lead or the lead is not an occupancy observation.
+
+Set `recommended_action` to one of:
+- `keep`: verified and suitable for promotion.
+- `review`: needs human review before promotion.
+- `reject`: should not be promoted.
+- `retry`: source needs to be replaced or rechecked.
+
+## Output Format
+
+Return strictly a single valid JSON array. Do not wrap the JSON in markdown or prose. Use this
+exact schema:
+
+[
+  {{
+    "lead_index": 0,
+    "source_url": "String",
+    "verification_status": "verified",
+    "source_reachable": true,
+    "facility_match": true,
+    "location_match": true,
+    "count_checks": [
+      {{
+        "count": 0,
+        "group_type": "String",
+        "reported_count_found": true,
+        "quote_found": true,
+        "supporting_quote": "Exact quote or null",
+        "notes": "String or null"
+      }}
+    ],
+    "supporting_quote": "Best exact quote supporting the lead, or null",
+    "recommended_action": "keep",
+    "review_notes": "Short explanation of the verification decision"
+  }}
+]
+
+## Leads To Verify
+
+{lead_payload}
+"""
 
 
 def _unique_profile_values(profile_set: BuildingProfileSet, attr: str) -> tuple[str, ...]:

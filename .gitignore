@@ -15,6 +15,7 @@ exports/
 harvest_runs/
 harvest_logs/
 lead_runs/
+qaqc_runs/
 review/
 runs/
 work/

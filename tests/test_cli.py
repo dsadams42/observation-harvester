@@ -542,6 +542,119 @@ def test_cli_leads_promote_writes_draft_investigation_run(tmp_path, capsys) -> N
     assert promoted["source_bundle"]["documents"][0]["source_url"] == "https://example.test/story"
 
 
+def test_cli_leads_qaqc_prompt_writes_verification_prompt(tmp_path, capsys) -> None:
+    lead_file = tmp_path / "lead_runs/leads.json"
+    output = tmp_path / "work/leads-qaqc.md"
+    lead_file.parent.mkdir()
+    lead_file.write_text(
+        json.dumps(
+            [
+                {
+                    "is_valid_occupancy_report": True,
+                    "source_url": "https://example.test/story",
+                    "source_title": "Workers evacuated",
+                    "source_type": "news",
+                    "evidence_quote": "Officials said 12 workers were evacuated.",
+                    "incident_date": "2026-01-02",
+                    "incident_time": "03:30 PM",
+                    "occupancy_data": [{"count": 12, "group_type": "workers"}],
+                    "location": {
+                        "facility_name": "Example Warehouse",
+                        "specific_address_or_landmark": "Industrial Drive",
+                        "city_or_region": "Tennessee",
+                        "country": "US",
+                    },
+                    "confidence": "high",
+                    "is_facility_level": True,
+                    "is_regional_aggregate": False,
+                    "review_flags": [],
+                    "review_notes": None,
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = main(["leads", "qaqc-prompt", str(lead_file), "--output", str(output)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert output.is_file()
+    assert "Occupancy Lead QAQC Verification" in captured.out
+    assert "https://example.test/story" in captured.out
+    assert "Example Warehouse" in captured.out
+    assert "`verified`: source is reachable" in captured.out
+    assert "`count_not_found`" in captured.out
+
+
+def test_cli_leads_qaqc_validate_accepts_valid_review(tmp_path, capsys) -> None:
+    qaqc_file = tmp_path / "qaqc_runs/leads-qaqc.json"
+    qaqc_file.parent.mkdir()
+    qaqc_file.write_text(
+        json.dumps(
+            [
+                {
+                    "lead_index": 0,
+                    "source_url": "https://example.test/story",
+                    "verification_status": "verified",
+                    "source_reachable": True,
+                    "facility_match": True,
+                    "location_match": True,
+                    "count_checks": [
+                        {
+                            "count": 12,
+                            "group_type": "workers",
+                            "reported_count_found": True,
+                            "quote_found": True,
+                            "supporting_quote": "Officials said 12 workers were evacuated.",
+                            "notes": None,
+                        }
+                    ],
+                    "supporting_quote": "Officials said 12 workers were evacuated.",
+                    "recommended_action": "keep",
+                    "review_notes": "Count, facility, and location are supported.",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = main(["leads", "qaqc-validate", str(qaqc_file)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert json.loads(captured.out) == {"valid": True, "review_count": 1}
+
+
+def test_cli_leads_qaqc_validate_rejects_invalid_status(tmp_path, capsys) -> None:
+    qaqc_file = tmp_path / "bad-qaqc.json"
+    qaqc_file.write_text(
+        json.dumps(
+            [
+                {
+                    "lead_index": 0,
+                    "source_url": "https://example.test/story",
+                    "verification_status": "mostly_ok",
+                    "source_reachable": True,
+                    "facility_match": True,
+                    "location_match": True,
+                    "count_checks": [],
+                    "supporting_quote": None,
+                    "recommended_action": "keep",
+                    "review_notes": "Bad status should fail.",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = main(["leads", "qaqc-validate", str(qaqc_file)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "mostly_ok" in captured.err
+
+
 def test_cli_work_claim_by_locality_and_exact_id(tmp_path, capsys) -> None:
     main(
         [

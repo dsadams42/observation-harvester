@@ -29,7 +29,12 @@ from pdt_observer.harvest import (
     run_harvest_batch,
     run_harvest_campaign,
 )
-from pdt_observer.leads import export_leads, load_leads, promote_lead_to_run
+from pdt_observer.leads import (
+    export_leads,
+    load_leads,
+    promote_lead_to_run,
+    render_lead_qaqc_prompt,
+)
 from pdt_observer.models import (
     HarvestBatchRunManifest,
     HarvestCampaignRunManifest,
@@ -115,6 +120,10 @@ class ActiveCodexRegistry:
                 for active_id in self._processes
             )
 
+    def active_count(self) -> int:
+        with self._lock:
+            return len(self._processes)
+
     def cancel(self, run_id: str) -> int:
         with self._lock:
             matches = [
@@ -149,6 +158,26 @@ async def _request_json(request: Request) -> dict[str, Any]:
 
 def _manifest_dir(root: Path) -> Path:
     return root / "harvest_runs"
+
+
+def _clear_runtime_history(root: Path) -> int:
+    patterns = {
+        "harvest_runs": ("*.json",),
+        "harvest_logs": ("*.log",),
+        "lead_runs": ("*.json",),
+        "work": ("*.md",),
+    }
+    deleted_count = 0
+    for directory_name, globs in patterns.items():
+        directory = root / directory_name
+        if not directory.is_dir():
+            continue
+        for pattern in globs:
+            for path in directory.glob(pattern):
+                if path.is_file():
+                    path.unlink()
+                    deleted_count += 1
+    return deleted_count
 
 
 def _run_manifest_path(root: Path, run_id: str) -> Path:
@@ -396,6 +425,16 @@ def create_app(
     async def runs(request: Request) -> JSONResponse:
         return JSONResponse({"runs": _list_manifests(root)})
 
+    async def clear_runs(request: Request) -> JSONResponse:
+        active_count = registry.active_count()
+        if active_count:
+            return _json_error(
+                f"Cannot clear history while {active_count} harvest process(es) are active.",
+                status_code=409,
+            )
+        deleted_count = _clear_runtime_history(root)
+        return JSONResponse({"cleared": True, "deleted_files": deleted_count})
+
     async def run_detail(request: Request) -> JSONResponse:
         run_id = request.path_params["run_id"]
         try:
@@ -470,6 +509,22 @@ def create_app(
         except ValueError as exc:
             return _json_error(str(exc), status_code=404)
 
+    async def run_qaqc_prompt(request: Request) -> PlainTextResponse:
+        run_id = request.path_params["run_id"]
+        try:
+            manifest = _load_any_manifest(root, run_id)
+            if not isinstance(manifest, HarvestRunManifest):
+                return PlainTextResponse(
+                    "QAQC prompts are generated for child harvest runs. Open a child run from "
+                    "this batch/campaign, then try again.",
+                    status_code=400,
+                )
+            leads = load_leads(Path(manifest.lead_path))
+            prompt = render_lead_qaqc_prompt(leads, source_label=manifest.lead_path)
+            return PlainTextResponse(prompt, media_type="text/plain")
+        except ValueError as exc:
+            return PlainTextResponse(str(exc), status_code=404)
+
     async def export_csv(request: Request) -> Response:
         return _export_response(root, request.path_params["run_id"], output_format="csv")
 
@@ -498,10 +553,12 @@ def create_app(
         Route("/api/harvest/batch-run", harvest_batch_run, methods=["POST"]),
         Route("/api/harvest/campaign-run", harvest_campaign_run, methods=["POST"]),
         Route("/api/runs", runs),
+        Route("/api/runs/clear", clear_runs, methods=["POST"]),
         Route("/api/runs/{run_id}", run_detail),
         Route("/api/runs/{run_id}/status", run_status),
         Route("/api/runs/{run_id}/log", run_log),
         Route("/api/runs/{run_id}/leads", run_leads),
+        Route("/api/runs/{run_id}/qaqc-prompt", run_qaqc_prompt),
         Route("/api/runs/{run_id}/export.csv", export_csv),
         Route("/api/runs/{run_id}/export.jsonl", export_jsonl),
         Route("/api/runs/{run_id}/cancel", cancel_run, methods=["POST"]),
@@ -545,7 +602,7 @@ def serve_app(
         threading.Thread(target=exit_later, daemon=True).start()
 
     app = create_app(workspace=workspace, codex_bin=codex_bin, shutdown_callback=shutdown)
-    url = f"http://{host}:{port}"
+    url = f"http://{host}:{port}/?v={int(time.time())}"
     if open_browser:
         webbrowser.open(url)
     uvicorn.run(app, host=host, port=port)
@@ -649,8 +706,9 @@ INDEX_HTML = r"""<!doctype html>
     }
     .row {
       display: grid;
-      grid-template-columns: 1fr 110px;
+      grid-template-columns: 120px minmax(0, 1fr);
       gap: 10px;
+      align-items: end;
     }
     .mode {
       display: grid;
@@ -800,6 +858,7 @@ INDEX_HTML = r"""<!doctype html>
       <div class="actions">
         <button id="runButton" type="button">Run Harvest</button>
         <button id="refreshButton" class="secondary" type="button">Refresh Runs</button>
+        <button id="clearRunsButton" class="secondary" type="button">Clear All</button>
       </div>
       <div id="status" class="status">Ready.</div>
       <div class="history" id="history"></div>
@@ -819,6 +878,7 @@ INDEX_HTML = r"""<!doctype html>
       </div>
       <div class="actions">
         <button id="copyButton" class="secondary" type="button">Copy JSON</button>
+        <button id="copyQaqcButton" class="secondary" type="button">Copy QAQC Prompt</button>
         <button id="downloadJsonButton" class="secondary" type="button">Download JSON</button>
         <button id="downloadCsvButton" class="secondary" type="button">Download CSV</button>
         <button id="downloadJsonlButton" class="secondary" type="button">Download JSONL</button>
@@ -971,6 +1031,20 @@ INDEX_HTML = r"""<!doctype html>
       $('jsonOutput').value = JSON.stringify(leads.length ? leads : { manifest }, null, 2);
     }
 
+    function resetResults() {
+      stopPolling();
+      state.currentRunId = null;
+      state.currentLeads = [];
+      $('metricStatus').textContent = '-';
+      $('metricLeads').textContent = '0';
+      $('metricFacilityLabel').textContent = 'Facility';
+      $('metricAggregateLabel').textContent = 'Aggregate';
+      $('metricFacility').textContent = '0';
+      $('metricAggregate').textContent = '0';
+      $('jsonOutput').value = '';
+      $('activityOutput').value = '';
+    }
+
     async function loadLog(runId) {
       if (!runId) return;
       const response = await fetch(`/api/runs/${runId}/log`);
@@ -1068,6 +1142,16 @@ INDEX_HTML = r"""<!doctype html>
       }
     }
 
+    async function clearRuns() {
+      if (!window.confirm('Clear recent harvest history and generated lead/log/prompt files?')) {
+        return;
+      }
+      const payload = await api('/api/runs/clear', { method: 'POST' });
+      resetResults();
+      await loadRuns();
+      setStatus(`Cleared ${payload.deleted_files} generated file(s).`, 'ok');
+    }
+
     async function loadRun(runId) {
       const detail = await api(`/api/runs/${runId}`);
       let leads = [];
@@ -1096,6 +1180,15 @@ INDEX_HTML = r"""<!doctype html>
         payload.cancelled ? 'ok' : 'error'
       );
       await pollCurrentRun();
+    }
+
+    async function copyQaqcPrompt() {
+      if (!state.currentRunId) return setStatus('No run selected.', 'error');
+      const response = await fetch(`/api/runs/${state.currentRunId}/qaqc-prompt`);
+      const text = await response.text();
+      if (!response.ok) return setStatus(text, 'error');
+      await navigator.clipboard.writeText(text);
+      setStatus('QAQC prompt copied.', 'ok');
     }
 
     async function exitApplication() {
@@ -1142,12 +1235,16 @@ INDEX_HTML = r"""<!doctype html>
       $('campaignMode').addEventListener('click', () => setMode('campaign'));
       $('runButton').addEventListener('click', runHarvest);
       $('refreshButton').addEventListener('click', loadRuns);
+      $('clearRunsButton').addEventListener('click', () => {
+        clearRuns().catch((error) => setStatus(error.message, 'error'));
+      });
       $('cancelButton').addEventListener('click', cancelRun);
       $('exitButton').addEventListener('click', exitApplication);
       $('copyButton').addEventListener('click', async () => {
         await navigator.clipboard.writeText($('jsonOutput').value);
         setStatus('JSON copied.', 'ok');
       });
+      $('copyQaqcButton').addEventListener('click', copyQaqcPrompt);
       $('downloadJsonButton').addEventListener('click', () => {
         downloadText('observation-harvest.json', $('jsonOutput').value, 'application/json');
       });

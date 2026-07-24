@@ -56,6 +56,22 @@ class LeadConfidence(StrEnum):
     UNKNOWN = "unknown"
 
 
+class LeadQaqcVerificationStatus(StrEnum):
+    VERIFIED = "verified"
+    AMBIGUOUS = "ambiguous"
+    COUNT_NOT_FOUND = "count_not_found"
+    FACILITY_MISMATCH = "facility_mismatch"
+    SOURCE_UNREACHABLE = "source_unreachable"
+    REJECT = "reject"
+
+
+class LeadQaqcRecommendedAction(StrEnum):
+    KEEP = "keep"
+    REVIEW = "review"
+    REJECT = "reject"
+    RETRY = "retry"
+
+
 class HarvestRunStatus(StrEnum):
     PREPARED = "prepared"
     RUNNING = "running"
@@ -232,6 +248,28 @@ class OccupancyLead(StrictModel):
     is_regional_aggregate: bool | None = None
     review_flags: tuple[str, ...] = ()
     review_notes: str | None = None
+
+
+class LeadQaqcCountCheck(StrictModel):
+    count: int = Field(ge=0)
+    group_type: str = Field(min_length=1)
+    reported_count_found: bool
+    quote_found: bool
+    supporting_quote: str | None = None
+    notes: str | None = None
+
+
+class LeadQaqcReview(StrictModel):
+    lead_index: int = Field(ge=0)
+    source_url: str = Field(min_length=1)
+    verification_status: LeadQaqcVerificationStatus
+    source_reachable: bool
+    facility_match: bool | None = None
+    location_match: bool | None = None
+    count_checks: tuple[LeadQaqcCountCheck, ...] = ()
+    supporting_quote: str | None = None
+    recommended_action: LeadQaqcRecommendedAction
+    review_notes: str = Field(min_length=1)
 
 
 class BuildingTypeProfile(StrictModel):

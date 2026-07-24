@@ -11,6 +11,7 @@ from pdt_observer.models import (
     AddressEnrichmentResult,
     AddressEnrichmentStatus,
     BuildingTypeProfile,
+    CoverageSteeringReview,
     HarvestRunManifest,
     HarvestRunStatus,
     InvestigationResult,
@@ -20,7 +21,11 @@ from pdt_observer.models import (
     LeadQaqcReview,
     LeadQaqcVerificationStatus,
     OccupancyLead,
+    RecommendedGapFillJob,
     ResultStatus,
+    SampleSetManifest,
+    SampleSetRound,
+    SampleSetRoundRole,
     SourceType,
     WorkItem,
 )
@@ -167,6 +172,48 @@ def test_harvest_run_manifest_model() -> None:
 
     assert manifest.status == HarvestRunStatus.COMPLETED
     assert manifest.summary == {"lead_count": 1}
+
+
+def test_sample_set_and_coverage_models_accept_augmented_round_fields() -> None:
+    sample_set = SampleSetManifest(
+        sample_set_id="us-tn-schools-sample",
+        country="US",
+        requested_localities=("Tennessee",),
+        facility_types=("schools",),
+        target=5,
+        rounds=(
+            SampleSetRound(
+                round_number=1,
+                role=SampleSetRoundRole.INITIAL,
+                source_run_ids=("us-tn-schools-campaign",),
+                child_run_ids=("us-tn-schools-child",),
+                status=HarvestRunStatus.COMPLETED,
+                summary={"lead_count": 3},
+            ),
+        ),
+        combined_child_run_ids=("us-tn-schools-child",),
+        stage_summary={"approved_count": 2},
+        created_at="2026-07-24T00:00:00Z",
+        updated_at="2026-07-24T00:00:00Z",
+    )
+    review = CoverageSteeringReview(
+        coverage_id="us-tn-schools-coverage",
+        sample_set_id=sample_set.sample_set_id,
+        dispersion_status="imbalanced",
+        narrative_notes="Western Tennessee is underrepresented.",
+        recommended_child_jobs=(
+            RecommendedGapFillJob(
+                country="US",
+                locality="Western Tennessee",
+                facility_type="schools",
+                target=3,
+                reason="Pad the sample outside the initial cluster.",
+            ),
+        ),
+    )
+
+    assert sample_set.rounds[0].role == SampleSetRoundRole.INITIAL
+    assert review.recommended_child_jobs[0].facility_type == "schools"
 
 
 def test_work_item_defaults_are_backward_compatible() -> None:

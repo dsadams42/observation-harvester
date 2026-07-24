@@ -79,6 +79,33 @@ ADDRESS_PAYLOAD = [
     }
 ]
 
+COVERAGE_PAYLOAD = {
+    "coverage_id": "placeholder-coverage",
+    "sample_set_id": "placeholder-sample",
+    "dispersion_status": "clustered",
+    "counts_by_locality": {"Tennessee": 1},
+    "counts_by_city_or_region": {"Tennessee": 1},
+    "counts_by_facility_type": {"schools": 1},
+    "out_of_scope_flags": [],
+    "duplicate_or_cluster_flags": [
+        {
+            "item_id": None,
+            "flag_type": "clustered",
+            "reason": "Current verified records are concentrated in one region.",
+        }
+    ],
+    "narrative_notes": "Run a targeted western Tennessee gap-fill pass.",
+    "recommended_child_jobs": [
+        {
+            "country": "US",
+            "locality": "Western Tennessee",
+            "facility_type": "schools",
+            "target": 2,
+            "reason": "Western Tennessee is underrepresented.",
+        }
+    ],
+}
+
 
 def successful_runner(
     command: Sequence[str],
@@ -86,7 +113,13 @@ def successful_runner(
     cwd: Path,
 ) -> subprocess.CompletedProcess[str]:
     output_path = Path(command[command.index("-o") + 1])
-    if "Facility Address Enrichment" in prompt:
+    if "Sample Set Coverage Steering" in prompt:
+        payload = {
+            **COVERAGE_PAYLOAD,
+            "coverage_id": output_path.stem,
+            "sample_set_id": output_path.stem.split("-coverage", 1)[0],
+        }
+    elif "Facility Address Enrichment" in prompt:
         item_id = "placeholder-0"
         try:
             records_text = prompt.split("## Input Records", 1)[1].strip()
@@ -100,7 +133,7 @@ def successful_runner(
     else:
         payload = LEAD_PAYLOAD
     output_path.write_text(json.dumps(payload), encoding="utf-8")
-    assert "Tennessee" in prompt
+    assert "Tennessee" in prompt or "Coverage Steering" in prompt
     return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
 
@@ -130,9 +163,16 @@ def test_index_page_contains_local_app_controls(tmp_path: Path) -> None:
     assert "Run QAQC" in response.text
     assert "Run Address Enrichment" in response.text
     assert "Download Verified CSV" in response.text
+    assert "Sample Set / Coverage" in response.text
+    assert "Create Sample Set" in response.text
+    assert "Analyze Coverage" in response.text
+    assert "Run Gap Fill" in response.text
+    assert "Run QAQC Missing" in response.text
+    assert "Run Address Missing" in response.text
     assert "Geometry Review" in response.text
     assert "leaflet.draw" in response.text
     assert "Load Approved" in response.text
+    assert "Load Augmented Sample" in response.text
     assert "Manual Address Search" in response.text
     assert "Search Address" in response.text
     assert "Save Footprint" in response.text
@@ -153,6 +193,12 @@ def test_index_page_contains_local_app_controls(tmp_path: Path) -> None:
     assert "/api/runs/${state.currentRunId}/address-run" in response.text
     assert "/api/runs/${state.currentRunId}/address-results" in response.text
     assert "/api/runs/${state.currentRunId}/geometry-items" in response.text
+    assert "/api/samples/from-run" in response.text
+    assert "/api/samples/${state.currentSampleSetId}/coverage-run" in response.text
+    assert "/api/samples/${state.currentSampleSetId}/gap-fill-run" in response.text
+    assert "/api/samples/${state.currentSampleSetId}/qaqc-missing" in response.text
+    assert "/api/samples/${state.currentSampleSetId}/address-missing" in response.text
+    assert "/api/samples/${state.currentSampleSetId}/geometry-items" in response.text
     assert "/api/geometry/geocode" in response.text
     assert "/api/runs/${state.currentRunId}/export.verified.${format}" in response.text
     assert "/api/runs/${state.currentRunId}/export.footprints.geojson" in response.text
@@ -527,6 +573,52 @@ def test_address_run_endpoint_fans_out_for_campaign_parent(tmp_path: Path) -> No
     assert len(results.json()["child_results"]) == 2
 
 
+def test_sample_set_coverage_and_gap_fill_api_flow(tmp_path: Path) -> None:
+    client = TestClient(create_app(workspace=tmp_path, runner=successful_runner, background=False))
+    created = client.post(
+        "/api/harvest/campaign-run",
+        json={
+            "country": "US",
+            "localities": ["Tennessee"],
+            "facility_types": ["schools"],
+            "target": 3,
+        },
+    ).json()
+    campaign_id = created["manifest"]["campaign_id"]
+    client.post(f"/api/runs/{campaign_id}/qaqc-run")
+    client.post(f"/api/runs/{campaign_id}/address-run")
+
+    sample = client.post(
+        "/api/samples/from-run",
+        json={"run_id": campaign_id, "sample_set_id": "tn-schools-sample"},
+    )
+    summary = client.get("/api/samples/tn-schools-sample/coverage-summary")
+    coverage = client.post("/api/samples/tn-schools-sample/coverage-run")
+    coverage_results = client.get("/api/samples/tn-schools-sample/coverage-results")
+    gap_fill = client.post("/api/samples/tn-schools-sample/gap-fill-run", json={})
+    missing_qaqc = client.post("/api/samples/tn-schools-sample/qaqc-missing")
+    missing_address = client.post("/api/samples/tn-schools-sample/address-missing")
+    geometry_items = client.get("/api/samples/tn-schools-sample/geometry-items")
+    exported = client.get("/api/samples/tn-schools-sample/export.verified.csv")
+
+    assert sample.status_code == 200
+    assert sample.json()["sample_set"]["combined_child_run_ids"] == created["manifest"][
+        "child_run_ids"
+    ]
+    assert summary.json()["summary"]["approved_count"] == 1
+    assert coverage.status_code == 200
+    assert coverage.json()["coverage"]["review"]["dispersion_status"] == "clustered"
+    assert coverage_results.json()["review"]["recommended_child_jobs"][0]["locality"] == (
+        "Western Tennessee"
+    )
+    assert gap_fill.json()["sample_set"]["rounds"][1]["role"] == "gap_fill"
+    assert len(gap_fill.json()["sample_set"]["combined_child_run_ids"]) == 2
+    assert missing_qaqc.json()["qaqc"]["child_run_ids"]
+    assert missing_address.json()["address"]["child_run_ids"]
+    assert geometry_items.json()["item_count"] == 2
+    assert "sample_round" in exported.text
+
+
 def test_run_log_includes_qaqc_child_subprocess_logs(tmp_path: Path) -> None:
     client = TestClient(create_app(workspace=tmp_path, runner=successful_runner, background=False))
     created = client.post(
@@ -593,6 +685,12 @@ def test_clear_runs_endpoint_removes_history_without_promoted_runs_or_exports(
     export_file = tmp_path / "exports/report.csv"
     export_file.parent.mkdir()
     export_file.write_text("kept", encoding="utf-8")
+    sample_file = tmp_path / "sample_sets/sample.json"
+    coverage_file = tmp_path / "coverage_runs/sample-coverage.json"
+    sample_file.parent.mkdir()
+    coverage_file.parent.mkdir()
+    sample_file.write_text("{}", encoding="utf-8")
+    coverage_file.write_text("{}", encoding="utf-8")
 
     response = client.post("/api/runs/clear")
 
@@ -604,6 +702,8 @@ def test_clear_runs_endpoint_removes_history_without_promoted_runs_or_exports(
     assert not any((tmp_path / "harvest_logs").glob("*.log"))
     assert not any((tmp_path / "qaqc_runs").glob("*.json"))
     assert not any((tmp_path / "address_runs").glob("*.json"))
+    assert not any((tmp_path / "sample_sets").glob("*.json"))
+    assert not any((tmp_path / "coverage_runs").glob("*.json"))
     assert not any((tmp_path / "work").glob("*.md"))
     assert geometry_file.is_file()
     assert Path(promoted["run_file"]).is_file()

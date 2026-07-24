@@ -802,6 +802,116 @@ def test_cli_leads_address_validate_rejects_invalid_status(tmp_path, capsys) -> 
     assert "sort_of" in captured.err
 
 
+def test_cli_samples_create_prompt_validate_and_gap_fill(tmp_path, capsys) -> None:
+    manifest_file = tmp_path / "harvest_runs/us-tn-schools.json"
+    manifest_file.parent.mkdir()
+    manifest_file.write_text(
+        json.dumps(
+            {
+                "run_id": "us-tn-schools",
+                "status": "completed",
+                "country": "US",
+                "locality": "Tennessee",
+                "profile_set": "schools",
+                "profile_id": None,
+                "target": 2,
+                "prompt_path": "work/us-tn-schools.md",
+                "lead_path": "lead_runs/us-tn-schools.json",
+                "started_at": "2026-07-24T00:00:00Z",
+                "completed_at": "2026-07-24T00:01:00Z",
+                "codex_command": [],
+                "exit_code": 0,
+                "validation_valid": True,
+                "summary": {"lead_count": 0},
+                "error_message": None,
+                "log_path": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = main(
+        [
+            "samples",
+            "create-from-run",
+            "us-tn-schools",
+            "--sample-set-id",
+            "us-tn-sample",
+            "--workspace",
+            str(tmp_path),
+        ]
+    )
+    created = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert created["sample_set_id"] == "us-tn-sample"
+    assert created["combined_child_run_ids"] == ["us-tn-schools"]
+
+    prompt_file = tmp_path / "work/coverage.md"
+    exit_code = main(
+        [
+            "samples",
+            "coverage-prompt",
+            "us-tn-sample",
+            "--coverage-id",
+            "us-tn-sample-coverage",
+            "--output",
+            str(prompt_file),
+            "--workspace",
+            str(tmp_path),
+        ]
+    )
+    prompt = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert prompt_file.is_file()
+    assert "Sample Set Coverage Steering" in prompt
+    assert "recommended_child_jobs" in prompt
+
+    coverage_file = tmp_path / "coverage_runs/us-tn-sample-coverage.json"
+    coverage_file.parent.mkdir()
+    coverage_file.write_text(
+        json.dumps(
+            {
+                "coverage_id": "us-tn-sample-coverage",
+                "sample_set_id": "us-tn-sample",
+                "dispersion_status": "insufficient_data",
+                "counts_by_locality": {},
+                "counts_by_city_or_region": {},
+                "counts_by_facility_type": {},
+                "out_of_scope_flags": [],
+                "duplicate_or_cluster_flags": [],
+                "narrative_notes": "No verified records yet.",
+                "recommended_child_jobs": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = main(["samples", "coverage-validate", str(coverage_file)])
+    validated = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert validated == {"valid": True, "recommended_job_count": 0}
+
+    exit_code = main(
+        [
+            "samples",
+            "gap-fill-run",
+            "us-tn-sample",
+            "--coverage",
+            str(coverage_file),
+            "--workspace",
+            str(tmp_path),
+        ]
+    )
+    updated = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert len(updated["rounds"]) == 2
+    assert updated["rounds"][1]["role"] == "gap_fill"
+
+
 def test_cli_work_claim_by_locality_and_exact_id(tmp_path, capsys) -> None:
     main(
         [

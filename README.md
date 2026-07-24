@@ -77,9 +77,8 @@ python -m pdt_observer app
 The first screen is the tool itself: enter a country, optional region/locality, facility type,
 optional subtype, and target count. The app writes the same runtime artifacts as the CLI:
 `work/`, `lead_runs/`, `harvest_runs/`, `harvest_logs/`, `qaqc_runs/`, `address_runs/`,
-`geometry_reviews/`, `geocode_cache/`, `exports/`, and `runs/`. Results are displayed as
-copyable JSON, with
-QAQC-gated CSV/JSON export buttons.
+`sample_sets/`, `coverage_runs/`, `geometry_reviews/`, `geocode_cache/`, `exports/`, and `runs/`.
+Results are displayed as copyable JSON, with QAQC-gated CSV/JSON export buttons.
 
 The header includes a Light/Dark/System theme selector. The preference is stored in the browser
 only, so it does not change project files or app configuration.
@@ -92,10 +91,11 @@ does not kill unrelated Python or Codex processes elsewhere on the machine.
 
 The Recent Runs panel can reopen completed runs. **Clear All** removes generated harvest history
 from `harvest_runs/`, `harvest_logs/`, `lead_runs/`, `qaqc_runs/`, and generated `work/` prompts.
-It also removes generated address-enrichment outputs from `address_runs/`. It does not delete
-promoted observations in `runs/`, exported files in `exports/`, profiles, geometry reviews, or
-source code. The app refuses to clear history while it is tracking an active Codex harvest, QAQC,
-or address-enrichment process.
+It also removes generated address-enrichment outputs from `address_runs/`, sample manifests from
+`sample_sets/`, and coverage reviews from `coverage_runs/`. It does not delete promoted
+observations in `runs/`, exported files in `exports/`, profiles, geometry reviews, or source code.
+The app refuses to clear history while it is tracking an active Codex harvest, QAQC,
+address-enrichment, coverage, or gap-fill process.
 
 Use **Run QAQC** after selecting a completed run. For a single child run, the app launches one
 Codex verifier agent. For a batch or campaign parent, it launches one verifier agent per child
@@ -104,6 +104,12 @@ facility-type run and displays the combined QAQC review JSON when the pass finis
 Use **Run Address Enrichment** after QAQC when you want a second agent to search for precise
 facility addresses before mapping. For batch or campaign parents, the app launches one address
 agent per child facility-type run and stores results separately under `address_runs/`.
+
+Use **Create Sample Set** after an initial run, batch, or campaign when you want to build an
+augmented collection. **Analyze Coverage** runs a steering agent over verified/geocoded records and
+recommends locality-adjusted gap-fill jobs. **Run Gap Fill** launches those targeted child
+harvests into the same sample set. **Run QAQC Missing** and **Run Address Missing** process only
+new child runs that do not already have those review outputs.
 
 Use **Geometry Review** after QAQC, ideally after address enrichment. **Load Approved** shows only
 observations where QAQC returned `verification_status: verified` and `recommended_action: keep`.
@@ -312,6 +318,21 @@ Run QAQC -> Run Address Enrichment -> Load Approved -> Geocode/Search Address ->
 The app uses user-triggered Nominatim geocoding with a local cache under `geocode_cache/`, and a
 Leaflet map with OSM streets plus Esri World Imagery for visual footprint tracing.
 
+Create a sample set from an existing run, batch, or campaign:
+
+```powershell
+python -m pdt_observer samples create-from-run us-tennessee-schools-campaign --sample-set-id us-tennessee-schools-sample
+```
+
+Generate a coverage steering prompt, validate the returned review, and run recommended gap-fill
+jobs:
+
+```powershell
+python -m pdt_observer samples coverage-prompt us-tennessee-schools-sample --output work/us-tennessee-schools-coverage.md
+python -m pdt_observer samples coverage-validate coverage_runs/us-tennessee-schools-coverage.json --pretty
+python -m pdt_observer samples gap-fill-run us-tennessee-schools-sample --coverage coverage_runs/us-tennessee-schools-coverage.json
+```
+
 ## Harvest Flow
 
 ```text
@@ -382,6 +403,22 @@ Leaflet Geometry Review
   v
 geometry_reviews/<child-run-id>.json
 exports verified JSON / CSV / footprint GeoJSON
+  |
+  |  optional sample-set loop for representative coverage
+  v
+sample_sets/<sample-set-id>.json
+  |
+  |  coverage steering reviews verified/geocoded dispersion
+  v
+coverage_runs/<coverage-id>.json
+  |
+  |  recommended locality-adjusted jobs launch as a gap-fill round
+  v
+harvest child runs -> QAQC missing -> address missing -> Load Augmented Sample
+  |
+  |  combined verified JSON / CSV / footprint GeoJSON exports
+  v
+sample-set exports
   |
   |  human/Codex selects verified or reviewable leads for audit-grade promotion
   v

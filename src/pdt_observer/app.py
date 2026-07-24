@@ -65,6 +65,17 @@ from pdt_observer.models import (
     HarvestRunManifest,
 )
 from pdt_observer.profiles import BUILTIN_PROFILE_SETS
+from pdt_observer.samples import (
+    compute_coverage_summary,
+    coverage_output_path,
+    create_sample_set_from_run,
+    load_coverage_review,
+    load_sample_set,
+    refresh_sample_set,
+    run_coverage_steering,
+    run_gap_fill,
+    sample_records,
+)
 from pdt_observer.workflow import write_model
 
 
@@ -108,6 +119,15 @@ class GeometrySaveRequest(BaseModel):
     geometry_status: GeometryStatus = GeometryStatus.NEEDS_REVIEW
     geocode_result: dict[str, Any] | None = None
     review_notes: str | None = None
+
+
+class SampleSetCreateRequest(BaseModel):
+    run_id: str = Field(min_length=1)
+    sample_set_id: str | None = None
+
+
+class SampleSetGapFillRequest(BaseModel):
+    coverage_id: str | None = None
 
 
 class ActiveCodexRegistry:
@@ -223,6 +243,8 @@ def _clear_runtime_history(root: Path) -> int:
         "lead_runs": ("*.json",),
         "qaqc_runs": ("*.json",),
         "address_runs": ("*.json",),
+        "coverage_runs": ("*.json",),
+        "sample_sets": ("*.json",),
         "work": ("*.md",),
     }
     deleted_count = 0
@@ -741,6 +763,135 @@ def _geometry_items_payload(root: Path, manifest: Any) -> dict[str, Any]:
     return {"item_count": len(items), "items": items}
 
 
+def _sample_geometry_items_payload(root: Path, sample_set_id: str) -> dict[str, Any]:
+    sample_set = refresh_sample_set(root, load_sample_set(root, sample_set_id))
+    items = sample_records(root, sample_set)
+    return {
+        "sample_set": sample_set.model_dump(mode="json"),
+        "item_count": len(items),
+        "items": list(items),
+    }
+
+
+def _latest_coverage_path(root: Path, sample_set_id: str) -> Path:
+    candidates = sorted(
+        root.glob(f"coverage_runs/{sample_set_id}-coverage*.json"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    if not candidates:
+        raise FileNotFoundError(f"coverage review not found for sample set: {sample_set_id}")
+    return candidates[0]
+
+
+def _sample_verified_export_response(
+    root: Path,
+    sample_set_id: str,
+    *,
+    output_format: str,
+) -> Response:
+    try:
+        sample_set = refresh_sample_set(root, load_sample_set(root, sample_set_id))
+        items = sample_records(root, sample_set)
+    except ValueError as exc:
+        return _json_error(str(exc), status_code=404)
+
+    if output_format == "json":
+        payload = verified_json(items)
+        media_type = "application/json"
+        filename = f"{sample_set_id}.verified.json"
+    elif output_format == "csv":
+        payload = verified_csv(items)
+        media_type = "text/csv"
+        filename = f"{sample_set_id}.verified.csv"
+    elif output_format == "geojson":
+        payload = footprints_geojson(items)
+        media_type = "application/geo+json"
+        filename = f"{sample_set_id}.footprints.geojson"
+    else:
+        return _json_error(f"unsupported sample export format: {output_format}")
+
+    return PlainTextResponse(
+        payload,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _run_qaqc_missing_for_sample(
+    *,
+    root: Path,
+    sample_set_id: str,
+    codex_bin: str,
+    runner: CodexRunner,
+) -> dict[str, Any]:
+    sample_set = load_sample_set(root, sample_set_id)
+    missing = tuple(
+        child_run_id
+        for child_run_id in sample_set.combined_child_run_ids
+        if not _qaqc_output_path(root, child_run_id).is_file()
+    )
+    append_harvest_log(
+        root,
+        sample_set_id,
+        f"Starting missing QAQC for {len(missing)} child run(s).",
+    )
+    child_results = [
+        _run_qaqc_for_child(
+            root=root,
+            run_id=child_run_id,
+            parent_id=sample_set_id,
+            codex_bin=codex_bin,
+            runner=runner,
+        )
+        for child_run_id in missing
+    ]
+    refreshed = refresh_sample_set(root, sample_set)
+    return {
+        "parent_id": sample_set_id,
+        "child_run_ids": missing,
+        "child_results": child_results,
+        "sample_set": refreshed.model_dump(mode="json"),
+    }
+
+
+def _run_address_missing_for_sample(
+    *,
+    root: Path,
+    sample_set_id: str,
+    codex_bin: str,
+    runner: CodexRunner,
+) -> dict[str, Any]:
+    sample_set = load_sample_set(root, sample_set_id)
+    missing = tuple(
+        child_run_id
+        for child_run_id in sample_set.combined_child_run_ids
+        if not address_output_path(root, child_run_id).is_file()
+    )
+    append_harvest_log(
+        root,
+        sample_set_id,
+        f"Starting missing address enrichment for {len(missing)} child run(s).",
+    )
+    child_results = [
+        _run_address_for_child(
+            root=root,
+            run_id=child_run_id,
+            parent_id=sample_set_id,
+            codex_bin=codex_bin,
+            runner=runner,
+        )
+        for child_run_id in missing
+    ]
+    refreshed = refresh_sample_set(root, sample_set)
+    return {
+        "parent_id": sample_set_id,
+        "child_run_ids": missing,
+        "child_results": child_results,
+        "sample_set": refreshed.model_dump(mode="json"),
+    }
+
+
 def _verified_export_response(root: Path, run_id: str, *, output_format: str) -> Response:
     try:
         manifest = _load_any_manifest(root, run_id)
@@ -1138,6 +1289,207 @@ def create_app(
         except ValueError as exc:
             return _json_error(str(exc), status_code=404)
 
+    async def samples(request: Request) -> JSONResponse:
+        items = []
+        for path in sorted((root / "sample_sets").glob("*.json")):
+            sample_set = load_sample_set(root, path.stem)
+            items.append(refresh_sample_set(root, sample_set).model_dump(mode="json"))
+        return JSONResponse({"sample_sets": items})
+
+    async def sample_create_from_run(request: Request) -> JSONResponse:
+        try:
+            data = SampleSetCreateRequest.model_validate(await _request_json(request))
+            sample_set = create_sample_set_from_run(
+                root=root,
+                run_id=data.run_id,
+                sample_set_id=data.sample_set_id,
+            )
+            return JSONResponse({"sample_set": sample_set.model_dump(mode="json")})
+        except (ValidationError, ValueError) as exc:
+            return _json_error(str(exc), status_code=404)
+
+    async def sample_detail(request: Request) -> JSONResponse:
+        sample_set_id = request.path_params["sample_set_id"]
+        try:
+            sample_set = refresh_sample_set(root, load_sample_set(root, sample_set_id))
+            return JSONResponse({"sample_set": sample_set.model_dump(mode="json")})
+        except ValueError as exc:
+            return _json_error(str(exc), status_code=404)
+
+    async def sample_log(request: Request) -> PlainTextResponse:
+        sample_set_id = request.path_params["sample_set_id"]
+        return PlainTextResponse(_read_log_text(log_path_for_run(root, sample_set_id)))
+
+    async def sample_status(request: Request) -> JSONResponse:
+        sample_set_id = request.path_params["sample_set_id"]
+        try:
+            sample_set = refresh_sample_set(root, load_sample_set(root, sample_set_id))
+            return JSONResponse(
+                {
+                    "sample_set": sample_set.model_dump(mode="json"),
+                    "active": registry.is_active(sample_set_id),
+                }
+            )
+        except ValueError as exc:
+            return _json_error(str(exc), status_code=404)
+
+    async def sample_coverage_summary(request: Request) -> JSONResponse:
+        sample_set_id = request.path_params["sample_set_id"]
+        try:
+            sample_set = refresh_sample_set(root, load_sample_set(root, sample_set_id))
+            return JSONResponse(
+                {
+                    "sample_set": sample_set.model_dump(mode="json"),
+                    "summary": compute_coverage_summary(root, sample_set),
+                }
+            )
+        except ValueError as exc:
+            return _json_error(str(exc), status_code=404)
+
+    async def sample_coverage_run(request: Request) -> JSONResponse:
+        sample_set_id = request.path_params["sample_set_id"]
+        if registry.is_active(sample_set_id):
+            return _json_error(
+                f"Sample set already has active work: {sample_set_id}",
+                status_code=409,
+            )
+        task = partial(
+            run_coverage_steering,
+            root=root,
+            sample_set_id=sample_set_id,
+            codex_bin=codex_bin,
+            runner=app_runner,
+        )
+        if background:
+            registry.mark_task_active(sample_set_id)
+
+            def background_task() -> None:
+                try:
+                    task()
+                except Exception as exc:
+                    append_harvest_log(root, sample_set_id, f"Coverage analysis failed: {exc}.")
+                finally:
+                    registry.mark_task_inactive(sample_set_id)
+
+            executor.submit(background_task)
+            return JSONResponse({"started": True, "sample_set_id": sample_set_id})
+        result = await run_in_threadpool(task)
+        return JSONResponse({"started": False, "coverage": result})
+
+    async def sample_coverage_results(request: Request) -> JSONResponse:
+        sample_set_id = request.path_params["sample_set_id"]
+        try:
+            path = _latest_coverage_path(root, sample_set_id)
+            review = load_coverage_review(path)
+            return JSONResponse(
+                {"coverage_path": str(path), "review": review.model_dump(mode="json")}
+            )
+        except FileNotFoundError as exc:
+            return _json_error(str(exc), status_code=409)
+
+    async def sample_gap_fill_run(request: Request) -> JSONResponse:
+        sample_set_id = request.path_params["sample_set_id"]
+        if registry.is_active(sample_set_id):
+            return _json_error(
+                f"Sample set already has active work: {sample_set_id}",
+                status_code=409,
+            )
+        try:
+            data = SampleSetGapFillRequest.model_validate(await _request_json(request))
+            coverage_path = (
+                coverage_output_path(root, data.coverage_id)
+                if data.coverage_id
+                else _latest_coverage_path(root, sample_set_id)
+            )
+        except (ValidationError, FileNotFoundError) as exc:
+            return _json_error(str(exc), status_code=409)
+        task = partial(
+            run_gap_fill,
+            root=root,
+            sample_set_id=sample_set_id,
+            coverage_path=coverage_path,
+            codex_bin=codex_bin,
+            runner=app_runner,
+        )
+        if background:
+            registry.mark_task_active(sample_set_id)
+
+            def background_task() -> None:
+                try:
+                    task()
+                except Exception as exc:
+                    append_harvest_log(root, sample_set_id, f"Gap-fill failed: {exc}.")
+                finally:
+                    registry.mark_task_inactive(sample_set_id)
+
+            executor.submit(background_task)
+            return JSONResponse({"started": True, "sample_set_id": sample_set_id})
+        sample_set = await run_in_threadpool(task)
+        return JSONResponse({"started": False, "sample_set": sample_set.model_dump(mode="json")})
+
+    async def sample_qaqc_missing(request: Request) -> JSONResponse:
+        sample_set_id = request.path_params["sample_set_id"]
+        if registry.is_active(sample_set_id):
+            return _json_error(
+                f"Sample set already has active work: {sample_set_id}",
+                status_code=409,
+            )
+        task = partial(
+            _run_qaqc_missing_for_sample,
+            root=root,
+            sample_set_id=sample_set_id,
+            codex_bin=codex_bin,
+            runner=app_runner,
+        )
+        result = await run_in_threadpool(task)
+        return JSONResponse({"qaqc": result})
+
+    async def sample_address_missing(request: Request) -> JSONResponse:
+        sample_set_id = request.path_params["sample_set_id"]
+        if registry.is_active(sample_set_id):
+            return _json_error(
+                f"Sample set already has active work: {sample_set_id}",
+                status_code=409,
+            )
+        task = partial(
+            _run_address_missing_for_sample,
+            root=root,
+            sample_set_id=sample_set_id,
+            codex_bin=codex_bin,
+            runner=app_runner,
+        )
+        result = await run_in_threadpool(task)
+        return JSONResponse({"address": result})
+
+    async def sample_geometry_items(request: Request) -> JSONResponse:
+        try:
+            return JSONResponse(
+                _sample_geometry_items_payload(root, request.path_params["sample_set_id"])
+            )
+        except ValueError as exc:
+            return _json_error(str(exc), status_code=404)
+
+    async def sample_export_verified_json(request: Request) -> Response:
+        return _sample_verified_export_response(
+            root,
+            request.path_params["sample_set_id"],
+            output_format="json",
+        )
+
+    async def sample_export_verified_csv(request: Request) -> Response:
+        return _sample_verified_export_response(
+            root,
+            request.path_params["sample_set_id"],
+            output_format="csv",
+        )
+
+    async def sample_export_footprints_geojson(request: Request) -> Response:
+        return _sample_verified_export_response(
+            root,
+            request.path_params["sample_set_id"],
+            output_format="geojson",
+        )
+
     async def verified_leads(request: Request) -> JSONResponse:
         run_id = request.path_params["run_id"]
         try:
@@ -1281,6 +1633,28 @@ def create_app(
         Route("/api/runs/{run_id}/export.footprints.geojson", export_footprints_geojson),
         Route("/api/runs/{run_id}/cancel", cancel_run, methods=["POST"]),
         Route("/api/runs/{run_id}/promote", promote, methods=["POST"]),
+        Route("/api/samples", samples),
+        Route("/api/samples/from-run", sample_create_from_run, methods=["POST"]),
+        Route("/api/samples/{sample_set_id}", sample_detail),
+        Route("/api/samples/{sample_set_id}/status", sample_status),
+        Route("/api/samples/{sample_set_id}/log", sample_log),
+        Route("/api/samples/{sample_set_id}/coverage-summary", sample_coverage_summary),
+        Route("/api/samples/{sample_set_id}/coverage-run", sample_coverage_run, methods=["POST"]),
+        Route("/api/samples/{sample_set_id}/coverage-results", sample_coverage_results),
+        Route("/api/samples/{sample_set_id}/gap-fill-run", sample_gap_fill_run, methods=["POST"]),
+        Route("/api/samples/{sample_set_id}/qaqc-missing", sample_qaqc_missing, methods=["POST"]),
+        Route(
+            "/api/samples/{sample_set_id}/address-missing",
+            sample_address_missing,
+            methods=["POST"],
+        ),
+        Route("/api/samples/{sample_set_id}/geometry-items", sample_geometry_items),
+        Route("/api/samples/{sample_set_id}/export.verified.json", sample_export_verified_json),
+        Route("/api/samples/{sample_set_id}/export.verified.csv", sample_export_verified_csv),
+        Route(
+            "/api/samples/{sample_set_id}/export.footprints.geojson",
+            sample_export_footprints_geojson,
+        ),
         Route("/api/app/exit", exit_app, methods=["POST"]),
     ]
     return Starlette(routes=routes)
@@ -1721,9 +2095,43 @@ INDEX_HTML = r"""<!doctype html>
     </section>
 
     <section class="wide">
+      <h2>Sample Set / Coverage</h2>
+      <div class="actions">
+        <button id="createSampleButton" class="secondary" type="button">
+          Create Sample Set
+        </button>
+        <button id="analyzeCoverageButton" class="secondary" type="button">
+          Analyze Coverage
+        </button>
+        <button id="runGapFillButton" class="secondary" type="button">Run Gap Fill</button>
+        <button id="runSampleQaqcButton" class="secondary" type="button">Run QAQC Missing</button>
+        <button id="runSampleAddressButton" class="secondary" type="button">
+          Run Address Missing
+        </button>
+        <button id="downloadSampleJsonButton" class="secondary" type="button">
+          Download Sample JSON
+        </button>
+        <button id="downloadSampleCsvButton" class="secondary" type="button">
+          Download Sample CSV
+        </button>
+      </div>
+      <div class="status" id="sampleStatus">Create a sample set from a selected run to begin.</div>
+      <textarea
+        id="sampleOutput"
+        class="compact"
+        spellcheck="false"
+        readonly
+        placeholder="Sample set and coverage output will appear here."
+      ></textarea>
+    </section>
+
+    <section class="wide">
       <h2>Geometry Review</h2>
       <div class="actions">
         <button id="loadApprovedButton" class="secondary" type="button">Load Approved</button>
+        <button id="loadAugmentedSampleButton" class="secondary" type="button">
+          Load Augmented Sample
+        </button>
         <button id="geocodeButton" class="secondary" type="button">Geocode</button>
         <button id="searchAddressButton" class="secondary" type="button">Search Address</button>
         <button id="useMapCenterButton" class="secondary" type="button">Use Map Center</button>
@@ -1737,6 +2145,9 @@ INDEX_HTML = r"""<!doctype html>
         </button>
         <button id="downloadFootprintsButton" class="secondary" type="button">
           Download Footprints GeoJSON
+        </button>
+        <button id="downloadSampleFootprintsButton" class="secondary" type="button">
+          Download Sample Footprints
         </button>
       </div>
       <div class="status" id="geometryStatus">Load QAQC-approved observations to begin.</div>
@@ -1762,9 +2173,12 @@ INDEX_HTML = r"""<!doctype html>
       profiles: [],
       mode: 'single',
       currentRunId: null,
+      currentSampleSetId: null,
       currentLeads: [],
       pollTimer: null,
       pollPurpose: 'harvest',
+      samplePollTimer: null,
+      samplePollPurpose: 'coverage',
       geometryItems: [],
       selectedGeometryItemId: null,
       map: null,
@@ -1913,7 +2327,9 @@ INDEX_HTML = r"""<!doctype html>
 
     function resetResults() {
       stopPolling();
+      stopSamplePolling();
       state.currentRunId = null;
+      state.currentSampleSetId = null;
       state.currentLeads = [];
       $('metricStatus').textContent = '-';
       $('metricLeads').textContent = '0';
@@ -1922,6 +2338,7 @@ INDEX_HTML = r"""<!doctype html>
       $('metricFacility').textContent = '0';
       $('metricAggregate').textContent = '0';
       $('jsonOutput').value = '';
+      $('sampleOutput').value = '';
       $('activityOutput').value = '';
     }
 
@@ -2159,6 +2576,109 @@ INDEX_HTML = r"""<!doctype html>
       }
     }
 
+    function setSampleStatus(message, kind = '') {
+      $('sampleStatus').textContent = message;
+      $('sampleStatus').className = `status ${kind}`;
+    }
+
+    function stopSamplePolling() {
+      if (state.samplePollTimer) window.clearInterval(state.samplePollTimer);
+      state.samplePollTimer = null;
+    }
+
+    async function loadSampleLog(sampleSetId) {
+      const response = await fetch(`/api/samples/${sampleSetId}/log`);
+      if (response.ok) {
+        $('activityOutput').value = await response.text();
+        $('activityOutput').scrollTop = $('activityOutput').scrollHeight;
+      }
+    }
+
+    async function pollSampleSet() {
+      if (!state.currentSampleSetId) return;
+      const payload = await api(`/api/samples/${state.currentSampleSetId}/status`);
+      $('sampleOutput').value = JSON.stringify(payload.sample_set, null, 2);
+      await loadSampleLog(state.currentSampleSetId);
+      if (payload.active) {
+        setSampleStatus(`${state.samplePollPurpose} still running...`, 'ok');
+        return;
+      }
+      stopSamplePolling();
+      if (state.samplePollPurpose === 'coverage') {
+        try {
+          const coverage = await api(`/api/samples/${state.currentSampleSetId}/coverage-results`);
+          $('sampleOutput').value = JSON.stringify(coverage, null, 2);
+          setSampleStatus('Coverage analysis complete.', 'ok');
+        } catch (error) {
+          setSampleStatus(error.message, 'error');
+        }
+      } else {
+        setSampleStatus(`${state.samplePollPurpose} complete.`, 'ok');
+      }
+    }
+
+    function startSamplePolling(sampleSetId, purpose) {
+      stopSamplePolling();
+      state.currentSampleSetId = sampleSetId;
+      state.samplePollPurpose = purpose;
+      state.samplePollTimer = window.setInterval(() => {
+        pollSampleSet().catch((error) => setSampleStatus(error.message, 'error'));
+      }, 1500);
+      pollSampleSet().catch((error) => setSampleStatus(error.message, 'error'));
+    }
+
+    async function createSampleSet() {
+      if (!state.currentRunId) return setSampleStatus('Select a run first.', 'error');
+      const payload = await api('/api/samples/from-run', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ run_id: state.currentRunId })
+      });
+      state.currentSampleSetId = payload.sample_set.sample_set_id;
+      $('sampleOutput').value = JSON.stringify(payload, null, 2);
+      setSampleStatus(`Sample set created: ${state.currentSampleSetId}.`, 'ok');
+    }
+
+    async function analyzeCoverage() {
+      if (!state.currentSampleSetId) return setSampleStatus('Create a sample set first.', 'error');
+      const payload = await api(`/api/samples/${state.currentSampleSetId}/coverage-run`, {
+        method: 'POST'
+      });
+      $('sampleOutput').value = JSON.stringify(payload, null, 2);
+      setSampleStatus('Coverage analysis started.', 'ok');
+      if (payload.started) startSamplePolling(state.currentSampleSetId, 'coverage');
+    }
+
+    async function runGapFill() {
+      if (!state.currentSampleSetId) return setSampleStatus('Create a sample set first.', 'error');
+      const payload = await api(`/api/samples/${state.currentSampleSetId}/gap-fill-run`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({})
+      });
+      $('sampleOutput').value = JSON.stringify(payload, null, 2);
+      setSampleStatus('Gap-fill started.', 'ok');
+      if (payload.started) startSamplePolling(state.currentSampleSetId, 'gap fill');
+    }
+
+    async function runSampleQaqcMissing() {
+      if (!state.currentSampleSetId) return setSampleStatus('Create a sample set first.', 'error');
+      const payload = await api(`/api/samples/${state.currentSampleSetId}/qaqc-missing`, {
+        method: 'POST'
+      });
+      $('sampleOutput').value = JSON.stringify(payload, null, 2);
+      setSampleStatus('Missing QAQC pass complete.', 'ok');
+    }
+
+    async function runSampleAddressMissing() {
+      if (!state.currentSampleSetId) return setSampleStatus('Create a sample set first.', 'error');
+      const payload = await api(`/api/samples/${state.currentSampleSetId}/address-missing`, {
+        method: 'POST'
+      });
+      $('sampleOutput').value = JSON.stringify(payload, null, 2);
+      setSampleStatus('Missing address pass complete.', 'ok');
+    }
+
     function setGeometryStatus(message, kind = '') {
       $('geometryStatus').textContent = message;
       $('geometryStatus').className = `status ${kind}`;
@@ -2279,6 +2799,20 @@ INDEX_HTML = r"""<!doctype html>
       renderGeometryList();
       if (state.selectedGeometryItemId) selectGeometryItem(state.selectedGeometryItemId);
       setGeometryStatus(`Loaded ${state.geometryItems.length} QAQC-approved observation(s).`, 'ok');
+    }
+
+    async function loadAugmentedSampleGeometry() {
+      if (!state.currentSampleSetId) return setGeometryStatus('No sample set selected.', 'error');
+      initMap();
+      const payload = await api(`/api/samples/${state.currentSampleSetId}/geometry-items`);
+      state.geometryItems = payload.items || [];
+      state.selectedGeometryItemId = state.geometryItems[0]?.item_id || null;
+      renderGeometryList();
+      if (state.selectedGeometryItemId) selectGeometryItem(state.selectedGeometryItemId);
+      setGeometryStatus(
+        `Loaded ${state.geometryItems.length} augmented sample observation(s).`,
+        'ok'
+      );
     }
 
     function currentPointPayload(source = 'user') {
@@ -2403,6 +2937,32 @@ INDEX_HTML = r"""<!doctype html>
       );
     }
 
+    async function downloadSampleExport(format) {
+      if (!state.currentSampleSetId) return setSampleStatus('No sample set selected.', 'error');
+      const response = await fetch(
+        `/api/samples/${state.currentSampleSetId}/export.verified.${format}`
+      );
+      if (!response.ok) return setSampleStatus(await response.text(), 'error');
+      downloadText(
+        `observation-sample.verified.${format}`,
+        await response.text(),
+        format === 'csv' ? 'text/csv' : 'application/json'
+      );
+    }
+
+    async function downloadSampleFootprints() {
+      if (!state.currentSampleSetId) return setGeometryStatus('No sample set selected.', 'error');
+      const response = await fetch(
+        `/api/samples/${state.currentSampleSetId}/export.footprints.geojson`
+      );
+      if (!response.ok) return setGeometryStatus(await response.text(), 'error');
+      downloadText(
+        'observation-sample-footprints.geojson',
+        await response.text(),
+        'application/geo+json'
+      );
+    }
+
     async function boot() {
       initTheme();
       const payload = await api('/api/profiles');
@@ -2431,10 +2991,30 @@ INDEX_HTML = r"""<!doctype html>
       $('copyQaqcButton').addEventListener('click', copyQaqcPrompt);
       $('runQaqcButton').addEventListener('click', runQaqc);
       $('runAddressButton').addEventListener('click', runAddressEnrichment);
+      $('createSampleButton').addEventListener('click', () => {
+        createSampleSet().catch((error) => setSampleStatus(error.message, 'error'));
+      });
+      $('analyzeCoverageButton').addEventListener('click', () => {
+        analyzeCoverage().catch((error) => setSampleStatus(error.message, 'error'));
+      });
+      $('runGapFillButton').addEventListener('click', () => {
+        runGapFill().catch((error) => setSampleStatus(error.message, 'error'));
+      });
+      $('runSampleQaqcButton').addEventListener('click', () => {
+        runSampleQaqcMissing().catch((error) => setSampleStatus(error.message, 'error'));
+      });
+      $('runSampleAddressButton').addEventListener('click', () => {
+        runSampleAddressMissing().catch((error) => setSampleStatus(error.message, 'error'));
+      });
+      $('downloadSampleJsonButton').addEventListener('click', () => downloadSampleExport('json'));
+      $('downloadSampleCsvButton').addEventListener('click', () => downloadSampleExport('csv'));
       $('downloadJsonButton').addEventListener('click', () => downloadExport('json'));
       $('downloadCsvButton').addEventListener('click', () => downloadExport('csv'));
       $('loadApprovedButton').addEventListener('click', () => {
         loadApprovedGeometry().catch((error) => setGeometryStatus(error.message, 'error'));
+      });
+      $('loadAugmentedSampleButton').addEventListener('click', () => {
+        loadAugmentedSampleGeometry().catch((error) => setGeometryStatus(error.message, 'error'));
       });
       $('geocodeButton').addEventListener('click', () => {
         geocodeSelected().catch((error) => setGeometryStatus(error.message, 'error'));
@@ -2452,6 +3032,7 @@ INDEX_HTML = r"""<!doctype html>
       $('downloadVerifiedJsonButton').addEventListener('click', () => downloadExport('json'));
       $('downloadVerifiedCsvButton').addEventListener('click', () => downloadExport('csv'));
       $('downloadFootprintsButton').addEventListener('click', downloadFootprints);
+      $('downloadSampleFootprintsButton').addEventListener('click', downloadSampleFootprints);
     }
     boot().catch((error) => setStatus(error.message, 'error'));
   </script>

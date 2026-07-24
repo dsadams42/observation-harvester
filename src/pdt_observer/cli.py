@@ -36,6 +36,16 @@ from pdt_observer.models import (
 )
 from pdt_observer.profiles import get_builtin_profile
 from pdt_observer.prompting import render_work_prompt
+from pdt_observer.samples import (
+    compute_coverage_summary,
+    coverage_review_to_json,
+    create_sample_set_from_run,
+    load_coverage_review,
+    load_sample_set,
+    render_coverage_steering_prompt,
+    run_gap_fill,
+    sample_records,
+)
 from pdt_observer.validation import ObservationValidationException, validate_run
 from pdt_observer.web import DirectFetchError, DirectWebFetcher
 from pdt_observer.workflow import (
@@ -301,6 +311,41 @@ def build_parser() -> argparse.ArgumentParser:
     )
     leads_address_validate.add_argument("address_file", type=Path)
     leads_address_validate.add_argument("--pretty", action="store_true")
+
+    samples = subparsers.add_parser(
+        "samples",
+        help="Create, analyze, and augment sample sets across harvest rounds.",
+    )
+    samples_subparsers = samples.add_subparsers(dest="samples_command", required=True)
+    samples_create = samples_subparsers.add_parser(
+        "create-from-run",
+        help="Create a sample set from an existing run, batch, or campaign.",
+    )
+    samples_create.add_argument("run_id")
+    samples_create.add_argument("--sample-set-id")
+    samples_create.add_argument("--workspace", type=Path, default=Path("."))
+    samples_coverage_prompt = samples_subparsers.add_parser(
+        "coverage-prompt",
+        help="Render a coverage steering prompt for a sample set.",
+    )
+    samples_coverage_prompt.add_argument("sample_set_id")
+    samples_coverage_prompt.add_argument("--coverage-id")
+    samples_coverage_prompt.add_argument("--output", type=Path)
+    samples_coverage_prompt.add_argument("--workspace", type=Path, default=Path("."))
+    samples_coverage_validate = samples_subparsers.add_parser(
+        "coverage-validate",
+        help="Validate a coverage steering JSON review.",
+    )
+    samples_coverage_validate.add_argument("coverage_file", type=Path)
+    samples_coverage_validate.add_argument("--pretty", action="store_true")
+    samples_gap_fill = samples_subparsers.add_parser(
+        "gap-fill-run",
+        help="Run recommended gap-fill harvest jobs and append them to a sample set.",
+    )
+    samples_gap_fill.add_argument("sample_set_id")
+    samples_gap_fill.add_argument("--coverage", type=Path, required=True)
+    samples_gap_fill.add_argument("--workspace", type=Path, default=Path("."))
+    samples_gap_fill.add_argument("--codex-bin", default="codex")
 
     investigate_api = subparsers.add_parser(
         "investigate-api",
@@ -584,6 +629,53 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(address_results_to_json(results))
             else:
                 print(json.dumps({"valid": True, "result_count": len(results)}, indent=2))
+            return 0
+        if args.command == "samples" and args.samples_command == "create-from-run":
+            sample_set = create_sample_set_from_run(
+                root=args.workspace,
+                run_id=args.run_id,
+                sample_set_id=args.sample_set_id,
+            )
+            print(sample_set.model_dump_json(indent=2))
+            return 0
+        if args.command == "samples" and args.samples_command == "coverage-prompt":
+            sample_set = load_sample_set(args.workspace, args.sample_set_id)
+            coverage_id = args.coverage_id or f"{sample_set.sample_set_id}-coverage"
+            summary = compute_coverage_summary(args.workspace, sample_set)
+            prompt = render_coverage_steering_prompt(
+                sample_set=sample_set,
+                coverage_id=coverage_id,
+                summary=summary,
+                records=sample_records(args.workspace, sample_set),
+            )
+            if args.output is not None:
+                args.output.parent.mkdir(parents=True, exist_ok=True)
+                args.output.write_text(prompt, encoding="utf-8")
+            print(prompt, end="" if prompt.endswith("\n") else "\n")
+            return 0
+        if args.command == "samples" and args.samples_command == "coverage-validate":
+            review = load_coverage_review(args.coverage_file)
+            if args.pretty:
+                print(coverage_review_to_json(review))
+            else:
+                print(
+                    json.dumps(
+                        {
+                            "valid": True,
+                            "recommended_job_count": len(review.recommended_child_jobs),
+                        },
+                        indent=2,
+                    )
+                )
+            return 0
+        if args.command == "samples" and args.samples_command == "gap-fill-run":
+            sample_set = run_gap_fill(
+                root=args.workspace,
+                sample_set_id=args.sample_set_id,
+                coverage_path=args.coverage,
+                codex_bin=args.codex_bin,
+            )
+            print(sample_set.model_dump_json(indent=2))
             return 0
         if args.command == "investigate-api":
             task = load_task(args.task_file)

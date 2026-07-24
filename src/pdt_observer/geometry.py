@@ -179,8 +179,11 @@ def verified_csv(records: Sequence[dict[str, Any]]) -> str:
     output = io.StringIO()
     fieldnames = (
         "item_id",
+        "sample_set_id",
+        "sample_round",
         "child_run_id",
         "lead_index",
+        "facility_type",
         "source_url",
         "facility_name",
         "city_or_region",
@@ -206,8 +209,11 @@ def verified_csv(records: Sequence[dict[str, Any]]) -> str:
         writer.writerow(
             {
                 "item_id": record["item_id"],
+                "sample_set_id": record.get("sample_set_id", ""),
+                "sample_round": record.get("sample_round", ""),
                 "child_run_id": record["child_run_id"],
                 "lead_index": record["lead_index"],
+                "facility_type": record.get("facility_type", ""),
                 "source_url": lead["source_url"],
                 "facility_name": lead["location"]["facility_name"],
                 "city_or_region": lead["location"]["city_or_region"],
@@ -242,8 +248,11 @@ def footprints_geojson(records: Sequence[dict[str, Any]]) -> str:
                 "geometry": polygon,
                 "properties": {
                     "item_id": record["item_id"],
+                    "sample_set_id": record.get("sample_set_id"),
+                    "sample_round": record.get("sample_round"),
                     "child_run_id": record["child_run_id"],
                     "lead_index": record["lead_index"],
+                    "facility_type": record.get("facility_type"),
                     "facility_name": lead["location"]["facility_name"],
                     "source_url": lead["source_url"],
                     "address_status": record.get("address_status", "not_run"),

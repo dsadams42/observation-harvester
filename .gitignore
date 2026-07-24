@@ -13,6 +13,7 @@ build/
 batches/
 exports/
 address_runs/
+coverage_runs/
 geocode_cache/
 geometry_reviews/
 harvest_runs/
@@ -21,5 +22,6 @@ lead_runs/
 qaqc_runs/
 review/
 runs/
+sample_sets/
 work/
 work_items/

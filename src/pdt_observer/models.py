@@ -101,6 +101,26 @@ class HarvestRunStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class SampleSetRoundRole(StrEnum):
+    INITIAL = "initial"
+    GAP_FILL = "gap_fill"
+
+
+class CoverageDispersionStatus(StrEnum):
+    UNKNOWN = "unknown"
+    BALANCED = "balanced"
+    IMBALANCED = "imbalanced"
+    CLUSTERED = "clustered"
+    INSUFFICIENT_DATA = "insufficient_data"
+
+
+class CoverageFlagType(StrEnum):
+    OUT_OF_SCOPE = "out_of_scope"
+    DUPLICATE_CANDIDATE = "duplicate_candidate"
+    CLUSTERED = "clustered"
+    UNDERCOVERED = "undercovered"
+
+
 class DayPart(StrEnum):
     EARLY_MORNING = "early_morning"
     MORNING = "morning"
@@ -458,6 +478,56 @@ class HarvestCampaignRunManifest(StrictModel):
     summary: dict[str, object] | None = None
     error_message: str | None = None
     log_path: str | None = None
+
+
+class SampleSetRound(StrictModel):
+    round_number: int = Field(ge=1)
+    role: SampleSetRoundRole
+    source_run_ids: tuple[str, ...] = ()
+    child_run_ids: tuple[str, ...] = ()
+    recommended_coverage_id: str | None = None
+    status: HarvestRunStatus
+    summary: dict[str, object] | None = None
+
+
+class SampleSetManifest(StrictModel):
+    sample_set_id: str = Field(min_length=1)
+    country: str = Field(min_length=2)
+    requested_localities: tuple[str, ...] = ()
+    facility_types: tuple[str, ...] = ()
+    target: int = Field(ge=1)
+    rounds: tuple[SampleSetRound, ...]
+    combined_child_run_ids: tuple[str, ...]
+    stage_summary: dict[str, object] | None = None
+    created_at: str = Field(min_length=1)
+    updated_at: str = Field(min_length=1)
+
+
+class RecommendedGapFillJob(StrictModel):
+    country: str = Field(min_length=2)
+    locality: str | None = None
+    facility_type: str = Field(min_length=1)
+    target: int = Field(ge=1)
+    reason: str = Field(min_length=1)
+
+
+class CoverageFlag(StrictModel):
+    item_id: str | None = None
+    flag_type: CoverageFlagType
+    reason: str = Field(min_length=1)
+
+
+class CoverageSteeringReview(StrictModel):
+    coverage_id: str = Field(min_length=1)
+    sample_set_id: str = Field(min_length=1)
+    dispersion_status: CoverageDispersionStatus = CoverageDispersionStatus.UNKNOWN
+    counts_by_locality: dict[str, int] = {}
+    counts_by_city_or_region: dict[str, int] = {}
+    counts_by_facility_type: dict[str, int] = {}
+    out_of_scope_flags: tuple[CoverageFlag, ...] = ()
+    duplicate_or_cluster_flags: tuple[CoverageFlag, ...] = ()
+    narrative_notes: str = Field(min_length=1)
+    recommended_child_jobs: tuple[RecommendedGapFillJob, ...] = ()
 
 
 class ReviewQueueItem(StrictModel):

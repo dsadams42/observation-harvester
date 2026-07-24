@@ -149,62 +149,74 @@ def test_index_page_contains_local_app_controls(tmp_path: Path) -> None:
     client = TestClient(create_app(workspace=tmp_path, runner=successful_runner, background=False))
 
     response = client.get("/")
+    html = response.text
 
     assert response.status_code == 200
-    assert "Observation Harvester" in response.text
-    assert "Country" in response.text
-    assert "Facility Type" in response.text
-    assert "Subtype" in response.text
-    assert "Campaign" in response.text
-    assert "Regions or Localities" in response.text
-    assert "Run Harvest" in response.text
-    assert "Copy JSON" in response.text
-    assert "Copy QAQC Prompt" in response.text
-    assert "Run QAQC" in response.text
-    assert "Run Address Enrichment" in response.text
-    assert "Download Verified CSV" in response.text
-    assert "Sample Set / Coverage" in response.text
-    assert "Create Sample Set" in response.text
-    assert "Analyze Coverage" in response.text
-    assert "Run Gap Fill" in response.text
-    assert "Run QAQC Missing" in response.text
-    assert "Run Address Missing" in response.text
-    assert "Geometry Review" in response.text
-    assert "leaflet.draw" in response.text
-    assert "Load Approved" in response.text
-    assert "Load Augmented Sample" in response.text
-    assert "Manual Address Search" in response.text
-    assert "Search Address" in response.text
-    assert "Save Footprint" in response.text
-    assert "Download Footprints GeoJSON" in response.text
-    assert "Clear All" in response.text
-    assert "Agent Activity" in response.text
-    assert "Cancel Run" in response.text
-    assert "Exit Application" in response.text
-    assert "Theme" in response.text
-    assert "observationHarvesterTheme" in response.text
-    assert "data-theme" in response.text
-    assert "/api/runs/${runId}/log" in response.text
-    assert "/api/runs/${state.currentRunId}/status" in response.text
-    assert "/api/runs/${state.currentRunId}/cancel" in response.text
-    assert "/api/runs/${state.currentRunId}/qaqc-prompt" in response.text
-    assert "/api/runs/${state.currentRunId}/qaqc-run" in response.text
-    assert "/api/runs/${state.currentRunId}/qaqc-reviews" in response.text
-    assert "/api/runs/${state.currentRunId}/address-run" in response.text
-    assert "/api/runs/${state.currentRunId}/address-results" in response.text
-    assert "/api/runs/${state.currentRunId}/geometry-items" in response.text
-    assert "/api/samples/from-run" in response.text
-    assert "/api/samples/${state.currentSampleSetId}/coverage-run" in response.text
-    assert "/api/samples/${state.currentSampleSetId}/gap-fill-run" in response.text
-    assert "/api/samples/${state.currentSampleSetId}/qaqc-missing" in response.text
-    assert "/api/samples/${state.currentSampleSetId}/address-missing" in response.text
-    assert "/api/samples/${state.currentSampleSetId}/geometry-items" in response.text
-    assert "/api/geometry/geocode" in response.text
-    assert "/api/runs/${state.currentRunId}/export.verified.${format}" in response.text
-    assert "/api/runs/${state.currentRunId}/export.footprints.geojson" in response.text
-    assert "QAQC still running" in response.text
-    assert "/api/runs/clear" in response.text
-    assert "/api/app/exit" in response.text
+    assert "Observation Harvester" in html
+    assert "Country" in html
+    assert "Facility Type" in html
+    assert "Subtype" in html
+    assert "Campaign" in html
+    assert "Regions or Localities" in html
+    assert "Run Harvest" in html
+    assert "Copy JSON" in html
+    assert "Copy QAQC Prompt" in html
+    assert "Run QAQC" in html
+    assert "Run Address Enrichment" in html
+    assert "Download Verified CSV" in html
+    assert "Geometry Review" in html
+    assert "Sample Set / Coverage" in html
+    assert html.index("Geometry Review") < html.index("Sample Set / Coverage")
+    assert "Create Sample Set" in html
+    assert "Analyze Coverage" in html
+    assert "Run Gap Fill" in html
+    assert "Run QAQC Missing" in html
+    assert "Run Address Missing" in html
+    assert "leaflet.draw" in html
+    assert "Load Approved" in html
+    assert "Load Augmented Sample" in html
+    assert "Show Sample Extent" in html
+    assert "Zoom To Extent" in html
+    assert "Clear Extent" in html
+    assert "geometryExtentSummary" in html
+    assert "overviewPointLayer" in html
+    assert "overviewFootprintLayer" in html
+    assert "overviewExtentLayer" in html
+    assert "renderSampleExtent" in html
+    assert "geometryRoundLabel" in html
+    assert "selectGeometryItem(item.item_id)" in html
+    assert "Manual Address Search" in html
+    assert "Search Address" in html
+    assert "Save Footprint" in html
+    assert "Download Footprints GeoJSON" in html
+    assert "Clear All" in html
+    assert "Agent Activity" in html
+    assert "Cancel Run" in html
+    assert "Exit Application" in html
+    assert "Theme" in html
+    assert "observationHarvesterTheme" in html
+    assert "data-theme" in html
+    assert "/api/runs/${runId}/log" in html
+    assert "/api/runs/${state.currentRunId}/status" in html
+    assert "/api/runs/${state.currentRunId}/cancel" in html
+    assert "/api/runs/${state.currentRunId}/qaqc-prompt" in html
+    assert "/api/runs/${state.currentRunId}/qaqc-run" in html
+    assert "/api/runs/${state.currentRunId}/qaqc-reviews" in html
+    assert "/api/runs/${state.currentRunId}/address-run" in html
+    assert "/api/runs/${state.currentRunId}/address-results" in html
+    assert "/api/runs/${state.currentRunId}/geometry-items" in html
+    assert "/api/samples/from-run" in html
+    assert "/api/samples/${state.currentSampleSetId}/coverage-run" in html
+    assert "/api/samples/${state.currentSampleSetId}/gap-fill-run" in html
+    assert "/api/samples/${state.currentSampleSetId}/qaqc-missing" in html
+    assert "/api/samples/${state.currentSampleSetId}/address-missing" in html
+    assert "/api/samples/${state.currentSampleSetId}/geometry-items" in html
+    assert "/api/geometry/geocode" in html
+    assert "/api/runs/${state.currentRunId}/export.verified.${format}" in html
+    assert "/api/runs/${state.currentRunId}/export.footprints.geojson" in html
+    assert "QAQC still running" in html
+    assert "/api/runs/clear" in html
+    assert "/api/app/exit" in html
 
 
 def test_profiles_endpoint_returns_builtin_profile_sets(tmp_path: Path) -> None:
@@ -617,6 +629,33 @@ def test_sample_set_coverage_and_gap_fill_api_flow(tmp_path: Path) -> None:
     assert missing_address.json()["address"]["child_run_ids"]
     assert geometry_items.json()["item_count"] == 2
     assert "sample_round" in exported.text
+
+
+def test_sample_address_missing_skips_children_that_need_qaqc_first(tmp_path: Path) -> None:
+    client = TestClient(create_app(workspace=tmp_path, runner=successful_runner, background=False))
+    created = client.post(
+        "/api/harvest/campaign-run",
+        json={
+            "country": "US",
+            "localities": ["Tennessee"],
+            "facility_types": ["schools"],
+            "target": 3,
+        },
+    ).json()
+    campaign_id = created["manifest"]["campaign_id"]
+    sample = client.post(
+        "/api/samples/from-run",
+        json={"run_id": campaign_id, "sample_set_id": "tn-schools-sample"},
+    )
+
+    response = client.post("/api/samples/tn-schools-sample/address-missing")
+
+    assert sample.status_code == 200
+    assert response.status_code == 200
+    assert response.json()["address"]["child_run_ids"] == []
+    assert response.json()["address"]["skipped_needs_qaqc"] == created["manifest"][
+        "child_run_ids"
+    ]
 
 
 def test_run_log_includes_qaqc_child_subprocess_logs(tmp_path: Path) -> None:

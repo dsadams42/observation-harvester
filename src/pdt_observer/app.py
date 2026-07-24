@@ -863,16 +863,28 @@ def _run_address_missing_for_sample(
     runner: CodexRunner,
 ) -> dict[str, Any]:
     sample_set = load_sample_set(root, sample_set_id)
+    skipped_needs_qaqc = tuple(
+        child_run_id
+        for child_run_id in sample_set.combined_child_run_ids
+        if not _qaqc_output_path(root, child_run_id).is_file()
+    )
     missing = tuple(
         child_run_id
         for child_run_id in sample_set.combined_child_run_ids
-        if not address_output_path(root, child_run_id).is_file()
+        if _qaqc_output_path(root, child_run_id).is_file()
+        and not address_output_path(root, child_run_id).is_file()
     )
     append_harvest_log(
         root,
         sample_set_id,
         f"Starting missing address enrichment for {len(missing)} child run(s).",
     )
+    if skipped_needs_qaqc:
+        append_harvest_log(
+            root,
+            sample_set_id,
+            f"Skipped {len(skipped_needs_qaqc)} address child run(s) that need QAQC first.",
+        )
     child_results = [
         _run_address_for_child(
             root=root,
@@ -887,6 +899,7 @@ def _run_address_missing_for_sample(
     return {
         "parent_id": sample_set_id,
         "child_run_ids": missing,
+        "skipped_needs_qaqc": skipped_needs_qaqc,
         "child_results": child_results,
         "sample_set": refreshed.model_dump(mode="json"),
     }
@@ -1441,8 +1454,24 @@ def create_app(
             codex_bin=codex_bin,
             runner=app_runner,
         )
-        result = await run_in_threadpool(task)
-        return JSONResponse({"qaqc": result})
+        if background:
+            registry.mark_task_active(sample_set_id)
+
+            def background_task() -> None:
+                try:
+                    task()
+                except Exception as exc:
+                    append_harvest_log(root, sample_set_id, f"Missing QAQC failed: {exc}.")
+                finally:
+                    registry.mark_task_inactive(sample_set_id)
+
+            executor.submit(background_task)
+            return JSONResponse({"started": True, "sample_set_id": sample_set_id})
+        try:
+            result = await run_in_threadpool(task)
+        except (FileNotFoundError, ValueError) as exc:
+            return _json_error(str(exc), status_code=409)
+        return JSONResponse({"started": False, "qaqc": result})
 
     async def sample_address_missing(request: Request) -> JSONResponse:
         sample_set_id = request.path_params["sample_set_id"]
@@ -1458,8 +1487,24 @@ def create_app(
             codex_bin=codex_bin,
             runner=app_runner,
         )
-        result = await run_in_threadpool(task)
-        return JSONResponse({"address": result})
+        if background:
+            registry.mark_task_active(sample_set_id)
+
+            def background_task() -> None:
+                try:
+                    task()
+                except Exception as exc:
+                    append_harvest_log(root, sample_set_id, f"Missing address failed: {exc}.")
+                finally:
+                    registry.mark_task_inactive(sample_set_id)
+
+            executor.submit(background_task)
+            return JSONResponse({"started": True, "sample_set_id": sample_set_id})
+        try:
+            result = await run_in_threadpool(task)
+        except (FileNotFoundError, ValueError) as exc:
+            return _json_error(str(exc), status_code=409)
+        return JSONResponse({"started": False, "address": result})
 
     async def sample_geometry_items(request: Request) -> JSONResponse:
         try:
@@ -1954,6 +1999,16 @@ INDEX_HTML = r"""<!doctype html>
       border-color: var(--accent);
       background: var(--selected);
     }
+    .extent-summary {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel-soft);
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+      padding: 9px 10px;
+      margin: 8px 0 12px;
+    }
     .theme-control {
       display: flex;
       align-items: center;
@@ -2095,37 +2150,6 @@ INDEX_HTML = r"""<!doctype html>
     </section>
 
     <section class="wide">
-      <h2>Sample Set / Coverage</h2>
-      <div class="actions">
-        <button id="createSampleButton" class="secondary" type="button">
-          Create Sample Set
-        </button>
-        <button id="analyzeCoverageButton" class="secondary" type="button">
-          Analyze Coverage
-        </button>
-        <button id="runGapFillButton" class="secondary" type="button">Run Gap Fill</button>
-        <button id="runSampleQaqcButton" class="secondary" type="button">Run QAQC Missing</button>
-        <button id="runSampleAddressButton" class="secondary" type="button">
-          Run Address Missing
-        </button>
-        <button id="downloadSampleJsonButton" class="secondary" type="button">
-          Download Sample JSON
-        </button>
-        <button id="downloadSampleCsvButton" class="secondary" type="button">
-          Download Sample CSV
-        </button>
-      </div>
-      <div class="status" id="sampleStatus">Create a sample set from a selected run to begin.</div>
-      <textarea
-        id="sampleOutput"
-        class="compact"
-        spellcheck="false"
-        readonly
-        placeholder="Sample set and coverage output will appear here."
-      ></textarea>
-    </section>
-
-    <section class="wide">
       <h2>Geometry Review</h2>
       <div class="actions">
         <button id="loadApprovedButton" class="secondary" type="button">Load Approved</button>
@@ -2150,6 +2174,20 @@ INDEX_HTML = r"""<!doctype html>
           Download Sample Footprints
         </button>
       </div>
+      <div class="actions">
+        <button id="showSampleExtentButton" class="secondary" type="button">
+          Show Sample Extent
+        </button>
+        <button id="zoomSampleExtentButton" class="secondary" type="button">
+          Zoom To Extent
+        </button>
+        <button id="clearSampleExtentButton" class="secondary" type="button">
+          Clear Extent
+        </button>
+      </div>
+      <div class="extent-summary" id="geometryExtentSummary">
+        Extent: load approved observations, then geocode or save points to map the sample.
+      </div>
       <div class="status" id="geometryStatus">Load QAQC-approved observations to begin.</div>
       <div class="geometry-layout">
         <div>
@@ -2166,6 +2204,40 @@ INDEX_HTML = r"""<!doctype html>
         </div>
         <div id="map" class="map"></div>
       </div>
+    </section>
+
+    <section class="wide">
+      <h2>Sample Set / Coverage</h2>
+      <div class="actions">
+        <button id="createSampleButton" class="secondary" type="button">
+          Create Sample Set
+        </button>
+        <button id="analyzeCoverageButton" class="secondary" type="button">
+          Analyze Coverage
+        </button>
+        <button id="runGapFillButton" class="secondary" type="button">Run Gap Fill</button>
+        <button id="runSampleQaqcButton" class="secondary" type="button">Run QAQC Missing</button>
+        <button id="runSampleAddressButton" class="secondary" type="button">
+          Run Address Missing
+        </button>
+        <button id="downloadSampleJsonButton" class="secondary" type="button">
+          Download Sample JSON
+        </button>
+        <button id="downloadSampleCsvButton" class="secondary" type="button">
+          Download Sample CSV
+        </button>
+      </div>
+      <div class="status" id="sampleStatus">
+        Create a sample set after geometry review; coverage works best once approved
+        observations have geocoded points.
+      </div>
+      <textarea
+        id="sampleOutput"
+        class="compact"
+        spellcheck="false"
+        readonly
+        placeholder="Sample set and coverage output will appear here."
+      ></textarea>
     </section>
   </main>
   <script>
@@ -2184,6 +2256,11 @@ INDEX_HTML = r"""<!doctype html>
       map: null,
       drawnItems: null,
       marker: null,
+      overviewPointLayer: null,
+      overviewFootprintLayer: null,
+      overviewExtentLayer: null,
+      overviewBounds: null,
+      sampleExtentVisible: false,
       themePreference: 'system'
     };
     const $ = (id) => document.getElementById(id);
@@ -2641,11 +2718,27 @@ INDEX_HTML = r"""<!doctype html>
 
     async function analyzeCoverage() {
       if (!state.currentSampleSetId) return setSampleStatus('Create a sample set first.', 'error');
+      let geometryNote = '';
+      try {
+        const summaryPayload = await api(
+          `/api/samples/${state.currentSampleSetId}/coverage-summary`
+        );
+        const summary = summaryPayload.summary || {};
+        if (summary.approved_count && !summary.geocoded_count) {
+          geometryNote = ' No geocoded observations yet; geometry review can improve steering.';
+        } else if (summary.geocoded_count < summary.approved_count) {
+          geometryNote =
+            ` ${summary.geocoded_count}/${summary.approved_count} approved observations ` +
+            'have geocoded points.';
+        }
+      } catch (_) {
+        geometryNote = '';
+      }
       const payload = await api(`/api/samples/${state.currentSampleSetId}/coverage-run`, {
         method: 'POST'
       });
       $('sampleOutput').value = JSON.stringify(payload, null, 2);
-      setSampleStatus('Coverage analysis started.', 'ok');
+      setSampleStatus(`Coverage analysis started.${geometryNote}`, 'ok');
       if (payload.started) startSamplePolling(state.currentSampleSetId, 'coverage');
     }
 
@@ -2667,7 +2760,11 @@ INDEX_HTML = r"""<!doctype html>
         method: 'POST'
       });
       $('sampleOutput').value = JSON.stringify(payload, null, 2);
-      setSampleStatus('Missing QAQC pass complete.', 'ok');
+      setSampleStatus(
+        payload.started ? 'Missing QAQC started.' : 'Missing QAQC pass complete.',
+        'ok'
+      );
+      if (payload.started) startSamplePolling(state.currentSampleSetId, 'missing QAQC');
     }
 
     async function runSampleAddressMissing() {
@@ -2676,7 +2773,11 @@ INDEX_HTML = r"""<!doctype html>
         method: 'POST'
       });
       $('sampleOutput').value = JSON.stringify(payload, null, 2);
-      setSampleStatus('Missing address pass complete.', 'ok');
+      setSampleStatus(
+        payload.started ? 'Missing address enrichment started.' : 'Missing address pass complete.',
+        'ok'
+      );
+      if (payload.started) startSamplePolling(state.currentSampleSetId, 'missing address');
     }
 
     function setGeometryStatus(message, kind = '') {
@@ -2700,6 +2801,12 @@ INDEX_HTML = r"""<!doctype html>
       );
       imagery.addTo(state.map);
       L.control.layers({ Imagery: imagery, Streets: streets }).addTo(state.map);
+      state.overviewFootprintLayer = new L.FeatureGroup();
+      state.overviewPointLayer = new L.FeatureGroup();
+      state.overviewExtentLayer = new L.FeatureGroup();
+      state.map.addLayer(state.overviewFootprintLayer);
+      state.map.addLayer(state.overviewPointLayer);
+      state.map.addLayer(state.overviewExtentLayer);
       state.drawnItems = new L.FeatureGroup();
       state.map.addLayer(state.drawnItems);
       const drawControl = new L.Control.Draw({
@@ -2724,19 +2831,65 @@ INDEX_HTML = r"""<!doctype html>
       return state.geometryItems.find((item) => item.item_id === state.selectedGeometryItemId);
     }
 
+    function geometryRound(item) {
+      return item.sample_round ? Number(item.sample_round) : 0;
+    }
+
+    function geometryRoundLabel(item) {
+      const round = geometryRound(item);
+      if (!round) return 'current run';
+      return round === 1 ? 'round 1' : `gap-fill round ${round}`;
+    }
+
+    function geometryColor(item) {
+      const round = geometryRound(item);
+      if (round > 1) return '#d97706';
+      if (round === 1) return '#2563eb';
+      return '#16a34a';
+    }
+
+    function geometrySummary() {
+      const rounds = new Set();
+      let geocoded = 0;
+      let footprints = 0;
+      for (const item of state.geometryItems) {
+        if (pointFromGeometry(item)) geocoded += 1;
+        if (polygonFromGeometry(item)) footprints += 1;
+        rounds.add(geometryRoundLabel(item));
+      }
+      return {
+        approved: state.geometryItems.length,
+        geocoded,
+        footprints,
+        missing: Math.max(state.geometryItems.length - geocoded, 0),
+        rounds: Array.from(rounds).join(', ') || 'none'
+      };
+    }
+
+    function updateGeometrySummary() {
+      const summary = geometrySummary();
+      $('geometryExtentSummary').textContent =
+        `Extent: ${summary.approved} approved, ${summary.geocoded} geocoded, ` +
+        `${summary.footprints} footprint(s), ${summary.missing} missing point(s). ` +
+        `Rounds: ${summary.rounds}.`;
+    }
+
     function renderGeometryList() {
       $('geometryList').innerHTML = state.geometryItems.map((item) => {
         const lead = item.lead;
         const addressStatus = item.address_status || 'not_run';
-        const label = `${lead.location.facility_name} - ${addressStatus} - ${item.geometry_status}`;
+        const label = `${lead.location.facility_name} - ${addressStatus} - ` +
+          `${item.geometry_status}`;
         const active = item.item_id === state.selectedGeometryItemId ? ' active' : '';
         return `<button type="button" class="${active}" data-geometry="${item.item_id}">
-          ${label}<br>${lead.location.city_or_region}, ${lead.location.country}
+          ${label}<br>${lead.location.city_or_region}, ${lead.location.country} -
+          ${geometryRoundLabel(item)}
         </button>`;
       }).join('') || '<div class="status">No QAQC-approved observations loaded.</div>';
       for (const button of $('geometryList').querySelectorAll('button[data-geometry]')) {
         button.addEventListener('click', () => selectGeometryItem(button.dataset.geometry));
       }
+      updateGeometrySummary();
     }
 
     function pointFromGeometry(item) {
@@ -2758,6 +2911,102 @@ INDEX_HTML = r"""<!doctype html>
         { draggable: true }
       ).addTo(state.map);
       state.map.setView([point.latitude, point.longitude], 18);
+    }
+
+    function clearMarker() {
+      if (state.marker && state.map) state.map.removeLayer(state.marker);
+      state.marker = null;
+    }
+
+    function overviewPopup(item) {
+      const lead = item.lead;
+      const counts = (lead.occupancy_data || [])
+        .map((count) => `${count.count} ${count.group_type}`)
+        .join(', ');
+      return `<strong>${lead.location.facility_name}</strong><br>` +
+        `${lead.location.city_or_region}, ${lead.location.country}<br>` +
+        `${geometryRoundLabel(item)}<br>${counts}`;
+    }
+
+    function clearSampleExtent() {
+      initMap();
+      if (state.overviewPointLayer) state.overviewPointLayer.clearLayers();
+      if (state.overviewFootprintLayer) state.overviewFootprintLayer.clearLayers();
+      if (state.overviewExtentLayer) state.overviewExtentLayer.clearLayers();
+      state.overviewBounds = null;
+      state.sampleExtentVisible = false;
+      updateGeometrySummary();
+      setGeometryStatus('Sample extent cleared.', 'ok');
+    }
+
+    function renderSampleExtent(fit = false) {
+      initMap();
+      if (!state.map) return;
+      state.sampleExtentVisible = true;
+      state.overviewPointLayer.clearLayers();
+      state.overviewFootprintLayer.clearLayers();
+      state.overviewExtentLayer.clearLayers();
+      const bounds = L.latLngBounds([]);
+      let mapped = 0;
+      for (const item of state.geometryItems) {
+        const color = geometryColor(item);
+        const point = pointFromGeometry(item);
+        if (point) {
+          const marker = L.circleMarker([point.latitude, point.longitude], {
+            radius: 7,
+            color,
+            fillColor: color,
+            fillOpacity: 0.8,
+            weight: 2
+          });
+          marker.bindPopup(overviewPopup(item));
+          marker.on('click', () => selectGeometryItem(item.item_id));
+          marker.addTo(state.overviewPointLayer);
+          bounds.extend([point.latitude, point.longitude]);
+          mapped += 1;
+        }
+        const polygon = polygonFromGeometry(item);
+        if (polygon) {
+          const footprint = L.geoJSON(polygon, {
+            style: {
+              color,
+              fillColor: color,
+              fillOpacity: 0.16,
+              weight: 2
+            }
+          });
+          footprint.bindPopup(overviewPopup(item));
+          footprint.on('click', () => selectGeometryItem(item.item_id));
+          footprint.addTo(state.overviewFootprintLayer);
+          const footprintBounds = footprint.getBounds();
+          if (footprintBounds.isValid()) bounds.extend(footprintBounds);
+          mapped += 1;
+        }
+      }
+      if (!bounds.isValid()) {
+        state.overviewBounds = null;
+        updateGeometrySummary();
+        return setGeometryStatus('No geocoded observations are available for an extent.', 'error');
+      }
+      state.overviewBounds = bounds;
+      L.rectangle(bounds, {
+        color: '#dc2626',
+        fillOpacity: 0,
+        dashArray: '6 6',
+        weight: 2
+      }).addTo(state.overviewExtentLayer);
+      if (fit) state.map.fitBounds(bounds.pad(0.15));
+      updateGeometrySummary();
+      setGeometryStatus(`Sample extent shows ${mapped} mapped geometry layer(s).`, 'ok');
+    }
+
+    function zoomSampleExtent() {
+      if (!state.sampleExtentVisible || !state.overviewBounds) renderSampleExtent(false);
+      if (!state.overviewBounds || !state.overviewBounds.isValid()) {
+        return setGeometryStatus('No geocoded observations are available for an extent.', 'error');
+      }
+      state.map.fitBounds(state.overviewBounds.pad(0.15));
+      setGeometryStatus('Zoomed to sample extent.', 'ok');
     }
 
     function selectGeometryItem(itemId) {
@@ -2782,6 +3031,7 @@ INDEX_HTML = r"""<!doctype html>
       if (state.drawnItems) state.drawnItems.clearLayers();
       const point = pointFromGeometry(item);
       if (point) setMarker(point);
+      else clearMarker();
       const polygon = polygonFromGeometry(item);
       if (polygon && state.drawnItems) {
         const layer = L.geoJSON(polygon).getLayers()[0];
@@ -2798,7 +3048,13 @@ INDEX_HTML = r"""<!doctype html>
       state.selectedGeometryItemId = state.geometryItems[0]?.item_id || null;
       renderGeometryList();
       if (state.selectedGeometryItemId) selectGeometryItem(state.selectedGeometryItemId);
+      else {
+        clearMarker();
+        if (state.drawnItems) state.drawnItems.clearLayers();
+        $('geometryDetail').value = '';
+      }
       setGeometryStatus(`Loaded ${state.geometryItems.length} QAQC-approved observation(s).`, 'ok');
+      if (state.sampleExtentVisible) renderSampleExtent(false);
     }
 
     async function loadAugmentedSampleGeometry() {
@@ -2809,10 +3065,16 @@ INDEX_HTML = r"""<!doctype html>
       state.selectedGeometryItemId = state.geometryItems[0]?.item_id || null;
       renderGeometryList();
       if (state.selectedGeometryItemId) selectGeometryItem(state.selectedGeometryItemId);
+      else {
+        clearMarker();
+        if (state.drawnItems) state.drawnItems.clearLayers();
+        $('geometryDetail').value = '';
+      }
       setGeometryStatus(
         `Loaded ${state.geometryItems.length} augmented sample observation(s).`,
         'ok'
       );
+      if (state.sampleExtentVisible) renderSampleExtent(true);
     }
 
     function currentPointPayload(source = 'user') {
@@ -2844,6 +3106,7 @@ INDEX_HTML = r"""<!doctype html>
       item.geocode_query = query;
       if (payload.geometry.point) setMarker(payload.geometry.point);
       renderGeometryList();
+      if (state.sampleExtentVisible) renderSampleExtent(false);
       setGeometryStatus(
         payload.geocode_result ? 'Geocode placed a point.' : 'No geocode result.',
         'ok'
@@ -2889,6 +3152,7 @@ INDEX_HTML = r"""<!doctype html>
       item.geometry_status = payload.geometry.geometry_status;
       item.area_m2 = payload.geometry.area_m2;
       renderGeometryList();
+      if (state.sampleExtentVisible) renderSampleExtent(false);
       selectGeometryItem(item.item_id);
       setGeometryStatus(`Geometry saved: ${item.geometry_status}.`, 'ok');
     }
@@ -3029,6 +3293,9 @@ INDEX_HTML = r"""<!doctype html>
       $('skipGeometryButton').addEventListener('click', () => {
         saveGeometry('skipped').catch((error) => setGeometryStatus(error.message, 'error'));
       });
+      $('showSampleExtentButton').addEventListener('click', () => renderSampleExtent(true));
+      $('zoomSampleExtentButton').addEventListener('click', zoomSampleExtent);
+      $('clearSampleExtentButton').addEventListener('click', clearSampleExtent);
       $('downloadVerifiedJsonButton').addEventListener('click', () => downloadExport('json'));
       $('downloadVerifiedCsvButton').addEventListener('click', () => downloadExport('csv'));
       $('downloadFootprintsButton').addEventListener('click', downloadFootprints);

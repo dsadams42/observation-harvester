@@ -59,6 +59,26 @@ QAQC_PAYLOAD = [
     }
 ]
 
+ADDRESS_PAYLOAD = [
+    {
+        "lead_index": 0,
+        "item_id": "placeholder-0",
+        "facility_name": "Example Warehouse",
+        "formatted_address": "100 Industrial Drive, Nashville, TN, US",
+        "address_line1": "100 Industrial Drive",
+        "address_line2": None,
+        "city_or_region": "Nashville",
+        "state_or_province": "TN",
+        "postal_code": None,
+        "country": "US",
+        "address_source_url": "https://example.test/warehouse",
+        "address_evidence_quote": "Example Warehouse is located at 100 Industrial Drive.",
+        "confidence": "high",
+        "status": "found",
+        "review_notes": "Official address page matches the harvested facility.",
+    }
+]
+
 
 def successful_runner(
     command: Sequence[str],
@@ -66,7 +86,19 @@ def successful_runner(
     cwd: Path,
 ) -> subprocess.CompletedProcess[str]:
     output_path = Path(command[command.index("-o") + 1])
-    payload = QAQC_PAYLOAD if "Occupancy Lead QAQC Verification" in prompt else LEAD_PAYLOAD
+    if "Facility Address Enrichment" in prompt:
+        item_id = "placeholder-0"
+        try:
+            records_text = prompt.split("## Input Records", 1)[1].strip()
+            records = json.loads(records_text)
+            item_id = records[0]["item_id"]
+        except (IndexError, KeyError, ValueError, json.JSONDecodeError):
+            pass
+        payload = [{**ADDRESS_PAYLOAD[0], "item_id": item_id}]
+    elif "Occupancy Lead QAQC Verification" in prompt:
+        payload = QAQC_PAYLOAD
+    else:
+        payload = LEAD_PAYLOAD
     output_path.write_text(json.dumps(payload), encoding="utf-8")
     assert "Tennessee" in prompt
     return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
@@ -96,22 +128,30 @@ def test_index_page_contains_local_app_controls(tmp_path: Path) -> None:
     assert "Copy JSON" in response.text
     assert "Copy QAQC Prompt" in response.text
     assert "Run QAQC" in response.text
+    assert "Run Address Enrichment" in response.text
     assert "Download Verified CSV" in response.text
     assert "Geometry Review" in response.text
     assert "leaflet.draw" in response.text
     assert "Load Approved" in response.text
+    assert "Manual Address Search" in response.text
+    assert "Search Address" in response.text
     assert "Save Footprint" in response.text
     assert "Download Footprints GeoJSON" in response.text
     assert "Clear All" in response.text
     assert "Agent Activity" in response.text
     assert "Cancel Run" in response.text
     assert "Exit Application" in response.text
+    assert "Theme" in response.text
+    assert "observationHarvesterTheme" in response.text
+    assert "data-theme" in response.text
     assert "/api/runs/${runId}/log" in response.text
     assert "/api/runs/${state.currentRunId}/status" in response.text
     assert "/api/runs/${state.currentRunId}/cancel" in response.text
     assert "/api/runs/${state.currentRunId}/qaqc-prompt" in response.text
     assert "/api/runs/${state.currentRunId}/qaqc-run" in response.text
     assert "/api/runs/${state.currentRunId}/qaqc-reviews" in response.text
+    assert "/api/runs/${state.currentRunId}/address-run" in response.text
+    assert "/api/runs/${state.currentRunId}/address-results" in response.text
     assert "/api/runs/${state.currentRunId}/geometry-items" in response.text
     assert "/api/geometry/geocode" in response.text
     assert "/api/runs/${state.currentRunId}/export.verified.${format}" in response.text
@@ -275,6 +315,78 @@ def test_qaqc_run_endpoint_verifies_single_child_run(tmp_path: Path) -> None:
     assert reviews.json()["reviews"][0]["verification_status"] == "verified"
 
 
+def test_address_run_endpoint_enriches_qaqc_approved_leads(tmp_path: Path) -> None:
+    client = TestClient(create_app(workspace=tmp_path, runner=successful_runner, background=False))
+    created = client.post(
+        "/api/harvest/run",
+        json={
+            "country": "US",
+            "locality": "Tennessee",
+            "profiles": "commercial_business",
+            "profile": "factories_warehouses",
+            "target": 5,
+        },
+    ).json()
+    run_id = created["manifest"]["run_id"]
+    client.post(f"/api/runs/{run_id}/qaqc-run")
+
+    address = client.post(f"/api/runs/{run_id}/address-run")
+    results = client.get(f"/api/runs/{run_id}/address-results")
+    verified = client.get(f"/api/runs/{run_id}/verified-leads")
+
+    assert address.status_code == 200
+    assert address.json()["address"]["summary"]["completed_count"] == 1
+    assert address.json()["address"]["summary"]["result_count"] == 1
+    assert (tmp_path / f"address_runs/{run_id}-address.json").is_file()
+    assert results.json()["result_count"] == 1
+    assert results.json()["results"][0]["status"] == "found"
+    assert verified.json()["items"][0]["address_enrichment"]["formatted_address"].startswith("100")
+
+
+def test_geometry_geocode_prefers_enriched_address(tmp_path: Path) -> None:
+    def geocoder(query: str) -> dict[str, object]:
+        assert query == "100 Industrial Drive, Nashville, TN, US"
+        return {
+            "display_name": query,
+            "latitude": 36.0,
+            "longitude": -86.0,
+            "provider": "mock",
+            "query": query,
+        }
+
+    client = TestClient(
+        create_app(
+            workspace=tmp_path,
+            runner=successful_runner,
+            geocoder=geocoder,
+            background=False,
+        )
+    )
+    created = client.post(
+        "/api/harvest/run",
+        json={
+            "country": "US",
+            "locality": "Tennessee",
+            "profiles": "commercial_business",
+            "profile": "factories_warehouses",
+            "target": 5,
+        },
+    ).json()
+    run_id = created["manifest"]["run_id"]
+    client.post(f"/api/runs/{run_id}/qaqc-run")
+    client.post(f"/api/runs/{run_id}/address-run")
+    item = client.get(f"/api/runs/{run_id}/geometry-items").json()["items"][0]
+
+    geocoded = client.post(
+        "/api/geometry/geocode",
+        json={"item_id": item["item_id"], "query": item["geocode_query"]},
+    )
+
+    assert item["geocode_query"] == "100 Industrial Drive, Nashville, TN, US"
+    assert item["address_status"] == "found"
+    assert geocoded.json()["geometry"]["point"]["latitude"] == 36.0
+
+
 def test_geometry_review_endpoints_and_verified_exports(tmp_path: Path) -> None:
     def geocoder(query: str) -> dict[str, object]:
         assert "Example Warehouse" in query
@@ -390,6 +502,31 @@ def test_qaqc_run_endpoint_fans_out_for_campaign_parent(tmp_path: Path) -> None:
     assert verified.json()["item_count"] == 2
 
 
+def test_address_run_endpoint_fans_out_for_campaign_parent(tmp_path: Path) -> None:
+    client = TestClient(create_app(workspace=tmp_path, runner=successful_runner, background=False))
+    created = client.post(
+        "/api/harvest/campaign-run",
+        json={
+            "country": "US",
+            "localities": ["Tennessee"],
+            "facility_types": ["schools", "manufacturing"],
+            "target": 3,
+        },
+    ).json()
+    campaign_id = created["manifest"]["campaign_id"]
+    client.post(f"/api/runs/{campaign_id}/qaqc-run")
+
+    address = client.post(f"/api/runs/{campaign_id}/address-run")
+    results = client.get(f"/api/runs/{campaign_id}/address-results")
+
+    assert address.status_code == 200
+    assert address.json()["address"]["summary"]["planned_count"] == 2
+    assert address.json()["address"]["summary"]["completed_count"] == 2
+    assert address.json()["address"]["summary"]["result_count"] == 2
+    assert results.json()["result_count"] == 2
+    assert len(results.json()["child_results"]) == 2
+
+
 def test_run_log_includes_qaqc_child_subprocess_logs(tmp_path: Path) -> None:
     client = TestClient(create_app(workspace=tmp_path, runner=successful_runner, background=False))
     created = client.post(
@@ -448,6 +585,7 @@ def test_clear_runs_endpoint_removes_history_without_promoted_runs_or_exports(
     ).json()
     run_id = created["manifest"]["run_id"]
     client.post(f"/api/runs/{run_id}/qaqc-run")
+    client.post(f"/api/runs/{run_id}/address-run")
     geometry_file = tmp_path / f"geometry_reviews/{run_id}.json"
     geometry_file.parent.mkdir()
     geometry_file.write_text("[]", encoding="utf-8")
@@ -465,6 +603,7 @@ def test_clear_runs_endpoint_removes_history_without_promoted_runs_or_exports(
     assert not any((tmp_path / "lead_runs").glob("*.json"))
     assert not any((tmp_path / "harvest_logs").glob("*.log"))
     assert not any((tmp_path / "qaqc_runs").glob("*.json"))
+    assert not any((tmp_path / "address_runs").glob("*.json"))
     assert not any((tmp_path / "work").glob("*.md"))
     assert geometry_file.is_file()
     assert Path(promoted["run_file"]).is_file()

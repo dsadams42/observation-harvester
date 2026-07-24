@@ -12,6 +12,7 @@ dist/
 build/
 batches/
 exports/
+address_runs/
 geocode_cache/
 geometry_reviews/
 harvest_runs/

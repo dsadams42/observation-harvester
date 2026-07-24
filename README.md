@@ -76,9 +76,13 @@ python -m pdt_observer app
 
 The first screen is the tool itself: enter a country, optional region/locality, facility type,
 optional subtype, and target count. The app writes the same runtime artifacts as the CLI:
-`work/`, `lead_runs/`, `harvest_runs/`, `harvest_logs/`, `qaqc_runs/`, `geometry_reviews/`,
-`geocode_cache/`, `exports/`, and `runs/`. Results are displayed as copyable JSON, with
+`work/`, `lead_runs/`, `harvest_runs/`, `harvest_logs/`, `qaqc_runs/`, `address_runs/`,
+`geometry_reviews/`, `geocode_cache/`, `exports/`, and `runs/`. Results are displayed as
+copyable JSON, with
 QAQC-gated CSV/JSON export buttons.
+
+The header includes a Light/Dark/System theme selector. The preference is stored in the browser
+only, so it does not change project files or app configuration.
 
 The app includes an Agent Activity panel while a harvest runs. It polls the run manifest and log
 file so the user can see prompt rendering, Codex launch, validation, completion, failure, or
@@ -88,17 +92,23 @@ does not kill unrelated Python or Codex processes elsewhere on the machine.
 
 The Recent Runs panel can reopen completed runs. **Clear All** removes generated harvest history
 from `harvest_runs/`, `harvest_logs/`, `lead_runs/`, `qaqc_runs/`, and generated `work/` prompts.
-It does not delete promoted observations in `runs/`, exported files in `exports/`, profiles, or
-source code. The app refuses to clear history while it is tracking an active Codex harvest or QAQC
-process.
+It also removes generated address-enrichment outputs from `address_runs/`. It does not delete
+promoted observations in `runs/`, exported files in `exports/`, profiles, geometry reviews, or
+source code. The app refuses to clear history while it is tracking an active Codex harvest, QAQC,
+or address-enrichment process.
 
 Use **Run QAQC** after selecting a completed run. For a single child run, the app launches one
 Codex verifier agent. For a batch or campaign parent, it launches one verifier agent per child
 facility-type run and displays the combined QAQC review JSON when the pass finishes.
 
-Use **Geometry Review** after QAQC. **Load Approved** shows only observations where QAQC returned
-`verification_status: verified` and `recommended_action: keep`. Select an observation, geocode its
-facility/address into a point, adjust the point if needed, draw or edit one building footprint
+Use **Run Address Enrichment** after QAQC when you want a second agent to search for precise
+facility addresses before mapping. For batch or campaign parents, the app launches one address
+agent per child facility-type run and stores results separately under `address_runs/`.
+
+Use **Geometry Review** after QAQC, ideally after address enrichment. **Load Approved** shows only
+observations where QAQC returned `verification_status: verified` and `recommended_action: keep`.
+Select an observation, geocode its enriched address or harvested facility/address into a point,
+manually search an address when needed, adjust the point, draw or edit one building footprint
 polygon on the Leaflet map, and save the footprint. Geometry review files are durable user work and
 are not removed by Clear All. Verified downloads in the app are QAQC-gated, and footprint GeoJSON
 includes only approved observations with saved polygons.
@@ -269,6 +279,19 @@ that review output:
 python -m pdt_observer leads qaqc-validate qaqc_runs/us-tennessee-factories-qaqc.json --pretty
 ```
 
+Generate an address-enrichment prompt for QAQC-approved leads:
+
+```powershell
+python -m pdt_observer leads address-prompt lead_runs/us-tennessee-factories.json --qaqc qaqc_runs/us-tennessee-factories-qaqc.json --output work/us-tennessee-factories-address.md
+```
+
+Run that prompt through Codex CLI or Codex chat with web search, or use **Run Address Enrichment**
+in the local browser app. Validate the returned address review output:
+
+```powershell
+python -m pdt_observer leads address-validate address_runs/us-tennessee-factories-address.json --pretty
+```
+
 Promote a promising lead into a draft strict run:
 
 ```powershell
@@ -279,10 +302,11 @@ Use QAQC results to choose whether each lead should be kept, reviewed, rejected,
 Promoted runs are intentionally marked `review` until exact source text, exact supporting quote,
 and georeference details are completed well enough for strict validation.
 
-In the local browser app, geometry review can turn verified leads into footprint exports:
+In the local browser app, geometry review can turn verified and optionally address-enriched leads
+into footprint exports:
 
 ```text
-Load Approved -> Geocode -> adjust point -> draw footprint -> Save Footprint
+Run QAQC -> Run Address Enrichment -> Load Approved -> Geocode/Search Address -> adjust point -> draw footprint -> Save Footprint
 ```
 
 The app uses user-triggered Nominatim geocoding with a local cache under `geocode_cache/`, and a
@@ -342,11 +366,18 @@ python -m pdt_observer leads qaqc-prompt
 Codex/web-search QAQC agent
 python -m pdt_observer leads qaqc-validate
   |
+  |  optional second pass searches for precise facility addresses
+  v
+python -m pdt_observer leads address-prompt
+Codex/web-search address enrichment agent
+python -m pdt_observer leads address-validate
+  |
   |  app filters verified + keep observations for geometry review
+  |  and prefers enriched addresses when available
   v
 Leaflet Geometry Review
   |
-  |  user-triggered geocode creates a candidate point
+  |  user-triggered geocode/search creates a candidate point
   |  user adjusts point and draws one building footprint polygon
   v
 geometry_reviews/<child-run-id>.json

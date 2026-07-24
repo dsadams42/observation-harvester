@@ -187,6 +187,10 @@ def verified_csv(records: Sequence[dict[str, Any]]) -> str:
         "country",
         "counts",
         "qaqc_status",
+        "address_status",
+        "enriched_address",
+        "address_confidence",
+        "address_source_url",
         "geometry_status",
         "area_m2",
     )
@@ -195,6 +199,7 @@ def verified_csv(records: Sequence[dict[str, Any]]) -> str:
     for record in records:
         lead = record["lead"]
         review = record["qaqc_review"]
+        address = record.get("address_enrichment") or {}
         counts = "; ".join(
             f"{datum['count']} {datum['group_type']}" for datum in lead["occupancy_data"]
         )
@@ -209,6 +214,10 @@ def verified_csv(records: Sequence[dict[str, Any]]) -> str:
                 "country": lead["location"]["country"],
                 "counts": counts,
                 "qaqc_status": review["verification_status"],
+                "address_status": record.get("address_status", "not_run"),
+                "enriched_address": address.get("formatted_address", ""),
+                "address_confidence": address.get("confidence", ""),
+                "address_source_url": address.get("address_source_url", ""),
                 "geometry_status": record.get("geometry_status", GeometryStatus.NEEDS_REVIEW.value),
                 "area_m2": record.get("area_m2") or "",
             }
@@ -226,6 +235,7 @@ def footprints_geojson(records: Sequence[dict[str, Any]]) -> str:
         if not isinstance(polygon, dict):
             continue
         lead = record["lead"]
+        address = record.get("address_enrichment") or {}
         features.append(
             {
                 "type": "Feature",
@@ -236,6 +246,9 @@ def footprints_geojson(records: Sequence[dict[str, Any]]) -> str:
                     "lead_index": record["lead_index"],
                     "facility_name": lead["location"]["facility_name"],
                     "source_url": lead["source_url"],
+                    "address_status": record.get("address_status", "not_run"),
+                    "enriched_address": address.get("formatted_address"),
+                    "address_source_url": address.get("address_source_url"),
                     "area_m2": geometry.get("area_m2"),
                 },
             }

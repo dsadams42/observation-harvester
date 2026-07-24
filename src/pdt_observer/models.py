@@ -79,6 +79,20 @@ class GeometryStatus(StrEnum):
     SKIPPED = "skipped"
 
 
+class AddressEnrichmentStatus(StrEnum):
+    FOUND = "found"
+    AMBIGUOUS = "ambiguous"
+    NOT_FOUND = "not_found"
+    NEEDS_REVIEW = "needs_review"
+
+
+class AddressConfidence(StrEnum):
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+    UNKNOWN = "unknown"
+
+
 class HarvestRunStatus(StrEnum):
     PREPARED = "prepared"
     RUNNING = "running"
@@ -276,6 +290,24 @@ class LeadQaqcReview(StrictModel):
     count_checks: tuple[LeadQaqcCountCheck, ...] = ()
     supporting_quote: str | None = None
     recommended_action: LeadQaqcRecommendedAction
+    review_notes: str = Field(min_length=1)
+
+
+class AddressEnrichmentResult(StrictModel):
+    lead_index: int = Field(ge=0)
+    item_id: str = Field(min_length=1)
+    facility_name: str = Field(min_length=1)
+    formatted_address: str | None = None
+    address_line1: str | None = None
+    address_line2: str | None = None
+    city_or_region: str | None = None
+    state_or_province: str | None = None
+    postal_code: str | None = None
+    country: str | None = None
+    address_source_url: str | None = None
+    address_evidence_quote: str | None = None
+    confidence: AddressConfidence = AddressConfidence.UNKNOWN
+    status: AddressEnrichmentStatus = AddressEnrichmentStatus.NEEDS_REVIEW
     review_notes: str = Field(min_length=1)
 
 

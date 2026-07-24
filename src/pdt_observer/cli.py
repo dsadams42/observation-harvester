@@ -6,6 +6,12 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from pdt_observer.addresses import (
+    address_results_to_json,
+    approved_address_inputs_from_files,
+    load_address_results,
+    render_address_enrichment_prompt,
+)
 from pdt_observer.agent import load_task, run_agent_investigation, run_offline_demo
 from pdt_observer.config import MissingAPIKeyError
 from pdt_observer.harvest import run_harvest, run_harvest_batch, run_harvest_campaign
@@ -282,6 +288,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     leads_qaqc_validate.add_argument("qaqc_file", type=Path)
     leads_qaqc_validate.add_argument("--pretty", action="store_true")
+    leads_address_prompt = leads_subparsers.add_parser(
+        "address-prompt",
+        help="Render a Codex prompt that enriches QAQC-approved leads with facility addresses.",
+    )
+    leads_address_prompt.add_argument("lead_file", type=Path)
+    leads_address_prompt.add_argument("--qaqc", type=Path, required=True)
+    leads_address_prompt.add_argument("--output", type=Path)
+    leads_address_validate = leads_subparsers.add_parser(
+        "address-validate",
+        help="Validate an address enrichment JSON array.",
+    )
+    leads_address_validate.add_argument("address_file", type=Path)
+    leads_address_validate.add_argument("--pretty", action="store_true")
 
     investigate_api = subparsers.add_parser(
         "investigate-api",
@@ -544,6 +563,27 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(qaqc_reviews_to_json(reviews))
             else:
                 print(json.dumps({"valid": True, "review_count": len(reviews)}, indent=2))
+            return 0
+        if args.command == "leads" and args.leads_command == "address-prompt":
+            records = approved_address_inputs_from_files(
+                lead_path=args.lead_file,
+                qaqc_path=args.qaqc,
+            )
+            prompt = render_address_enrichment_prompt(
+                records,
+                source_label=f"{args.lead_file} + {args.qaqc}",
+            )
+            if args.output is not None:
+                args.output.parent.mkdir(parents=True, exist_ok=True)
+                args.output.write_text(prompt, encoding="utf-8")
+            print(prompt, end="" if prompt.endswith("\n") else "\n")
+            return 0
+        if args.command == "leads" and args.leads_command == "address-validate":
+            results = load_address_results(args.address_file)
+            if args.pretty:
+                print(address_results_to_json(results))
+            else:
+                print(json.dumps({"valid": True, "result_count": len(results)}, indent=2))
             return 0
         if args.command == "investigate-api":
             task = load_task(args.task_file)

@@ -7,6 +7,9 @@ import pytest
 from pydantic import ValidationError
 
 from pdt_observer.models import (
+    AddressConfidence,
+    AddressEnrichmentResult,
+    AddressEnrichmentStatus,
     BuildingTypeProfile,
     HarvestRunManifest,
     HarvestRunStatus,
@@ -115,6 +118,32 @@ def test_lead_qaqc_review_model_accepts_verification_fields() -> None:
     assert review.verification_status == LeadQaqcVerificationStatus.VERIFIED
     assert review.recommended_action == LeadQaqcRecommendedAction.KEEP
     assert review.count_checks[0].reported_count_found is True
+
+
+def test_address_enrichment_result_model_accepts_address_fields() -> None:
+    result = AddressEnrichmentResult.model_validate(
+        {
+            "lead_index": 0,
+            "item_id": "us-tn-schools-0",
+            "facility_name": "Example School",
+            "formatted_address": "10 Main Street, Nashville, TN, US",
+            "address_line1": "10 Main Street",
+            "address_line2": None,
+            "city_or_region": "Nashville",
+            "state_or_province": "TN",
+            "postal_code": "37201",
+            "country": "US",
+            "address_source_url": "https://example.test/school",
+            "address_evidence_quote": "Example School, 10 Main Street.",
+            "confidence": "high",
+            "status": "found",
+            "review_notes": "Official page address matches the facility.",
+        }
+    )
+
+    assert result.status == AddressEnrichmentStatus.FOUND
+    assert result.confidence == AddressConfidence.HIGH
+    assert result.formatted_address is not None
 
 
 def test_harvest_run_manifest_model() -> None:

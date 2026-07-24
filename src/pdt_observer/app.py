@@ -19,6 +19,15 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from starlette.routing import Route
 
+from pdt_observer.addresses import (
+    address_output_path,
+    address_prompt_path,
+    address_results_payload,
+    approved_address_inputs,
+    load_address_results,
+    merge_address_results,
+    render_address_enrichment_prompt,
+)
 from pdt_observer.geometry import (
     Geocoder,
     NominatimGeocoder,
@@ -170,10 +179,13 @@ class ActiveCodexRegistry:
 
     def cancel(self, run_id: str) -> int:
         with self._lock:
+            parent_task_active = run_id in self._tasks
             matches = [
                 (active_id, process)
                 for active_id, process in self._processes.items()
-                if active_id == run_id or active_id.startswith(f"{run_id}-")
+                if parent_task_active
+                or active_id == run_id
+                or active_id.startswith(f"{run_id}-")
             ]
         for active_id, process in matches:
             append_harvest_log(self.root, active_id, "Cancellation requested.")
@@ -210,6 +222,7 @@ def _clear_runtime_history(root: Path) -> int:
         "harvest_logs": ("*.log",),
         "lead_runs": ("*.json",),
         "qaqc_runs": ("*.json",),
+        "address_runs": ("*.json",),
         "work": ("*.md",),
     }
     deleted_count = 0
@@ -247,6 +260,10 @@ def _qaqc_prompt_path(root: Path, run_id: str) -> Path:
 
 def _qaqc_output_path(root: Path, run_id: str) -> Path:
     return root / "qaqc_runs" / f"{_qaqc_id_for_run(run_id)}.json"
+
+
+def _address_id_for_run(run_id: str) -> str:
+    return f"{run_id}-address"
 
 
 def _load_run_manifest(root: Path, run_id: str) -> HarvestRunManifest:
@@ -505,6 +522,186 @@ def _run_qaqc_for_manifest(
     }
 
 
+def _run_address_for_child(
+    *,
+    root: Path,
+    run_id: str,
+    parent_id: str,
+    codex_bin: str,
+    runner: CodexRunner,
+) -> dict[str, Any]:
+    address_id = _address_id_for_run(run_id)
+    prompt_path = address_prompt_path(root, run_id)
+    output_path = address_output_path(root, run_id)
+    manifest = _load_run_manifest(root, run_id)
+    append_harvest_log(root, parent_id, f"Rendering address enrichment prompt for {run_id}.")
+    records = approved_address_inputs(root=root, manifest=manifest)
+    if not records:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text("[]", encoding="utf-8")
+        append_harvest_log(
+            root,
+            parent_id,
+            f"No QAQC-approved leads found for {run_id}; address enrichment skipped.",
+        )
+        return {
+            "run_id": run_id,
+            "address_id": address_id,
+            "status": "completed",
+            "prompt_path": str(prompt_path),
+            "address_path": str(output_path),
+            "result_count": 0,
+            "error_message": None,
+        }
+    prompt = render_address_enrichment_prompt(records, source_label=f"{run_id} QAQC-approved leads")
+    prompt_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    prompt_path.write_text(prompt, encoding="utf-8")
+    append_harvest_log(root, parent_id, f"Address prompt written to {prompt_path}.")
+
+    command = (
+        codex_bin,
+        "--search",
+        "exec",
+        "--sandbox",
+        "workspace-write",
+        "--cd",
+        str(root),
+        "-o",
+        str(output_path),
+        "-",
+    )
+    append_harvest_log(root, parent_id, f"Launching address enrichment agent for {run_id}.")
+    append_harvest_log(root, parent_id, f"Address command: {' '.join(command)}")
+    result = runner(command, prompt, root)
+    if result.stdout.strip():
+        append_harvest_log(
+            root,
+            parent_id,
+            f"Address stdout for {run_id}: {result.stdout.strip()}",
+        )
+    if result.stderr.strip():
+        append_harvest_log(
+            root,
+            parent_id,
+            f"Address stderr for {run_id}: {result.stderr.strip()}",
+        )
+    append_harvest_log(
+        root,
+        parent_id,
+        f"Address enrichment agent for {run_id} exited with {result.returncode}.",
+    )
+    if result.returncode < 0:
+        return {
+            "run_id": run_id,
+            "address_id": address_id,
+            "status": "cancelled",
+            "prompt_path": str(prompt_path),
+            "address_path": str(output_path),
+            "result_count": 0,
+            "error_message": "Address enrichment cancelled by user.",
+        }
+    if result.returncode != 0:
+        return {
+            "run_id": run_id,
+            "address_id": address_id,
+            "status": "failed",
+            "prompt_path": str(prompt_path),
+            "address_path": str(output_path),
+            "result_count": 0,
+            "error_message": result.stderr.strip() or result.stdout.strip(),
+        }
+    try:
+        results = load_address_results(output_path)
+    except Exception as exc:
+        append_harvest_log(
+            root,
+            parent_id,
+            f"Address validation failed for {run_id}: {exc}.",
+        )
+        return {
+            "run_id": run_id,
+            "address_id": address_id,
+            "status": "failed",
+            "prompt_path": str(prompt_path),
+            "address_path": str(output_path),
+            "result_count": 0,
+            "error_message": str(exc),
+        }
+    append_harvest_log(
+        root,
+        parent_id,
+        f"Address validation completed for {run_id}: {len(results)} result(s).",
+    )
+    return {
+        "run_id": run_id,
+        "address_id": address_id,
+        "status": "completed",
+        "prompt_path": str(prompt_path),
+        "address_path": str(output_path),
+        "result_count": len(results),
+        "error_message": None,
+    }
+
+
+def _run_address_for_manifest(
+    *,
+    root: Path,
+    manifest: Any,
+    codex_bin: str,
+    runner: CodexRunner,
+) -> dict[str, Any]:
+    parent_id = _manifest_identity(manifest)
+    child_run_ids = _manifest_child_run_ids(manifest)
+    append_harvest_log(
+        root,
+        parent_id,
+        f"Starting address enrichment for {len(child_run_ids)} child run(s).",
+    )
+    child_results: list[dict[str, Any]] = []
+    for child_run_id in child_run_ids:
+        child_result = _run_address_for_child(
+            root=root,
+            run_id=child_run_id,
+            parent_id=parent_id,
+            codex_bin=codex_bin,
+            runner=runner,
+        )
+        child_results.append(child_result)
+        append_harvest_log(
+            root,
+            parent_id,
+            f"Address child {child_run_id} finished as {child_result['status']}.",
+        )
+        if child_result["status"] == "cancelled":
+            break
+
+    completed_count = sum(1 for result in child_results if result["status"] == "completed")
+    failed_count = sum(1 for result in child_results if result["status"] == "failed")
+    cancelled_count = sum(1 for result in child_results if result["status"] == "cancelled")
+    result_count = sum(
+        result["result_count"]
+        for result in child_results
+        if isinstance(result["result_count"], int)
+    )
+    status = "cancelled" if cancelled_count else ("failed" if failed_count else "completed")
+    summary = {
+        "status": status,
+        "planned_count": len(child_run_ids),
+        "completed_count": completed_count,
+        "failed_count": failed_count,
+        "cancelled_count": cancelled_count,
+        "result_count": result_count,
+    }
+    append_harvest_log(root, parent_id, f"Address enrichment finished: {summary}.")
+    return {
+        "parent_id": parent_id,
+        "child_run_ids": child_run_ids,
+        "child_results": child_results,
+        "summary": summary,
+    }
+
+
 def _qaqc_reviews_payload(root: Path, child_run_ids: Sequence[str]) -> dict[str, Any]:
     child_reviews: list[dict[str, Any]] = []
     all_reviews: list[dict[str, Any]] = []
@@ -539,7 +736,7 @@ def _approved_records_for_manifest(root: Path, manifest: Any) -> tuple[dict[str,
 
 
 def _geometry_items_payload(root: Path, manifest: Any) -> dict[str, Any]:
-    records = _approved_records_for_manifest(root, manifest)
+    records = merge_address_results(root, _approved_records_for_manifest(root, manifest))
     items = tuple(merge_geometry_items(root, records))
     return {"item_count": len(items), "items": items}
 
@@ -547,7 +744,8 @@ def _geometry_items_payload(root: Path, manifest: Any) -> dict[str, Any]:
 def _verified_export_response(root: Path, run_id: str, *, output_format: str) -> Response:
     try:
         manifest = _load_any_manifest(root, run_id)
-        items = tuple(merge_geometry_items(root, _approved_records_for_manifest(root, manifest)))
+        records = merge_address_results(root, _approved_records_for_manifest(root, manifest))
+        items = tuple(merge_geometry_items(root, records))
     except FileNotFoundError as exc:
         return _json_error(str(exc), status_code=409)
     except ValueError as exc:
@@ -593,6 +791,10 @@ def _combined_log_text(root: Path, manifest: Any) -> str:
         text = _read_log_text(qaqc_log_path)
         if text:
             chunks.append(f"--- QAQC subprocess log: {child_run_id} ---\n{text.rstrip()}")
+        address_log_path = log_path_for_run(root, _address_id_for_run(child_run_id))
+        text = _read_log_text(address_log_path)
+        if text:
+            chunks.append(f"--- Address subprocess log: {child_run_id} ---\n{text.rstrip()}")
     return "\n".join(chunks) + ("\n" if chunks else "")
 
 
@@ -877,11 +1079,70 @@ def create_app(
         except ValueError as exc:
             return _json_error(str(exc), status_code=404)
 
+    async def run_address(request: Request) -> JSONResponse:
+        run_id = request.path_params["run_id"]
+        try:
+            manifest = _load_any_manifest(root, run_id)
+        except ValueError as exc:
+            return _json_error(str(exc), status_code=404)
+        identity = _manifest_identity(manifest)
+        if registry.is_active(identity):
+            return _json_error(f"Run already has active work: {identity}", status_code=409)
+
+        task = partial(
+            _run_address_for_manifest,
+            root=root,
+            manifest=manifest,
+            codex_bin=codex_bin,
+            runner=app_runner,
+        )
+        if background:
+            registry.mark_task_active(identity)
+
+            def background_task() -> None:
+                try:
+                    task()
+                except Exception as exc:
+                    append_harvest_log(root, identity, f"Address enrichment failed: {exc}.")
+                finally:
+                    registry.mark_task_inactive(identity)
+
+            executor.submit(background_task)
+            return JSONResponse(
+                {
+                    "started": True,
+                    "parent_id": identity,
+                    "child_run_ids": _manifest_child_run_ids(manifest),
+                    "manifest": manifest.model_dump(mode="json"),
+                }
+            )
+
+        try:
+            result = await run_in_threadpool(task)
+        except FileNotFoundError as exc:
+            return _json_error(str(exc), status_code=409)
+        return JSONResponse(
+            {
+                "started": False,
+                "parent_id": identity,
+                "manifest": manifest.model_dump(mode="json"),
+                "address": result,
+            }
+        )
+
+    async def run_address_results(request: Request) -> JSONResponse:
+        run_id = request.path_params["run_id"]
+        try:
+            manifest = _load_any_manifest(root, run_id)
+            return JSONResponse(address_results_payload(root, _manifest_child_run_ids(manifest)))
+        except ValueError as exc:
+            return _json_error(str(exc), status_code=404)
+
     async def verified_leads(request: Request) -> JSONResponse:
         run_id = request.path_params["run_id"]
         try:
             manifest = _load_any_manifest(root, run_id)
-            records = _approved_records_for_manifest(root, manifest)
+            records = merge_address_results(root, _approved_records_for_manifest(root, manifest))
             return JSONResponse({"item_count": len(records), "items": list(records)})
         except FileNotFoundError as exc:
             return _json_error(str(exc), status_code=409)
@@ -1007,6 +1268,8 @@ def create_app(
         Route("/api/runs/{run_id}/qaqc-prompt", run_qaqc_prompt),
         Route("/api/runs/{run_id}/qaqc-run", run_qaqc, methods=["POST"]),
         Route("/api/runs/{run_id}/qaqc-reviews", run_qaqc_reviews),
+        Route("/api/runs/{run_id}/address-run", run_address, methods=["POST"]),
+        Route("/api/runs/{run_id}/address-results", run_address_results),
         Route("/api/runs/{run_id}/verified-leads", verified_leads),
         Route("/api/runs/{run_id}/geometry-items", geometry_items),
         Route("/api/geometry/geocode", geometry_geocode, methods=["POST"]),
@@ -1084,6 +1347,12 @@ INDEX_HTML = r"""<!doctype html>
       color-scheme: light;
       --bg: #f7f8fa;
       --panel: #ffffff;
+      --panel-soft: #fbfcfd;
+      --input-bg: #ffffff;
+      --button-text: #ffffff;
+      --selected: #edf8fb;
+      --activity-bg: #111827;
+      --activity-text: #e5e7eb;
       --line: #d9dee7;
       --text: #1f2937;
       --muted: #5f6b7a;
@@ -1091,6 +1360,24 @@ INDEX_HTML = r"""<!doctype html>
       --accent-dark: #104d61;
       --danger: #a33a35;
       --ok: #216e4e;
+    }
+    html[data-theme="dark"] {
+      color-scheme: dark;
+      --bg: #111418;
+      --panel: #191f26;
+      --panel-soft: #151a20;
+      --input-bg: #111820;
+      --button-text: #ffffff;
+      --selected: #12313b;
+      --activity-bg: #070b10;
+      --activity-text: #d7dee8;
+      --line: #33404d;
+      --text: #e5ebf2;
+      --muted: #a6b1bf;
+      --accent: #4ca4c3;
+      --accent-dark: #6bb9d4;
+      --danger: #ee827c;
+      --ok: #65c18c;
     }
     * { box-sizing: border-box; }
     body {
@@ -1105,6 +1392,10 @@ INDEX_HTML = r"""<!doctype html>
       border-bottom: 1px solid var(--line);
       background: var(--panel);
       padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
     }
     h1 {
       margin: 0;
@@ -1144,7 +1435,7 @@ INDEX_HTML = r"""<!doctype html>
       width: 100%;
       border: 1px solid var(--line);
       border-radius: 6px;
-      background: #fff;
+      background: var(--input-bg);
       color: var(--text);
       font: inherit;
       padding: 9px 10px;
@@ -1163,8 +1454,8 @@ INDEX_HTML = r"""<!doctype html>
     }
     textarea.activity {
       min-height: 220px;
-      background: #111827;
-      color: #e5e7eb;
+      background: var(--activity-bg);
+      color: var(--activity-text);
     }
     select[multiple] {
       min-height: 116px;
@@ -1188,25 +1479,25 @@ INDEX_HTML = r"""<!doctype html>
     .mode button {
       border: 0;
       border-radius: 0;
-      background: #fff;
+      background: var(--input-bg);
       color: var(--muted);
       padding: 9px;
     }
     .mode button.active {
       background: var(--accent);
-      color: #fff;
+      color: var(--button-text);
     }
     button {
       border: 1px solid var(--accent);
       border-radius: 6px;
       background: var(--accent);
-      color: white;
+      color: var(--button-text);
       cursor: pointer;
       font-weight: 650;
       padding: 9px 12px;
     }
     button.secondary {
-      background: #fff;
+      background: var(--input-bg);
       color: var(--accent);
     }
     button:disabled {
@@ -1229,7 +1520,7 @@ INDEX_HTML = r"""<!doctype html>
       border: 1px solid var(--line);
       border-radius: 6px;
       padding: 10px;
-      background: #fbfcfd;
+      background: var(--panel-soft);
     }
     .metric span {
       display: block;
@@ -1258,7 +1549,7 @@ INDEX_HTML = r"""<!doctype html>
     .history button {
       width: 100%;
       text-align: left;
-      background: #fff;
+      background: var(--input-bg);
       color: var(--text);
       border-color: var(--line);
       margin-top: 6px;
@@ -1279,7 +1570,7 @@ INDEX_HTML = r"""<!doctype html>
     .geometry-list button {
       width: 100%;
       text-align: left;
-      background: #fff;
+      background: var(--input-bg);
       color: var(--text);
       border-color: var(--line);
       margin-top: 6px;
@@ -1287,7 +1578,16 @@ INDEX_HTML = r"""<!doctype html>
     }
     .geometry-list button.active {
       border-color: var(--accent);
-      background: #edf8fb;
+      background: var(--selected);
+    }
+    .theme-control {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 190px;
+    }
+    .theme-control label {
+      margin: 0;
     }
     .map {
       min-height: 520px;
@@ -1303,7 +1603,17 @@ INDEX_HTML = r"""<!doctype html>
   </style>
 </head>
 <body>
-  <header><h1>Observation Harvester</h1></header>
+  <header>
+    <h1>Observation Harvester</h1>
+    <div class="theme-control">
+      <label for="themeSelect">Theme</label>
+      <select id="themeSelect">
+        <option value="system">System</option>
+        <option value="light">Light</option>
+        <option value="dark">Dark</option>
+      </select>
+    </div>
+  </header>
   <main>
     <section>
       <h2>New Harvest</h2>
@@ -1380,6 +1690,9 @@ INDEX_HTML = r"""<!doctype html>
         <button id="copyButton" class="secondary" type="button">Copy JSON</button>
         <button id="copyQaqcButton" class="secondary" type="button">Copy QAQC Prompt</button>
         <button id="runQaqcButton" class="secondary" type="button">Run QAQC</button>
+        <button id="runAddressButton" class="secondary" type="button">
+          Run Address Enrichment
+        </button>
         <button id="downloadJsonButton" class="secondary" type="button">
           Download Verified JSON
         </button>
@@ -1412,6 +1725,7 @@ INDEX_HTML = r"""<!doctype html>
       <div class="actions">
         <button id="loadApprovedButton" class="secondary" type="button">Load Approved</button>
         <button id="geocodeButton" class="secondary" type="button">Geocode</button>
+        <button id="searchAddressButton" class="secondary" type="button">Search Address</button>
         <button id="useMapCenterButton" class="secondary" type="button">Use Map Center</button>
         <button id="saveFootprintButton" class="secondary" type="button">Save Footprint</button>
         <button id="skipGeometryButton" class="secondary" type="button">Skip</button>
@@ -1429,6 +1743,8 @@ INDEX_HTML = r"""<!doctype html>
       <div class="geometry-layout">
         <div>
           <div class="geometry-list" id="geometryList"></div>
+          <label for="manualAddress">Manual Address Search</label>
+          <input id="manualAddress" placeholder="Optional address or place search">
           <label for="geometryDetail">Selected Observation</label>
           <textarea
             id="geometryDetail"
@@ -1453,10 +1769,30 @@ INDEX_HTML = r"""<!doctype html>
       selectedGeometryItemId: null,
       map: null,
       drawnItems: null,
-      marker: null
+      marker: null,
+      themePreference: 'system'
     };
     const $ = (id) => document.getElementById(id);
     const terminalStatuses = ['completed', 'failed', 'cancelled'];
+
+    function effectiveTheme(preference) {
+      if (preference === 'light' || preference === 'dark') return preference;
+      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+
+    function applyTheme(preference) {
+      state.themePreference = preference;
+      document.documentElement.dataset.theme = effectiveTheme(preference);
+      $('themeSelect').value = preference;
+    }
+
+    function initTheme() {
+      const stored = localStorage.getItem('observationHarvesterTheme') || 'system';
+      applyTheme(stored);
+      window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+        if (state.themePreference === 'system') applyTheme('system');
+      });
+    }
 
     function setStatus(message, kind = '') {
       $('status').textContent = message;
@@ -1642,6 +1978,30 @@ INDEX_HTML = r"""<!doctype html>
         }
         return;
       }
+      if (state.pollPurpose === 'address') {
+        if (payload.active) {
+          const stamp = new Date().toLocaleTimeString();
+          const heartbeat = `\\n[local ${stamp}] Address enrichment still running...\\n`;
+          if (!$('activityOutput').value.endsWith(heartbeat)) {
+            $('activityOutput').value += heartbeat;
+            $('activityOutput').scrollTop = $('activityOutput').scrollHeight;
+          }
+          setStatus('Address enrichment still running. Watching agent activity...', 'ok');
+        }
+        if (!payload.active) {
+          stopPolling();
+          const results = await api(`/api/runs/${state.currentRunId}/address-results`);
+          $('jsonOutput').value = JSON.stringify(results, null, 2);
+          $('metricStatus').textContent = 'address complete';
+          $('metricLeads').textContent = results.result_count || 0;
+          $('metricFacilityLabel').textContent = 'Children';
+          $('metricAggregateLabel').textContent = 'Addresses';
+          $('metricFacility').textContent = (results.child_results || []).length;
+          $('metricAggregate').textContent = results.result_count || 0;
+          setStatus('Address enrichment complete.', 'ok');
+        }
+        return;
+      }
       if (isTerminal(manifest.status)) {
         stopPolling();
         setStatus(
@@ -1779,6 +2139,26 @@ INDEX_HTML = r"""<!doctype html>
       }
     }
 
+    async function runAddressEnrichment() {
+      if (!state.currentRunId) return setStatus('No run selected.', 'error');
+      const button = $('runAddressButton');
+      button.disabled = true;
+      setStatus('Starting address enrichment agent run...');
+      try {
+        const payload = await api(`/api/runs/${state.currentRunId}/address-run`, {
+          method: 'POST'
+        });
+        $('activityOutput').value +=
+          `\\nAddress enrichment started for ${payload.child_run_ids.length} child run(s).\\n`;
+        setStatus('Address enrichment started. Watching agent activity...', 'ok');
+        startPolling(state.currentRunId, 'address');
+      } catch (error) {
+        setStatus(error.message, 'error');
+      } finally {
+        button.disabled = false;
+      }
+    }
+
     function setGeometryStatus(message, kind = '') {
       $('geometryStatus').textContent = message;
       $('geometryStatus').className = `status ${kind}`;
@@ -1827,7 +2207,8 @@ INDEX_HTML = r"""<!doctype html>
     function renderGeometryList() {
       $('geometryList').innerHTML = state.geometryItems.map((item) => {
         const lead = item.lead;
-        const label = `${lead.location.facility_name} - ${item.geometry_status}`;
+        const addressStatus = item.address_status || 'not_run';
+        const label = `${lead.location.facility_name} - ${addressStatus} - ${item.geometry_status}`;
         const active = item.item_id === state.selectedGeometryItemId ? ' active' : '';
         return `<button type="button" class="${active}" data-geometry="${item.item_id}">
           ${label}<br>${lead.location.city_or_region}, ${lead.location.country}
@@ -1865,13 +2246,16 @@ INDEX_HTML = r"""<!doctype html>
       renderGeometryList();
       const item = selectedGeometryItem();
       if (!item) return;
+      $('manualAddress').value = '';
       $('geometryDetail').value = JSON.stringify({
         item_id: item.item_id,
         facility: item.lead.location.facility_name,
         query: item.geocode_query,
+        enriched_address: item.address_enrichment,
         source_url: item.lead.source_url,
         counts: item.lead.occupancy_data,
         qaqc: item.qaqc_review.review_notes,
+        address_status: item.address_status,
         geometry_status: item.geometry_status,
         area_m2: item.area_m2
       }, null, 2);
@@ -1910,23 +2294,32 @@ INDEX_HTML = r"""<!doctype html>
       return layers[0].toGeoJSON().geometry;
     }
 
-    async function geocodeSelected() {
+    async function geocodeSelected(queryOverride = null) {
       const item = selectedGeometryItem();
       if (!item) return setGeometryStatus('No approved observation selected.', 'error');
+      const query = (queryOverride || item.geocode_query || '').trim();
+      if (!query) return setGeometryStatus('No address query available.', 'error');
       const payload = await api('/api/geometry/geocode', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ item_id: item.item_id, query: item.geocode_query })
+        body: JSON.stringify({ item_id: item.item_id, query })
       });
       item.geometry = payload.geometry;
       item.geometry_status = payload.geometry.geometry_status;
       item.area_m2 = payload.geometry.area_m2;
+      item.geocode_query = query;
       if (payload.geometry.point) setMarker(payload.geometry.point);
       renderGeometryList();
       setGeometryStatus(
         payload.geocode_result ? 'Geocode placed a point.' : 'No geocode result.',
         'ok'
       );
+    }
+
+    async function searchManualAddress() {
+      const query = $('manualAddress').value.trim();
+      if (!query) return setGeometryStatus('Enter an address or place to search.', 'error');
+      await geocodeSelected(query);
     }
 
     function useMapCenter() {
@@ -2011,10 +2404,15 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     async function boot() {
+      initTheme();
       const payload = await api('/api/profiles');
       state.profiles = payload.profile_sets;
       renderProfileSets();
       await loadRuns();
+      $('themeSelect').addEventListener('change', () => {
+        localStorage.setItem('observationHarvesterTheme', $('themeSelect').value);
+        applyTheme($('themeSelect').value);
+      });
       $('profileSet').addEventListener('change', renderProfiles);
       $('singleMode').addEventListener('click', () => setMode('single'));
       $('batchMode').addEventListener('click', () => setMode('batch'));
@@ -2032,15 +2430,17 @@ INDEX_HTML = r"""<!doctype html>
       });
       $('copyQaqcButton').addEventListener('click', copyQaqcPrompt);
       $('runQaqcButton').addEventListener('click', runQaqc);
-      $('downloadJsonButton').addEventListener('click', () => {
-        downloadText('observation-harvest.json', $('jsonOutput').value, 'application/json');
-      });
+      $('runAddressButton').addEventListener('click', runAddressEnrichment);
+      $('downloadJsonButton').addEventListener('click', () => downloadExport('json'));
       $('downloadCsvButton').addEventListener('click', () => downloadExport('csv'));
       $('loadApprovedButton').addEventListener('click', () => {
         loadApprovedGeometry().catch((error) => setGeometryStatus(error.message, 'error'));
       });
       $('geocodeButton').addEventListener('click', () => {
         geocodeSelected().catch((error) => setGeometryStatus(error.message, 'error'));
+      });
+      $('searchAddressButton').addEventListener('click', () => {
+        searchManualAddress().catch((error) => setGeometryStatus(error.message, 'error'));
       });
       $('useMapCenterButton').addEventListener('click', useMapCenter);
       $('saveFootprintButton').addEventListener('click', () => {

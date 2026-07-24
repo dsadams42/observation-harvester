@@ -655,6 +655,153 @@ def test_cli_leads_qaqc_validate_rejects_invalid_status(tmp_path, capsys) -> Non
     assert "mostly_ok" in captured.err
 
 
+def test_cli_leads_address_prompt_writes_enrichment_prompt(tmp_path, capsys) -> None:
+    lead_file = tmp_path / "lead_runs/leads.json"
+    qaqc_file = tmp_path / "qaqc_runs/leads-qaqc.json"
+    output = tmp_path / "work/leads-address.md"
+    lead_file.parent.mkdir()
+    qaqc_file.parent.mkdir()
+    lead_file.write_text(
+        json.dumps(
+            [
+                {
+                    "is_valid_occupancy_report": True,
+                    "source_url": "https://example.test/story",
+                    "source_title": "Workers evacuated",
+                    "source_type": "news",
+                    "evidence_quote": "Officials said 12 workers were evacuated.",
+                    "incident_date": "2026-01-02",
+                    "incident_time": "03:30 PM",
+                    "occupancy_data": [{"count": 12, "group_type": "workers"}],
+                    "location": {
+                        "facility_name": "Example Warehouse",
+                        "specific_address_or_landmark": "Industrial Drive",
+                        "city_or_region": "Tennessee",
+                        "country": "US",
+                    },
+                    "confidence": "high",
+                    "is_facility_level": True,
+                    "is_regional_aggregate": False,
+                    "review_flags": [],
+                    "review_notes": None,
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    qaqc_file.write_text(
+        json.dumps(
+            [
+                {
+                    "lead_index": 0,
+                    "source_url": "https://example.test/story",
+                    "verification_status": "verified",
+                    "source_reachable": True,
+                    "facility_match": True,
+                    "location_match": True,
+                    "count_checks": [],
+                    "supporting_quote": "Officials said 12 workers were evacuated.",
+                    "recommended_action": "keep",
+                    "review_notes": "Count, facility, and location are supported.",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = main(
+        [
+            "leads",
+            "address-prompt",
+            str(lead_file),
+            "--qaqc",
+            str(qaqc_file),
+            "--output",
+            str(output),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert output.is_file()
+    assert "Facility Address Enrichment" in captured.out
+    assert "Example Warehouse" in captured.out
+    assert "https://example.test/story" in captured.out
+    assert "Do not invent an address" in captured.out
+    assert '"status": "found"' in captured.out
+
+
+def test_cli_leads_address_validate_accepts_valid_result(tmp_path, capsys) -> None:
+    address_file = tmp_path / "address_runs/leads-address.json"
+    address_file.parent.mkdir()
+    address_file.write_text(
+        json.dumps(
+            [
+                {
+                    "lead_index": 0,
+                    "item_id": "leads-0",
+                    "facility_name": "Example Warehouse",
+                    "formatted_address": "100 Industrial Drive, Nashville, TN, US",
+                    "address_line1": "100 Industrial Drive",
+                    "address_line2": None,
+                    "city_or_region": "Nashville",
+                    "state_or_province": "TN",
+                    "postal_code": None,
+                    "country": "US",
+                    "address_source_url": "https://example.test/warehouse",
+                    "address_evidence_quote": (
+                        "Example Warehouse is located at 100 Industrial Drive."
+                    ),
+                    "confidence": "high",
+                    "status": "found",
+                    "review_notes": "Official address page matches the facility.",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = main(["leads", "address-validate", str(address_file)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert json.loads(captured.out) == {"valid": True, "result_count": 1}
+
+
+def test_cli_leads_address_validate_rejects_invalid_status(tmp_path, capsys) -> None:
+    address_file = tmp_path / "bad-address.json"
+    address_file.write_text(
+        json.dumps(
+            [
+                {
+                    "lead_index": 0,
+                    "item_id": "leads-0",
+                    "facility_name": "Example Warehouse",
+                    "formatted_address": None,
+                    "address_line1": None,
+                    "address_line2": None,
+                    "city_or_region": "Nashville",
+                    "state_or_province": "TN",
+                    "postal_code": None,
+                    "country": "US",
+                    "address_source_url": None,
+                    "address_evidence_quote": None,
+                    "confidence": "unknown",
+                    "status": "sort_of",
+                    "review_notes": "Bad status should fail.",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = main(["leads", "address-validate", str(address_file)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "sort_of" in captured.err
+
+
 def test_cli_work_claim_by_locality_and_exact_id(tmp_path, capsys) -> None:
     main(
         [

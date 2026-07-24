@@ -96,7 +96,12 @@ def test_index_page_contains_local_app_controls(tmp_path: Path) -> None:
     assert "Copy JSON" in response.text
     assert "Copy QAQC Prompt" in response.text
     assert "Run QAQC" in response.text
-    assert "Download CSV" in response.text
+    assert "Download Verified CSV" in response.text
+    assert "Geometry Review" in response.text
+    assert "leaflet.draw" in response.text
+    assert "Load Approved" in response.text
+    assert "Save Footprint" in response.text
+    assert "Download Footprints GeoJSON" in response.text
     assert "Clear All" in response.text
     assert "Agent Activity" in response.text
     assert "Cancel Run" in response.text
@@ -107,6 +112,11 @@ def test_index_page_contains_local_app_controls(tmp_path: Path) -> None:
     assert "/api/runs/${state.currentRunId}/qaqc-prompt" in response.text
     assert "/api/runs/${state.currentRunId}/qaqc-run" in response.text
     assert "/api/runs/${state.currentRunId}/qaqc-reviews" in response.text
+    assert "/api/runs/${state.currentRunId}/geometry-items" in response.text
+    assert "/api/geometry/geocode" in response.text
+    assert "/api/runs/${state.currentRunId}/export.verified.${format}" in response.text
+    assert "/api/runs/${state.currentRunId}/export.footprints.geojson" in response.text
+    assert "QAQC still running" in response.text
     assert "/api/runs/clear" in response.text
     assert "/api/app/exit" in response.text
 
@@ -265,6 +275,92 @@ def test_qaqc_run_endpoint_verifies_single_child_run(tmp_path: Path) -> None:
     assert reviews.json()["reviews"][0]["verification_status"] == "verified"
 
 
+def test_geometry_review_endpoints_and_verified_exports(tmp_path: Path) -> None:
+    def geocoder(query: str) -> dict[str, object]:
+        assert "Example Warehouse" in query
+        return {
+            "display_name": "Example Warehouse, Tennessee",
+            "latitude": 36.0,
+            "longitude": -86.0,
+            "provider": "mock",
+            "query": query,
+        }
+
+    client = TestClient(
+        create_app(
+            workspace=tmp_path,
+            runner=successful_runner,
+            geocoder=geocoder,
+            background=False,
+        )
+    )
+    created = client.post(
+        "/api/harvest/run",
+        json={
+            "country": "US",
+            "locality": "Tennessee",
+            "profiles": "commercial_business",
+            "profile": "factories_warehouses",
+            "target": 5,
+        },
+    ).json()
+    run_id = created["manifest"]["run_id"]
+    client.post(f"/api/runs/{run_id}/qaqc-run")
+
+    verified = client.get(f"/api/runs/{run_id}/verified-leads")
+    geometry_items = client.get(f"/api/runs/{run_id}/geometry-items")
+    item = geometry_items.json()["items"][0]
+    geocoded = client.post(
+        "/api/geometry/geocode",
+        json={"item_id": item["item_id"], "query": item["geocode_query"]},
+    )
+    polygon = {
+        "type": "Polygon",
+        "coordinates": [
+            [[-86.0, 36.0], [-86.0, 36.001], [-85.999, 36.001], [-85.999, 36.0], [-86.0, 36.0]]
+        ],
+    }
+    saved = client.post(
+        f"/api/geometry/items/{item['item_id']}",
+        json={
+            "item_id": item["item_id"],
+            "geocode_query": item["geocode_query"],
+            "point": {"latitude": 36.0, "longitude": -86.0, "source": "user"},
+            "polygon_geojson": polygon,
+            "geometry_status": "footprint_drawn",
+            "geocode_result": geocoded.json()["geocode_result"],
+            "review_notes": "Traced from imagery.",
+        },
+    )
+    verified_json = client.get(f"/api/runs/{run_id}/export.verified.json")
+    verified_csv = client.get(f"/api/runs/{run_id}/export.verified.csv")
+    footprints = client.get(f"/api/runs/{run_id}/export.footprints.geojson")
+
+    assert verified.status_code == 200
+    assert verified.json()["item_count"] == 1
+    assert geometry_items.json()["items"][0]["geometry_status"] == "needs_review"
+    assert geocoded.json()["geometry"]["point"]["latitude"] == 36.0
+    assert saved.json()["geometry"]["geometry_status"] == "footprint_drawn"
+    assert saved.json()["geometry"]["area_m2"] > 0
+    assert "Example Warehouse" in verified_json.text
+    assert "footprint_drawn" in verified_csv.text
+    assert footprints.json()["features"][0]["geometry"]["type"] == "Polygon"
+
+
+def test_verified_export_requires_qaqc(tmp_path: Path) -> None:
+    client = TestClient(create_app(workspace=tmp_path, runner=successful_runner, background=False))
+    created = client.post(
+        "/api/harvest/run",
+        json={"country": "US", "locality": "Tennessee", "profiles": "schools", "target": 5},
+    ).json()
+    run_id = created["manifest"]["run_id"]
+
+    response = client.get(f"/api/runs/{run_id}/export.verified.json")
+
+    assert response.status_code == 409
+    assert "QAQC review not found" in response.json()["error"]
+
+
 def test_qaqc_run_endpoint_fans_out_for_campaign_parent(tmp_path: Path) -> None:
     client = TestClient(create_app(workspace=tmp_path, runner=successful_runner, background=False))
     created = client.post(
@@ -287,6 +383,34 @@ def test_qaqc_run_endpoint_fans_out_for_campaign_parent(tmp_path: Path) -> None:
     assert qaqc.json()["qaqc"]["summary"]["review_count"] == 2
     assert reviews.json()["review_count"] == 2
     assert len(reviews.json()["child_reviews"]) == 2
+
+    verified = client.get(f"/api/runs/{campaign_id}/verified-leads")
+
+    assert verified.status_code == 200
+    assert verified.json()["item_count"] == 2
+
+
+def test_run_log_includes_qaqc_child_subprocess_logs(tmp_path: Path) -> None:
+    client = TestClient(create_app(workspace=tmp_path, runner=successful_runner, background=False))
+    created = client.post(
+        "/api/harvest/campaign-run",
+        json={
+            "country": "US",
+            "localities": ["Tennessee"],
+            "facility_types": ["schools"],
+            "target": 3,
+        },
+    ).json()
+    campaign_id = created["manifest"]["campaign_id"]
+    child_run_id = created["manifest"]["child_run_ids"][0]
+    child_qaqc_log = tmp_path / "harvest_logs" / f"{child_run_id}-qaqc.log"
+    child_qaqc_log.write_text("[test] child QAQC subprocess detail\n", encoding="utf-8")
+
+    response = client.get(f"/api/runs/{campaign_id}/log")
+
+    assert response.status_code == 200
+    assert "QAQC subprocess log" in response.text
+    assert "child QAQC subprocess detail" in response.text
 
 
 def test_qaqc_prompt_endpoint_rejects_grouped_parent_manifest(tmp_path: Path) -> None:
@@ -324,6 +448,9 @@ def test_clear_runs_endpoint_removes_history_without_promoted_runs_or_exports(
     ).json()
     run_id = created["manifest"]["run_id"]
     client.post(f"/api/runs/{run_id}/qaqc-run")
+    geometry_file = tmp_path / f"geometry_reviews/{run_id}.json"
+    geometry_file.parent.mkdir()
+    geometry_file.write_text("[]", encoding="utf-8")
     promoted = client.post(f"/api/runs/{run_id}/promote", json={"index": 0}).json()
     export_file = tmp_path / "exports/report.csv"
     export_file.parent.mkdir()
@@ -339,6 +466,7 @@ def test_clear_runs_endpoint_removes_history_without_promoted_runs_or_exports(
     assert not any((tmp_path / "harvest_logs").glob("*.log"))
     assert not any((tmp_path / "qaqc_runs").glob("*.json"))
     assert not any((tmp_path / "work").glob("*.md"))
+    assert geometry_file.is_file()
     assert Path(promoted["run_file"]).is_file()
     assert export_file.is_file()
 

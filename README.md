@@ -76,8 +76,9 @@ python -m pdt_observer app
 
 The first screen is the tool itself: enter a country, optional region/locality, facility type,
 optional subtype, and target count. The app writes the same runtime artifacts as the CLI:
-`work/`, `lead_runs/`, `harvest_runs/`, `harvest_logs/`, `qaqc_runs/`, `exports/`, and `runs/`.
-Results are displayed as copyable JSON, with CSV and JSONL export buttons.
+`work/`, `lead_runs/`, `harvest_runs/`, `harvest_logs/`, `qaqc_runs/`, `geometry_reviews/`,
+`geocode_cache/`, `exports/`, and `runs/`. Results are displayed as copyable JSON, with
+QAQC-gated CSV/JSON export buttons.
 
 The app includes an Agent Activity panel while a harvest runs. It polls the run manifest and log
 file so the user can see prompt rendering, Codex launch, validation, completion, failure, or
@@ -94,6 +95,13 @@ process.
 Use **Run QAQC** after selecting a completed run. For a single child run, the app launches one
 Codex verifier agent. For a batch or campaign parent, it launches one verifier agent per child
 facility-type run and displays the combined QAQC review JSON when the pass finishes.
+
+Use **Geometry Review** after QAQC. **Load Approved** shows only observations where QAQC returned
+`verification_status: verified` and `recommended_action: keep`. Select an observation, geocode its
+facility/address into a point, adjust the point if needed, draw or edit one building footprint
+polygon on the Leaflet map, and save the footprint. Geometry review files are durable user work and
+are not removed by Clear All. Verified downloads in the app are QAQC-gated, and footprint GeoJSON
+includes only approved observations with saved polygons.
 
 ## Codex Subscription Workflow
 
@@ -271,6 +279,15 @@ Use QAQC results to choose whether each lead should be kept, reviewed, rejected,
 Promoted runs are intentionally marked `review` until exact source text, exact supporting quote,
 and georeference details are completed well enough for strict validation.
 
+In the local browser app, geometry review can turn verified leads into footprint exports:
+
+```text
+Load Approved -> Geocode -> adjust point -> draw footprint -> Save Footprint
+```
+
+The app uses user-triggered Nominatim geocoding with a local cache under `geocode_cache/`, and a
+Leaflet map with OSM streets plus Esri World Imagery for visual footprint tracing.
+
 ## Harvest Flow
 
 ```text
@@ -324,6 +341,16 @@ python -m pdt_observer leads summarize
 python -m pdt_observer leads qaqc-prompt
 Codex/web-search QAQC agent
 python -m pdt_observer leads qaqc-validate
+  |
+  |  app filters verified + keep observations for geometry review
+  v
+Leaflet Geometry Review
+  |
+  |  user-triggered geocode creates a candidate point
+  |  user adjusts point and draws one building footprint polygon
+  v
+geometry_reviews/<child-run-id>.json
+exports verified JSON / CSV / footprint GeoJSON
   |
   |  human/Codex selects verified or reviewable leads for audit-grade promotion
   v

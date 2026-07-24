@@ -72,6 +72,13 @@ class LeadQaqcRecommendedAction(StrEnum):
     RETRY = "retry"
 
 
+class GeometryStatus(StrEnum):
+    NEEDS_REVIEW = "needs_review"
+    POINT_CONFIRMED = "point_confirmed"
+    FOOTPRINT_DRAWN = "footprint_drawn"
+    SKIPPED = "skipped"
+
+
 class HarvestRunStatus(StrEnum):
     PREPARED = "prepared"
     RUNNING = "running"
@@ -270,6 +277,25 @@ class LeadQaqcReview(StrictModel):
     supporting_quote: str | None = None
     recommended_action: LeadQaqcRecommendedAction
     review_notes: str = Field(min_length=1)
+
+
+class GeometryPoint(StrictModel):
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    source: str = Field(default="user", min_length=1)
+
+
+class GeometryReviewItem(StrictModel):
+    item_id: str = Field(min_length=1)
+    child_run_id: str = Field(min_length=1)
+    lead_index: int = Field(ge=0)
+    geocode_query: str = Field(min_length=1)
+    geocode_result: dict[str, object] | None = None
+    point: GeometryPoint | None = None
+    polygon_geojson: dict[str, object] | None = None
+    area_m2: float | None = Field(default=None, ge=0)
+    geometry_status: GeometryStatus = GeometryStatus.NEEDS_REVIEW
+    review_notes: str | None = None
 
 
 class BuildingTypeProfile(StrictModel):

@@ -12,6 +12,8 @@ dist/
 build/
 batches/
 exports/
+geocode_cache/
+geometry_reviews/
 harvest_runs/
 harvest_logs/
 lead_runs/

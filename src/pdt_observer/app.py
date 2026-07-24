@@ -19,12 +19,24 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from starlette.routing import Route
 
+from pdt_observer.geometry import (
+    Geocoder,
+    NominatimGeocoder,
+    approved_records_for_child,
+    footprints_geojson,
+    geometry_item_from_payload,
+    merge_geometry_items,
+    save_geometry_review_item,
+    verified_csv,
+    verified_json,
+)
 from pdt_observer.harvest import (
     CodexRunner,
     append_harvest_log,
     build_harvest_batch_id,
     build_harvest_campaign_id,
     build_harvest_run_id,
+    log_path_for_run,
     run_harvest,
     run_harvest_batch,
     run_harvest_campaign,
@@ -37,6 +49,8 @@ from pdt_observer.leads import (
     render_lead_qaqc_prompt,
 )
 from pdt_observer.models import (
+    GeometryPoint,
+    GeometryStatus,
     HarvestBatchRunManifest,
     HarvestCampaignRunManifest,
     HarvestRunManifest,
@@ -70,6 +84,21 @@ class HarvestCampaignRunRequest(BaseModel):
 class PromoteLeadRequest(BaseModel):
     index: int = Field(ge=0)
     task_id: str | None = None
+
+
+class GeometryGeocodeRequest(BaseModel):
+    item_id: str = Field(min_length=1)
+    query: str = Field(min_length=1)
+
+
+class GeometrySaveRequest(BaseModel):
+    item_id: str = Field(min_length=1)
+    geocode_query: str = Field(min_length=1)
+    point: GeometryPoint | None = None
+    polygon_geojson: dict[str, Any] | None = None
+    geometry_status: GeometryStatus = GeometryStatus.NEEDS_REVIEW
+    geocode_result: dict[str, Any] | None = None
+    review_notes: str | None = None
 
 
 class ActiveCodexRegistry:
@@ -501,6 +530,72 @@ def _qaqc_reviews_payload(root: Path, child_run_ids: Sequence[str]) -> dict[str,
     }
 
 
+def _approved_records_for_manifest(root: Path, manifest: Any) -> tuple[dict[str, Any], ...]:
+    records: list[dict[str, Any]] = []
+    for child_run_id in _manifest_child_run_ids(manifest):
+        child_manifest = _load_run_manifest(root, child_run_id)
+        records.extend(approved_records_for_child(root, child_manifest))
+    return tuple(records)
+
+
+def _geometry_items_payload(root: Path, manifest: Any) -> dict[str, Any]:
+    records = _approved_records_for_manifest(root, manifest)
+    items = tuple(merge_geometry_items(root, records))
+    return {"item_count": len(items), "items": items}
+
+
+def _verified_export_response(root: Path, run_id: str, *, output_format: str) -> Response:
+    try:
+        manifest = _load_any_manifest(root, run_id)
+        items = tuple(merge_geometry_items(root, _approved_records_for_manifest(root, manifest)))
+    except FileNotFoundError as exc:
+        return _json_error(str(exc), status_code=409)
+    except ValueError as exc:
+        return _json_error(str(exc), status_code=404)
+
+    if output_format == "json":
+        payload = verified_json(items)
+        media_type = "application/json"
+        filename = f"{run_id}.verified.json"
+    elif output_format == "csv":
+        payload = verified_csv(items)
+        media_type = "text/csv"
+        filename = f"{run_id}.verified.csv"
+    elif output_format == "geojson":
+        payload = footprints_geojson(items)
+        media_type = "application/geo+json"
+        filename = f"{run_id}.footprints.geojson"
+    else:
+        return _json_error(f"unsupported verified export format: {output_format}")
+
+    return PlainTextResponse(
+        payload,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _read_log_text(path: Path) -> str:
+    if not path.is_file():
+        return ""
+    return path.read_text(encoding="utf-8")
+
+
+def _combined_log_text(root: Path, manifest: Any) -> str:
+    chunks: list[str] = []
+    log_path = getattr(manifest, "log_path", None)
+    if log_path is not None:
+        text = _read_log_text(Path(log_path))
+        if text:
+            chunks.append(text.rstrip())
+    for child_run_id in _manifest_child_run_ids(manifest):
+        qaqc_log_path = log_path_for_run(root, _qaqc_id_for_run(child_run_id))
+        text = _read_log_text(qaqc_log_path)
+        if text:
+            chunks.append(f"--- QAQC subprocess log: {child_run_id} ---\n{text.rstrip()}")
+    return "\n".join(chunks) + ("\n" if chunks else "")
+
+
 async def _wait_for_manifest(load_manifest: Callable[[], Any]) -> Any:
     last_error: Exception | None = None
     for _ in range(20):
@@ -519,6 +614,7 @@ def create_app(
     workspace: Path,
     codex_bin: str = "codex",
     runner: CodexRunner | None = None,
+    geocoder: Geocoder | None = None,
     background: bool = True,
     shutdown_callback: Callable[[], None] | None = None,
 ) -> Starlette:
@@ -527,6 +623,7 @@ def create_app(
     registry = ActiveCodexRegistry(root)
     executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="harvest")
     app_runner = runner or registry.runner
+    app_geocoder = geocoder or NominatimGeocoder(root)
 
     async def index(request: Request) -> HTMLResponse:
         return HTMLResponse(INDEX_HTML)
@@ -670,13 +767,7 @@ def create_app(
             manifest = _load_any_manifest(root, run_id)
         except ValueError as exc:
             return PlainTextResponse(str(exc), status_code=404)
-        log_path = getattr(manifest, "log_path", None)
-        if log_path is None:
-            return PlainTextResponse("")
-        path = Path(log_path)
-        if not path.is_file():
-            return PlainTextResponse("")
-        return PlainTextResponse(path.read_text(encoding="utf-8"), media_type="text/plain")
+        return PlainTextResponse(_combined_log_text(root, manifest), media_type="text/plain")
 
     async def cancel_run(request: Request) -> JSONResponse:
         run_id = request.path_params["run_id"]
@@ -786,11 +877,105 @@ def create_app(
         except ValueError as exc:
             return _json_error(str(exc), status_code=404)
 
+    async def verified_leads(request: Request) -> JSONResponse:
+        run_id = request.path_params["run_id"]
+        try:
+            manifest = _load_any_manifest(root, run_id)
+            records = _approved_records_for_manifest(root, manifest)
+            return JSONResponse({"item_count": len(records), "items": list(records)})
+        except FileNotFoundError as exc:
+            return _json_error(str(exc), status_code=409)
+        except ValueError as exc:
+            return _json_error(str(exc), status_code=404)
+
+    async def geometry_items(request: Request) -> JSONResponse:
+        run_id = request.path_params["run_id"]
+        try:
+            manifest = _load_any_manifest(root, run_id)
+            return JSONResponse(_geometry_items_payload(root, manifest))
+        except FileNotFoundError as exc:
+            return _json_error(str(exc), status_code=409)
+        except ValueError as exc:
+            return _json_error(str(exc), status_code=404)
+
+    async def geometry_geocode(request: Request) -> JSONResponse:
+        try:
+            data = GeometryGeocodeRequest.model_validate(await _request_json(request))
+            result = app_geocoder(data.query)
+            point = (
+                GeometryPoint(
+                    latitude=float(result["latitude"]),
+                    longitude=float(result["longitude"]),
+                    source="geocode",
+                )
+                if result is not None
+                else None
+            )
+            item = geometry_item_from_payload(
+                item_id=data.item_id,
+                geocode_query=data.query,
+                point=point,
+                polygon_geojson=None,
+                geometry_status=(
+                    GeometryStatus.POINT_CONFIRMED
+                    if point is not None
+                    else GeometryStatus.NEEDS_REVIEW
+                ),
+                geocode_result=result,
+            )
+            save_geometry_review_item(root, item)
+            return JSONResponse(
+                {"geocode_result": result, "geometry": item.model_dump(mode="json")}
+            )
+        except (ValidationError, ValueError) as exc:
+            return _json_error(str(exc))
+
+    async def geometry_save(request: Request) -> JSONResponse:
+        item_id = request.path_params["item_id"]
+        try:
+            data = GeometrySaveRequest.model_validate(await _request_json(request))
+            if data.item_id != item_id:
+                return _json_error("item_id in path and body must match")
+            item = geometry_item_from_payload(
+                item_id=item_id,
+                geocode_query=data.geocode_query,
+                point=data.point,
+                polygon_geojson=data.polygon_geojson,
+                geometry_status=data.geometry_status,
+                geocode_result=data.geocode_result,
+                review_notes=data.review_notes,
+            )
+            save_geometry_review_item(root, item)
+            return JSONResponse({"geometry": item.model_dump(mode="json")})
+        except (ValidationError, ValueError) as exc:
+            return _json_error(str(exc))
+
     async def export_csv(request: Request) -> Response:
         return _export_response(root, request.path_params["run_id"], output_format="csv")
 
     async def export_jsonl(request: Request) -> Response:
         return _export_response(root, request.path_params["run_id"], output_format="jsonl")
+
+    async def export_verified_json(request: Request) -> Response:
+        return _verified_export_response(
+            root,
+            request.path_params["run_id"],
+            output_format="json",
+        )
+
+    async def export_verified_csv(request: Request) -> Response:
+        return _verified_export_response(
+            root,
+            request.path_params["run_id"],
+            output_format="csv",
+        )
+
+    async def export_footprints_geojson(request: Request) -> Response:
+        return _verified_export_response(
+            root,
+            request.path_params["run_id"],
+            output_format="geojson",
+        )
 
     async def promote(request: Request) -> JSONResponse:
         try:
@@ -822,8 +1007,15 @@ def create_app(
         Route("/api/runs/{run_id}/qaqc-prompt", run_qaqc_prompt),
         Route("/api/runs/{run_id}/qaqc-run", run_qaqc, methods=["POST"]),
         Route("/api/runs/{run_id}/qaqc-reviews", run_qaqc_reviews),
+        Route("/api/runs/{run_id}/verified-leads", verified_leads),
+        Route("/api/runs/{run_id}/geometry-items", geometry_items),
+        Route("/api/geometry/geocode", geometry_geocode, methods=["POST"]),
+        Route("/api/geometry/items/{item_id}", geometry_save, methods=["POST"]),
         Route("/api/runs/{run_id}/export.csv", export_csv),
         Route("/api/runs/{run_id}/export.jsonl", export_jsonl),
+        Route("/api/runs/{run_id}/export.verified.json", export_verified_json),
+        Route("/api/runs/{run_id}/export.verified.csv", export_verified_csv),
+        Route("/api/runs/{run_id}/export.footprints.geojson", export_footprints_geojson),
         Route("/api/runs/{run_id}/cancel", cancel_run, methods=["POST"]),
         Route("/api/runs/{run_id}/promote", promote, methods=["POST"]),
         Route("/api/app/exit", exit_app, methods=["POST"]),
@@ -877,6 +1069,16 @@ INDEX_HTML = r"""<!doctype html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Observation Harvester</title>
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  >
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css"
+  >
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
   <style>
     :root {
       color-scheme: light;
@@ -921,6 +1123,9 @@ INDEX_HTML = r"""<!doctype html>
       border: 1px solid var(--line);
       border-radius: 8px;
       padding: 16px;
+    }
+    section.wide {
+      grid-column: 1 / -1;
     }
     h2 {
       margin: 0 0 14px;
@@ -1059,9 +1264,41 @@ INDEX_HTML = r"""<!doctype html>
       margin-top: 6px;
       font-weight: 500;
     }
+    .geometry-layout {
+      display: grid;
+      grid-template-columns: minmax(260px, 360px) minmax(0, 1fr);
+      gap: 14px;
+    }
+    .geometry-list {
+      max-height: 440px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 6px;
+    }
+    .geometry-list button {
+      width: 100%;
+      text-align: left;
+      background: #fff;
+      color: var(--text);
+      border-color: var(--line);
+      margin-top: 6px;
+      font-weight: 500;
+    }
+    .geometry-list button.active {
+      border-color: var(--accent);
+      background: #edf8fb;
+    }
+    .map {
+      min-height: 520px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+    }
     @media (max-width: 860px) {
       main { grid-template-columns: 1fr; padding: 12px; }
       .summary { grid-template-columns: repeat(2, 1fr); }
+      .geometry-layout { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -1143,9 +1380,12 @@ INDEX_HTML = r"""<!doctype html>
         <button id="copyButton" class="secondary" type="button">Copy JSON</button>
         <button id="copyQaqcButton" class="secondary" type="button">Copy QAQC Prompt</button>
         <button id="runQaqcButton" class="secondary" type="button">Run QAQC</button>
-        <button id="downloadJsonButton" class="secondary" type="button">Download JSON</button>
-        <button id="downloadCsvButton" class="secondary" type="button">Download CSV</button>
-        <button id="downloadJsonlButton" class="secondary" type="button">Download JSONL</button>
+        <button id="downloadJsonButton" class="secondary" type="button">
+          Download Verified JSON
+        </button>
+        <button id="downloadCsvButton" class="secondary" type="button">
+          Download Verified CSV
+        </button>
       </div>
       <textarea
         id="jsonOutput"
@@ -1166,6 +1406,40 @@ INDEX_HTML = r"""<!doctype html>
         placeholder="Agent activity will appear here while a harvest runs."
       ></textarea>
     </section>
+
+    <section class="wide">
+      <h2>Geometry Review</h2>
+      <div class="actions">
+        <button id="loadApprovedButton" class="secondary" type="button">Load Approved</button>
+        <button id="geocodeButton" class="secondary" type="button">Geocode</button>
+        <button id="useMapCenterButton" class="secondary" type="button">Use Map Center</button>
+        <button id="saveFootprintButton" class="secondary" type="button">Save Footprint</button>
+        <button id="skipGeometryButton" class="secondary" type="button">Skip</button>
+        <button id="downloadVerifiedJsonButton" class="secondary" type="button">
+          Download Verified JSON
+        </button>
+        <button id="downloadVerifiedCsvButton" class="secondary" type="button">
+          Download Verified CSV
+        </button>
+        <button id="downloadFootprintsButton" class="secondary" type="button">
+          Download Footprints GeoJSON
+        </button>
+      </div>
+      <div class="status" id="geometryStatus">Load QAQC-approved observations to begin.</div>
+      <div class="geometry-layout">
+        <div>
+          <div class="geometry-list" id="geometryList"></div>
+          <label for="geometryDetail">Selected Observation</label>
+          <textarea
+            id="geometryDetail"
+            class="compact"
+            spellcheck="false"
+            readonly
+          ></textarea>
+        </div>
+        <div id="map" class="map"></div>
+      </div>
+    </section>
   </main>
   <script>
     const state = {
@@ -1174,7 +1448,12 @@ INDEX_HTML = r"""<!doctype html>
       currentRunId: null,
       currentLeads: [],
       pollTimer: null,
-      pollPurpose: 'harvest'
+      pollPurpose: 'harvest',
+      geometryItems: [],
+      selectedGeometryItemId: null,
+      map: null,
+      drawnItems: null,
+      marker: null
     };
     const $ = (id) => document.getElementById(id);
     const terminalStatuses = ['completed', 'failed', 'cancelled'];
@@ -1340,6 +1619,15 @@ INDEX_HTML = r"""<!doctype html>
       $('cancelButton').disabled = !payload.active;
       await loadLog(state.currentRunId);
       if (state.pollPurpose === 'qaqc') {
+        if (payload.active) {
+          const stamp = new Date().toLocaleTimeString();
+          const heartbeat = `\\n[local ${stamp}] QAQC still running...\\n`;
+          if (!$('activityOutput').value.endsWith(heartbeat)) {
+            $('activityOutput').value += heartbeat;
+            $('activityOutput').scrollTop = $('activityOutput').scrollHeight;
+          }
+          setStatus('QAQC still running. Watching agent activity...', 'ok');
+        }
         if (!payload.active) {
           stopPolling();
           const reviews = await api(`/api/runs/${state.currentRunId}/qaqc-reviews`);
@@ -1491,6 +1779,193 @@ INDEX_HTML = r"""<!doctype html>
       }
     }
 
+    function setGeometryStatus(message, kind = '') {
+      $('geometryStatus').textContent = message;
+      $('geometryStatus').className = `status ${kind}`;
+    }
+
+    function initMap() {
+      if (state.map || typeof L === 'undefined') return;
+      state.map = L.map('map').setView([20, 0], 2);
+      const streets = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap contributors'
+      });
+      const imagery = L.tileLayer(
+        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        {
+          maxZoom: 19,
+          attribution: 'Tiles &copy; Esri'
+        }
+      );
+      imagery.addTo(state.map);
+      L.control.layers({ Imagery: imagery, Streets: streets }).addTo(state.map);
+      state.drawnItems = new L.FeatureGroup();
+      state.map.addLayer(state.drawnItems);
+      const drawControl = new L.Control.Draw({
+        draw: {
+          polygon: true,
+          rectangle: false,
+          polyline: false,
+          circle: false,
+          circlemarker: false,
+          marker: false
+        },
+        edit: { featureGroup: state.drawnItems }
+      });
+      state.map.addControl(drawControl);
+      state.map.on(L.Draw.Event.CREATED, (event) => {
+        state.drawnItems.clearLayers();
+        state.drawnItems.addLayer(event.layer);
+      });
+    }
+
+    function selectedGeometryItem() {
+      return state.geometryItems.find((item) => item.item_id === state.selectedGeometryItemId);
+    }
+
+    function renderGeometryList() {
+      $('geometryList').innerHTML = state.geometryItems.map((item) => {
+        const lead = item.lead;
+        const label = `${lead.location.facility_name} - ${item.geometry_status}`;
+        const active = item.item_id === state.selectedGeometryItemId ? ' active' : '';
+        return `<button type="button" class="${active}" data-geometry="${item.item_id}">
+          ${label}<br>${lead.location.city_or_region}, ${lead.location.country}
+        </button>`;
+      }).join('') || '<div class="status">No QAQC-approved observations loaded.</div>';
+      for (const button of $('geometryList').querySelectorAll('button[data-geometry]')) {
+        button.addEventListener('click', () => selectGeometryItem(button.dataset.geometry));
+      }
+    }
+
+    function pointFromGeometry(item) {
+      if (item.geometry && item.geometry.point) return item.geometry.point;
+      return null;
+    }
+
+    function polygonFromGeometry(item) {
+      if (item.geometry && item.geometry.polygon_geojson) return item.geometry.polygon_geojson;
+      return null;
+    }
+
+    function setMarker(point) {
+      initMap();
+      if (!state.map || !point) return;
+      if (state.marker) state.map.removeLayer(state.marker);
+      state.marker = L.marker(
+        [point.latitude, point.longitude],
+        { draggable: true }
+      ).addTo(state.map);
+      state.map.setView([point.latitude, point.longitude], 18);
+    }
+
+    function selectGeometryItem(itemId) {
+      initMap();
+      state.selectedGeometryItemId = itemId;
+      renderGeometryList();
+      const item = selectedGeometryItem();
+      if (!item) return;
+      $('geometryDetail').value = JSON.stringify({
+        item_id: item.item_id,
+        facility: item.lead.location.facility_name,
+        query: item.geocode_query,
+        source_url: item.lead.source_url,
+        counts: item.lead.occupancy_data,
+        qaqc: item.qaqc_review.review_notes,
+        geometry_status: item.geometry_status,
+        area_m2: item.area_m2
+      }, null, 2);
+      if (state.drawnItems) state.drawnItems.clearLayers();
+      const point = pointFromGeometry(item);
+      if (point) setMarker(point);
+      const polygon = polygonFromGeometry(item);
+      if (polygon && state.drawnItems) {
+        const layer = L.geoJSON(polygon).getLayers()[0];
+        state.drawnItems.addLayer(layer);
+        state.map.fitBounds(layer.getBounds());
+      }
+    }
+
+    async function loadApprovedGeometry() {
+      if (!state.currentRunId) return setGeometryStatus('No run selected.', 'error');
+      initMap();
+      const payload = await api(`/api/runs/${state.currentRunId}/geometry-items`);
+      state.geometryItems = payload.items || [];
+      state.selectedGeometryItemId = state.geometryItems[0]?.item_id || null;
+      renderGeometryList();
+      if (state.selectedGeometryItemId) selectGeometryItem(state.selectedGeometryItemId);
+      setGeometryStatus(`Loaded ${state.geometryItems.length} QAQC-approved observation(s).`, 'ok');
+    }
+
+    function currentPointPayload(source = 'user') {
+      if (!state.marker) return null;
+      const latlng = state.marker.getLatLng();
+      return { latitude: latlng.lat, longitude: latlng.lng, source };
+    }
+
+    function currentPolygonGeojson() {
+      if (!state.drawnItems) return null;
+      const layers = state.drawnItems.getLayers();
+      if (!layers.length) return null;
+      return layers[0].toGeoJSON().geometry;
+    }
+
+    async function geocodeSelected() {
+      const item = selectedGeometryItem();
+      if (!item) return setGeometryStatus('No approved observation selected.', 'error');
+      const payload = await api('/api/geometry/geocode', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ item_id: item.item_id, query: item.geocode_query })
+      });
+      item.geometry = payload.geometry;
+      item.geometry_status = payload.geometry.geometry_status;
+      item.area_m2 = payload.geometry.area_m2;
+      if (payload.geometry.point) setMarker(payload.geometry.point);
+      renderGeometryList();
+      setGeometryStatus(
+        payload.geocode_result ? 'Geocode placed a point.' : 'No geocode result.',
+        'ok'
+      );
+    }
+
+    function useMapCenter() {
+      const item = selectedGeometryItem();
+      if (!item || !state.map) {
+        return setGeometryStatus('No approved observation selected.', 'error');
+      }
+      const center = state.map.getCenter();
+      setMarker({ latitude: center.lat, longitude: center.lng, source: 'user' });
+      setGeometryStatus('Point set from map center.', 'ok');
+    }
+
+    async function saveGeometry(status = null) {
+      const item = selectedGeometryItem();
+      if (!item) return setGeometryStatus('No approved observation selected.', 'error');
+      const polygon = currentPolygonGeojson();
+      const point = currentPointPayload();
+      const geometryStatus = status || (polygon ? 'footprint_drawn' : 'point_confirmed');
+      const payload = await api(`/api/geometry/items/${item.item_id}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          item_id: item.item_id,
+          geocode_query: item.geocode_query,
+          point,
+          polygon_geojson: polygon,
+          geometry_status: geometryStatus,
+          geocode_result: item.geometry?.geocode_result || null,
+          review_notes: geometryStatus === 'skipped' ? 'Skipped in geometry review.' : null
+        })
+      });
+      item.geometry = payload.geometry;
+      item.geometry_status = payload.geometry.geometry_status;
+      item.area_m2 = payload.geometry.area_m2;
+      renderGeometryList();
+      selectGeometryItem(item.item_id);
+      setGeometryStatus(`Geometry saved: ${item.geometry_status}.`, 'ok');
+    }
+
     async function exitApplication() {
       if (!window.confirm('Exit Observation Harvester and cancel active harvests?')) return;
       try {
@@ -1515,12 +1990,23 @@ INDEX_HTML = r"""<!doctype html>
 
     async function downloadExport(format) {
       if (!state.currentRunId) return setStatus('No run selected.', 'error');
-      const response = await fetch(`/api/runs/${state.currentRunId}/export.${format}`);
+      const response = await fetch(`/api/runs/${state.currentRunId}/export.verified.${format}`);
       if (!response.ok) return setStatus(await response.text(), 'error');
       downloadText(
-        `observation-harvest.${format}`,
+        `observation-harvest.verified.${format}`,
         await response.text(),
-        format === 'csv' ? 'text/csv' : 'application/x-ndjson'
+        format === 'csv' ? 'text/csv' : 'application/json'
+      );
+    }
+
+    async function downloadFootprints() {
+      if (!state.currentRunId) return setGeometryStatus('No run selected.', 'error');
+      const response = await fetch(`/api/runs/${state.currentRunId}/export.footprints.geojson`);
+      if (!response.ok) return setGeometryStatus(await response.text(), 'error');
+      downloadText(
+        'observation-footprints.geojson',
+        await response.text(),
+        'application/geo+json'
       );
     }
 
@@ -1550,7 +2036,22 @@ INDEX_HTML = r"""<!doctype html>
         downloadText('observation-harvest.json', $('jsonOutput').value, 'application/json');
       });
       $('downloadCsvButton').addEventListener('click', () => downloadExport('csv'));
-      $('downloadJsonlButton').addEventListener('click', () => downloadExport('jsonl'));
+      $('loadApprovedButton').addEventListener('click', () => {
+        loadApprovedGeometry().catch((error) => setGeometryStatus(error.message, 'error'));
+      });
+      $('geocodeButton').addEventListener('click', () => {
+        geocodeSelected().catch((error) => setGeometryStatus(error.message, 'error'));
+      });
+      $('useMapCenterButton').addEventListener('click', useMapCenter);
+      $('saveFootprintButton').addEventListener('click', () => {
+        saveGeometry().catch((error) => setGeometryStatus(error.message, 'error'));
+      });
+      $('skipGeometryButton').addEventListener('click', () => {
+        saveGeometry('skipped').catch((error) => setGeometryStatus(error.message, 'error'));
+      });
+      $('downloadVerifiedJsonButton').addEventListener('click', () => downloadExport('json'));
+      $('downloadVerifiedCsvButton').addEventListener('click', () => downloadExport('csv'));
+      $('downloadFootprintsButton').addEventListener('click', downloadFootprints);
     }
     boot().catch((error) => setStatus(error.message, 'error'));
   </script>

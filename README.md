@@ -86,9 +86,14 @@ session. Exit Application cancels active harvest children and shuts down this lo
 does not kill unrelated Python or Codex processes elsewhere on the machine.
 
 The Recent Runs panel can reopen completed runs. **Clear All** removes generated harvest history
-from `harvest_runs/`, `harvest_logs/`, `lead_runs/`, and generated `work/` prompts. It does not
-delete promoted observations in `runs/`, exported files in `exports/`, profiles, or source code.
-The app refuses to clear history while it is tracking an active Codex harvest process.
+from `harvest_runs/`, `harvest_logs/`, `lead_runs/`, `qaqc_runs/`, and generated `work/` prompts.
+It does not delete promoted observations in `runs/`, exported files in `exports/`, profiles, or
+source code. The app refuses to clear history while it is tracking an active Codex harvest or QAQC
+process.
+
+Use **Run QAQC** after selecting a completed run. For a single child run, the app launches one
+Codex verifier agent. For a batch or campaign parent, it launches one verifier agent per child
+facility-type run and displays the combined QAQC review JSON when the pass finishes.
 
 ## Codex Subscription Workflow
 
@@ -247,9 +252,10 @@ Generate a QAQC verifier prompt for a harvested lead file:
 python -m pdt_observer leads qaqc-prompt lead_runs/us-tennessee-factories.json --output work/us-tennessee-factories-qaqc.md
 ```
 
-Run that prompt through Codex CLI or Codex chat with web search. The QAQC agent should open each
-`source_url`, verify that the reported count appears in the source, check facility/location match,
-and return a separate review JSON array. Validate that review output:
+Run that prompt through Codex CLI or Codex chat with web search, or use **Run QAQC** in the local
+browser app. The QAQC agent should open each `source_url`, verify that the reported count appears
+in the source, check facility/location match, and return a separate review JSON array. Validate
+that review output:
 
 ```powershell
 python -m pdt_observer leads qaqc-validate qaqc_runs/us-tennessee-factories-qaqc.json --pretty

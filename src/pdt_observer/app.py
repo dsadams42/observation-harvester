@@ -32,6 +32,7 @@ from pdt_observer.harvest import (
 from pdt_observer.leads import (
     export_leads,
     load_leads,
+    load_qaqc_reviews,
     promote_lead_to_run,
     render_lead_qaqc_prompt,
 )
@@ -76,6 +77,7 @@ class ActiveCodexRegistry:
         self.root = root
         self._lock = threading.Lock()
         self._processes: dict[str, subprocess.Popen[str]] = {}
+        self._tasks: set[str] = set()
 
     def _run_id_from_command(self, command: Sequence[str]) -> str:
         try:
@@ -115,6 +117,11 @@ class ActiveCodexRegistry:
 
     def is_active(self, run_id: str) -> bool:
         with self._lock:
+            if any(
+                active_id == run_id or active_id.startswith(f"{run_id}-")
+                for active_id in self._tasks
+            ):
+                return True
             return any(
                 active_id == run_id or active_id.startswith(f"{run_id}-")
                 for active_id in self._processes
@@ -122,7 +129,15 @@ class ActiveCodexRegistry:
 
     def active_count(self) -> int:
         with self._lock:
-            return len(self._processes)
+            return len(self._processes) + len(self._tasks)
+
+    def mark_task_active(self, run_id: str) -> None:
+        with self._lock:
+            self._tasks.add(run_id)
+
+    def mark_task_inactive(self, run_id: str) -> None:
+        with self._lock:
+            self._tasks.discard(run_id)
 
     def cancel(self, run_id: str) -> int:
         with self._lock:
@@ -165,6 +180,7 @@ def _clear_runtime_history(root: Path) -> int:
         "harvest_runs": ("*.json",),
         "harvest_logs": ("*.log",),
         "lead_runs": ("*.json",),
+        "qaqc_runs": ("*.json",),
         "work": ("*.md",),
     }
     deleted_count = 0
@@ -190,6 +206,18 @@ def _batch_manifest_path(root: Path, batch_id: str) -> Path:
 
 def _campaign_manifest_path(root: Path, campaign_id: str) -> Path:
     return _manifest_dir(root) / f"{campaign_id}.campaign.json"
+
+
+def _qaqc_id_for_run(run_id: str) -> str:
+    return f"{run_id}-qaqc"
+
+
+def _qaqc_prompt_path(root: Path, run_id: str) -> Path:
+    return root / "work" / f"{_qaqc_id_for_run(run_id)}.md"
+
+
+def _qaqc_output_path(root: Path, run_id: str) -> Path:
+    return root / "qaqc_runs" / f"{_qaqc_id_for_run(run_id)}.json"
 
 
 def _load_run_manifest(root: Path, run_id: str) -> HarvestRunManifest:
@@ -284,6 +312,13 @@ def _manifest_identity(manifest: Any) -> str:
     )
 
 
+def _manifest_child_run_ids(manifest: Any) -> tuple[str, ...]:
+    run_id = getattr(manifest, "run_id", None)
+    if run_id is not None:
+        return (str(run_id),)
+    return tuple(str(run_id) for run_id in getattr(manifest, "child_run_ids", ()))
+
+
 def _load_any_manifest(root: Path, run_id: str) -> Any:
     try:
         return _load_run_manifest(root, run_id)
@@ -292,6 +327,178 @@ def _load_any_manifest(root: Path, run_id: str) -> Any:
             return _load_batch_manifest(root, run_id)
         except ValueError:
             return _load_campaign_manifest(root, run_id)
+
+
+def _run_qaqc_for_child(
+    *,
+    root: Path,
+    run_id: str,
+    parent_id: str,
+    codex_bin: str,
+    runner: CodexRunner,
+) -> dict[str, Any]:
+    qaqc_id = _qaqc_id_for_run(run_id)
+    prompt_path = _qaqc_prompt_path(root, run_id)
+    output_path = _qaqc_output_path(root, run_id)
+    manifest = _load_run_manifest(root, run_id)
+    append_harvest_log(root, parent_id, f"Rendering QAQC prompt for {run_id}.")
+    leads = load_leads(Path(manifest.lead_path))
+    prompt = render_lead_qaqc_prompt(leads, source_label=manifest.lead_path)
+    prompt_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    prompt_path.write_text(prompt, encoding="utf-8")
+    append_harvest_log(root, parent_id, f"QAQC prompt written to {prompt_path}.")
+
+    command = (
+        codex_bin,
+        "--search",
+        "exec",
+        "--sandbox",
+        "workspace-write",
+        "--cd",
+        str(root),
+        "-o",
+        str(output_path),
+        "-",
+    )
+    append_harvest_log(root, parent_id, f"Launching QAQC agent for {run_id}.")
+    append_harvest_log(root, parent_id, f"QAQC command: {' '.join(command)}")
+    result = runner(command, prompt, root)
+    if result.stdout.strip():
+        append_harvest_log(root, parent_id, f"QAQC stdout for {run_id}: {result.stdout.strip()}")
+    if result.stderr.strip():
+        append_harvest_log(root, parent_id, f"QAQC stderr for {run_id}: {result.stderr.strip()}")
+    append_harvest_log(
+        root,
+        parent_id,
+        f"QAQC agent for {run_id} exited with {result.returncode}.",
+    )
+    if result.returncode < 0:
+        return {
+            "run_id": run_id,
+            "qaqc_id": qaqc_id,
+            "status": "cancelled",
+            "prompt_path": str(prompt_path),
+            "qaqc_path": str(output_path),
+            "review_count": 0,
+            "error_message": "QAQC cancelled by user.",
+        }
+    if result.returncode != 0:
+        return {
+            "run_id": run_id,
+            "qaqc_id": qaqc_id,
+            "status": "failed",
+            "prompt_path": str(prompt_path),
+            "qaqc_path": str(output_path),
+            "review_count": 0,
+            "error_message": result.stderr.strip() or result.stdout.strip(),
+        }
+    try:
+        reviews = load_qaqc_reviews(output_path)
+    except Exception as exc:
+        append_harvest_log(root, parent_id, f"QAQC validation failed for {run_id}: {exc}.")
+        return {
+            "run_id": run_id,
+            "qaqc_id": qaqc_id,
+            "status": "failed",
+            "prompt_path": str(prompt_path),
+            "qaqc_path": str(output_path),
+            "review_count": 0,
+            "error_message": str(exc),
+        }
+    append_harvest_log(
+        root,
+        parent_id,
+        f"QAQC validation completed for {run_id}: {len(reviews)} reviews.",
+    )
+    return {
+        "run_id": run_id,
+        "qaqc_id": qaqc_id,
+        "status": "completed",
+        "prompt_path": str(prompt_path),
+        "qaqc_path": str(output_path),
+        "review_count": len(reviews),
+        "error_message": None,
+    }
+
+
+def _run_qaqc_for_manifest(
+    *,
+    root: Path,
+    manifest: Any,
+    codex_bin: str,
+    runner: CodexRunner,
+) -> dict[str, Any]:
+    parent_id = _manifest_identity(manifest)
+    child_run_ids = _manifest_child_run_ids(manifest)
+    append_harvest_log(root, parent_id, f"Starting QAQC run for {len(child_run_ids)} child run(s).")
+    child_results: list[dict[str, Any]] = []
+    for child_run_id in child_run_ids:
+        child_result = _run_qaqc_for_child(
+            root=root,
+            run_id=child_run_id,
+            parent_id=parent_id,
+            codex_bin=codex_bin,
+            runner=runner,
+        )
+        child_results.append(child_result)
+        append_harvest_log(
+            root,
+            parent_id,
+            f"QAQC child {child_run_id} finished as {child_result['status']}.",
+        )
+        if child_result["status"] == "cancelled":
+            break
+
+    completed_count = sum(1 for result in child_results if result["status"] == "completed")
+    failed_count = sum(1 for result in child_results if result["status"] == "failed")
+    cancelled_count = sum(1 for result in child_results if result["status"] == "cancelled")
+    review_count = sum(
+        result["review_count"]
+        for result in child_results
+        if isinstance(result["review_count"], int)
+    )
+    status = "cancelled" if cancelled_count else ("failed" if failed_count else "completed")
+    summary = {
+        "status": status,
+        "planned_count": len(child_run_ids),
+        "completed_count": completed_count,
+        "failed_count": failed_count,
+        "cancelled_count": cancelled_count,
+        "review_count": review_count,
+    }
+    append_harvest_log(root, parent_id, f"QAQC run finished: {summary}.")
+    return {
+        "parent_id": parent_id,
+        "child_run_ids": child_run_ids,
+        "child_results": child_results,
+        "summary": summary,
+    }
+
+
+def _qaqc_reviews_payload(root: Path, child_run_ids: Sequence[str]) -> dict[str, Any]:
+    child_reviews: list[dict[str, Any]] = []
+    all_reviews: list[dict[str, Any]] = []
+    for child_run_id in child_run_ids:
+        output_path = _qaqc_output_path(root, child_run_id)
+        if not output_path.is_file():
+            continue
+        reviews = load_qaqc_reviews(output_path)
+        review_payload = [review.model_dump(mode="json") for review in reviews]
+        child_reviews.append(
+            {
+                "run_id": child_run_id,
+                "qaqc_path": str(output_path),
+                "review_count": len(reviews),
+                "reviews": review_payload,
+            }
+        )
+        all_reviews.extend(review_payload)
+    return {
+        "review_count": len(all_reviews),
+        "child_reviews": child_reviews,
+        "reviews": all_reviews,
+    }
 
 
 async def _wait_for_manifest(load_manifest: Callable[[], Any]) -> Any:
@@ -525,6 +732,60 @@ def create_app(
         except ValueError as exc:
             return PlainTextResponse(str(exc), status_code=404)
 
+    async def run_qaqc(request: Request) -> JSONResponse:
+        run_id = request.path_params["run_id"]
+        try:
+            manifest = _load_any_manifest(root, run_id)
+        except ValueError as exc:
+            return _json_error(str(exc), status_code=404)
+        identity = _manifest_identity(manifest)
+        if registry.is_active(identity):
+            return _json_error(f"Run already has active work: {identity}", status_code=409)
+
+        task = partial(
+            _run_qaqc_for_manifest,
+            root=root,
+            manifest=manifest,
+            codex_bin=codex_bin,
+            runner=app_runner,
+        )
+        if background:
+            registry.mark_task_active(identity)
+
+            def background_task() -> None:
+                try:
+                    task()
+                finally:
+                    registry.mark_task_inactive(identity)
+
+            executor.submit(background_task)
+            return JSONResponse(
+                {
+                    "started": True,
+                    "parent_id": identity,
+                    "child_run_ids": _manifest_child_run_ids(manifest),
+                    "manifest": manifest.model_dump(mode="json"),
+                }
+            )
+
+        result = await run_in_threadpool(task)
+        return JSONResponse(
+            {
+                "started": False,
+                "parent_id": identity,
+                "manifest": manifest.model_dump(mode="json"),
+                "qaqc": result,
+            }
+        )
+
+    async def run_qaqc_reviews(request: Request) -> JSONResponse:
+        run_id = request.path_params["run_id"]
+        try:
+            manifest = _load_any_manifest(root, run_id)
+            return JSONResponse(_qaqc_reviews_payload(root, _manifest_child_run_ids(manifest)))
+        except ValueError as exc:
+            return _json_error(str(exc), status_code=404)
+
     async def export_csv(request: Request) -> Response:
         return _export_response(root, request.path_params["run_id"], output_format="csv")
 
@@ -559,6 +820,8 @@ def create_app(
         Route("/api/runs/{run_id}/log", run_log),
         Route("/api/runs/{run_id}/leads", run_leads),
         Route("/api/runs/{run_id}/qaqc-prompt", run_qaqc_prompt),
+        Route("/api/runs/{run_id}/qaqc-run", run_qaqc, methods=["POST"]),
+        Route("/api/runs/{run_id}/qaqc-reviews", run_qaqc_reviews),
         Route("/api/runs/{run_id}/export.csv", export_csv),
         Route("/api/runs/{run_id}/export.jsonl", export_jsonl),
         Route("/api/runs/{run_id}/cancel", cancel_run, methods=["POST"]),
@@ -879,6 +1142,7 @@ INDEX_HTML = r"""<!doctype html>
       <div class="actions">
         <button id="copyButton" class="secondary" type="button">Copy JSON</button>
         <button id="copyQaqcButton" class="secondary" type="button">Copy QAQC Prompt</button>
+        <button id="runQaqcButton" class="secondary" type="button">Run QAQC</button>
         <button id="downloadJsonButton" class="secondary" type="button">Download JSON</button>
         <button id="downloadCsvButton" class="secondary" type="button">Download CSV</button>
         <button id="downloadJsonlButton" class="secondary" type="button">Download JSONL</button>
@@ -909,7 +1173,8 @@ INDEX_HTML = r"""<!doctype html>
       mode: 'single',
       currentRunId: null,
       currentLeads: [],
-      pollTimer: null
+      pollTimer: null,
+      pollPurpose: 'harvest'
     };
     const $ = (id) => document.getElementById(id);
     const terminalStatuses = ['completed', 'failed', 'cancelled'];
@@ -1055,6 +1320,7 @@ INDEX_HTML = r"""<!doctype html>
     function stopPolling() {
       if (state.pollTimer) window.clearInterval(state.pollTimer);
       state.pollTimer = null;
+      state.pollPurpose = 'harvest';
       $('cancelButton').disabled = true;
     }
 
@@ -1073,6 +1339,21 @@ INDEX_HTML = r"""<!doctype html>
       renderResult(manifest, leads);
       $('cancelButton').disabled = !payload.active;
       await loadLog(state.currentRunId);
+      if (state.pollPurpose === 'qaqc') {
+        if (!payload.active) {
+          stopPolling();
+          const reviews = await api(`/api/runs/${state.currentRunId}/qaqc-reviews`);
+          $('jsonOutput').value = JSON.stringify(reviews, null, 2);
+          $('metricStatus').textContent = 'qaqc complete';
+          $('metricLeads').textContent = reviews.review_count || 0;
+          $('metricFacilityLabel').textContent = 'Children';
+          $('metricAggregateLabel').textContent = 'Reviews';
+          $('metricFacility').textContent = (reviews.child_reviews || []).length;
+          $('metricAggregate').textContent = reviews.review_count || 0;
+          setStatus('QAQC complete.', 'ok');
+        }
+        return;
+      }
       if (isTerminal(manifest.status)) {
         stopPolling();
         setStatus(
@@ -1083,9 +1364,10 @@ INDEX_HTML = r"""<!doctype html>
       }
     }
 
-    function startPolling(runId) {
+    function startPolling(runId, purpose = 'harvest') {
       stopPolling();
       state.currentRunId = runId;
+      state.pollPurpose = purpose;
       state.pollTimer = window.setInterval(() => {
         pollCurrentRun().catch((error) => setStatus(error.message, 'error'));
       }, 1500);
@@ -1191,6 +1473,24 @@ INDEX_HTML = r"""<!doctype html>
       setStatus('QAQC prompt copied.', 'ok');
     }
 
+    async function runQaqc() {
+      if (!state.currentRunId) return setStatus('No run selected.', 'error');
+      const button = $('runQaqcButton');
+      button.disabled = true;
+      setStatus('Starting QAQC agent run...');
+      try {
+        const payload = await api(`/api/runs/${state.currentRunId}/qaqc-run`, { method: 'POST' });
+        $('activityOutput').value +=
+          `\\nQAQC started for ${payload.child_run_ids.length} child run(s).\\n`;
+        setStatus('QAQC started. Watching agent activity...', 'ok');
+        startPolling(state.currentRunId, 'qaqc');
+      } catch (error) {
+        setStatus(error.message, 'error');
+      } finally {
+        button.disabled = false;
+      }
+    }
+
     async function exitApplication() {
       if (!window.confirm('Exit Observation Harvester and cancel active harvests?')) return;
       try {
@@ -1245,6 +1545,7 @@ INDEX_HTML = r"""<!doctype html>
         setStatus('JSON copied.', 'ok');
       });
       $('copyQaqcButton').addEventListener('click', copyQaqcPrompt);
+      $('runQaqcButton').addEventListener('click', runQaqc);
       $('downloadJsonButton').addEventListener('click', () => {
         downloadText('observation-harvest.json', $('jsonOutput').value, 'application/json');
       });

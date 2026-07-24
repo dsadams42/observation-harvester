@@ -35,6 +35,30 @@ LEAD_PAYLOAD = [
     }
 ]
 
+QAQC_PAYLOAD = [
+    {
+        "lead_index": 0,
+        "source_url": "https://example.test/story",
+        "verification_status": "verified",
+        "source_reachable": True,
+        "facility_match": True,
+        "location_match": True,
+        "count_checks": [
+            {
+                "count": 12,
+                "group_type": "workers evacuated",
+                "reported_count_found": True,
+                "quote_found": True,
+                "supporting_quote": "Officials said 12 workers were evacuated.",
+                "notes": None,
+            }
+        ],
+        "supporting_quote": "Officials said 12 workers were evacuated.",
+        "recommended_action": "keep",
+        "review_notes": "Count, facility, and location are supported.",
+    }
+]
+
 
 def successful_runner(
     command: Sequence[str],
@@ -42,7 +66,8 @@ def successful_runner(
     cwd: Path,
 ) -> subprocess.CompletedProcess[str]:
     output_path = Path(command[command.index("-o") + 1])
-    output_path.write_text(json.dumps(LEAD_PAYLOAD), encoding="utf-8")
+    payload = QAQC_PAYLOAD if "Occupancy Lead QAQC Verification" in prompt else LEAD_PAYLOAD
+    output_path.write_text(json.dumps(payload), encoding="utf-8")
     assert "Tennessee" in prompt
     return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
@@ -70,6 +95,7 @@ def test_index_page_contains_local_app_controls(tmp_path: Path) -> None:
     assert "Run Harvest" in response.text
     assert "Copy JSON" in response.text
     assert "Copy QAQC Prompt" in response.text
+    assert "Run QAQC" in response.text
     assert "Download CSV" in response.text
     assert "Clear All" in response.text
     assert "Agent Activity" in response.text
@@ -79,6 +105,8 @@ def test_index_page_contains_local_app_controls(tmp_path: Path) -> None:
     assert "/api/runs/${state.currentRunId}/status" in response.text
     assert "/api/runs/${state.currentRunId}/cancel" in response.text
     assert "/api/runs/${state.currentRunId}/qaqc-prompt" in response.text
+    assert "/api/runs/${state.currentRunId}/qaqc-run" in response.text
+    assert "/api/runs/${state.currentRunId}/qaqc-reviews" in response.text
     assert "/api/runs/clear" in response.text
     assert "/api/app/exit" in response.text
 
@@ -212,6 +240,55 @@ def test_run_detail_leads_export_and_promote_endpoints(tmp_path: Path) -> None:
     assert Path(promoted.json()["run_file"]).is_file()
 
 
+def test_qaqc_run_endpoint_verifies_single_child_run(tmp_path: Path) -> None:
+    client = TestClient(create_app(workspace=tmp_path, runner=successful_runner, background=False))
+    created = client.post(
+        "/api/harvest/run",
+        json={
+            "country": "US",
+            "locality": "Tennessee",
+            "profiles": "commercial_business",
+            "profile": "factories_warehouses",
+            "target": 5,
+        },
+    ).json()
+    run_id = created["manifest"]["run_id"]
+
+    qaqc = client.post(f"/api/runs/{run_id}/qaqc-run")
+    reviews = client.get(f"/api/runs/{run_id}/qaqc-reviews")
+
+    assert qaqc.status_code == 200
+    assert qaqc.json()["qaqc"]["summary"]["completed_count"] == 1
+    assert qaqc.json()["qaqc"]["summary"]["review_count"] == 1
+    assert (tmp_path / f"qaqc_runs/{run_id}-qaqc.json").is_file()
+    assert reviews.json()["review_count"] == 1
+    assert reviews.json()["reviews"][0]["verification_status"] == "verified"
+
+
+def test_qaqc_run_endpoint_fans_out_for_campaign_parent(tmp_path: Path) -> None:
+    client = TestClient(create_app(workspace=tmp_path, runner=successful_runner, background=False))
+    created = client.post(
+        "/api/harvest/campaign-run",
+        json={
+            "country": "US",
+            "localities": ["Tennessee"],
+            "facility_types": ["schools", "manufacturing"],
+            "target": 3,
+        },
+    ).json()
+    campaign_id = created["manifest"]["campaign_id"]
+
+    qaqc = client.post(f"/api/runs/{campaign_id}/qaqc-run")
+    reviews = client.get(f"/api/runs/{campaign_id}/qaqc-reviews")
+
+    assert qaqc.status_code == 200
+    assert qaqc.json()["qaqc"]["summary"]["planned_count"] == 2
+    assert qaqc.json()["qaqc"]["summary"]["completed_count"] == 2
+    assert qaqc.json()["qaqc"]["summary"]["review_count"] == 2
+    assert reviews.json()["review_count"] == 2
+    assert len(reviews.json()["child_reviews"]) == 2
+
+
 def test_qaqc_prompt_endpoint_rejects_grouped_parent_manifest(tmp_path: Path) -> None:
     client = TestClient(create_app(workspace=tmp_path, runner=successful_runner, background=False))
     created = client.post(
@@ -246,6 +323,7 @@ def test_clear_runs_endpoint_removes_history_without_promoted_runs_or_exports(
         },
     ).json()
     run_id = created["manifest"]["run_id"]
+    client.post(f"/api/runs/{run_id}/qaqc-run")
     promoted = client.post(f"/api/runs/{run_id}/promote", json={"index": 0}).json()
     export_file = tmp_path / "exports/report.csv"
     export_file.parent.mkdir()
@@ -259,6 +337,7 @@ def test_clear_runs_endpoint_removes_history_without_promoted_runs_or_exports(
     assert not any((tmp_path / "harvest_runs").glob("*.json"))
     assert not any((tmp_path / "lead_runs").glob("*.json"))
     assert not any((tmp_path / "harvest_logs").glob("*.log"))
+    assert not any((tmp_path / "qaqc_runs").glob("*.json"))
     assert not any((tmp_path / "work").glob("*.md"))
     assert Path(promoted["run_file"]).is_file()
     assert export_file.is_file()

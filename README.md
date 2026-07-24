@@ -74,30 +74,36 @@ python -m pip install -e ".[app]"
 python -m pdt_observer app
 ```
 
-The first screen is the tool itself: enter a country, optional region/locality, profile set,
-optional facility type, and target count. The app writes the same runtime artifacts as the CLI:
-`work/`, `lead_runs/`, `harvest_runs/`, `exports/`, and `runs/`. Results are displayed as
-copyable JSON, with CSV and JSONL export buttons.
+The first screen is the tool itself: enter a country, optional region/locality, facility type,
+optional subtype, and target count. The app writes the same runtime artifacts as the CLI:
+`work/`, `lead_runs/`, `harvest_runs/`, `harvest_logs/`, `exports/`, and `runs/`. Results are
+displayed as copyable JSON, with CSV and JSONL export buttons.
+
+The app includes an Agent Activity panel while a harvest runs. It polls the run manifest and log
+file so the user can see prompt rendering, Codex launch, validation, completion, failure, or
+cancellation. Cancel Run stops active Codex harvest subprocesses launched by the current app
+session. Exit Application cancels active harvest children and shuts down this local app server; it
+does not kill unrelated Python or Codex processes elsewhere on the machine.
 
 ## Codex Subscription Workflow
 
 Use one of the prompts in `prompts/` from a Codex chat or automation. For multi-agent harvesting,
-start with `prompts/building_type_agent.md` and a profile definition such as
-`profiles/public_venues.json` or `profiles/commercial_business.json`.
+start with `prompts/building_type_agent.md` and a facility-type definition such as
+`profiles/schools.json`, `profiles/manufacturing.json`, or `profiles/restaurants.json`.
 
-Create a local batch of profile-specific work items:
-
-```powershell
-python -m pdt_observer batch create --locality Milltown --country US --profiles public_venues
-```
-
-Each Codex agent claims work for one profile:
+Create a local batch of subtype-specific work items:
 
 ```powershell
-python -m pdt_observer work claim --profile restaurants_bars --claimed-by codex-restaurants
+python -m pdt_observer batch create --locality Tennessee --country US --facility-type schools
 ```
 
-Render a profile-specific working prompt for the claimed item:
+Each Codex agent claims work for one subtype:
+
+```powershell
+python -m pdt_observer work claim --profile primary_secondary_education --claimed-by codex-schools
+```
+
+Render a subtype-specific working prompt for the claimed item:
 
 ```powershell
 python -m pdt_observer work prompt --work-item-id <work_item_id>
@@ -106,8 +112,8 @@ python -m pdt_observer work prompt --work-item-id <work_item_id>
 For country pilots, claims can be narrowed to a locality or exact work item:
 
 ```powershell
-python -m pdt_observer work claim --profile restaurants_bars --locality Manila --country PH --claimed-by codex-restaurants
-python -m pdt_observer work claim --work-item-id ph-manila-pilot-001-restaurants_bars --claimed-by codex-restaurants
+python -m pdt_observer work claim --profile light_manufacturing --locality Manila --country PH --claimed-by codex-manufacturing
+python -m pdt_observer work claim --work-item-id ph-manila-pilot-001-light_manufacturing --claimed-by codex-manufacturing
 ```
 
 Claiming is protected by a local file-backed lock so two agents do not intentionally receive the
@@ -132,13 +138,20 @@ The building-type agent prompt uses evidence-first quoted searches such as
 `"<locality>" "people were inside" <venue>`, `"<locality>" "customers were evacuated" <venue>`,
 and `"<locality>" "inside the <venue> when"` before broad venue discovery.
 
-Facility profiles tailor those searches by facility type, while the work item country scopes where
-to harvest. For example, `--profiles commercial_business --country PH` uses malls/retail/markets,
-offices/BPOs/call centers, factories/warehouses, and hotels/restaurants in the Philippines. It
-treats source-tied phrases such as evacuated employees, trapped workers, rescued guests, and
-evacuated shoppers as acceptable real-time occupancy proxies while keeping accepted observations
-gated by exact URL, exact quote, count, facility identity, locality/country, and georeference
-validation.
+Facility types are the top-level PDT observation families. Subtypes tune search and extraction
+inside a family. The built-in PDT-oriented facility types are currently `schools`, `manufacturing`,
+and `restaurants`, with subtypes such as `primary_secondary_education`, `university_college`,
+`light_manufacturing`, `heavy_manufacturing`, `full_service_restaurants`,
+`quick_service_restaurants`, and `bars_nightlife`. Legacy profile sets such as
+`commercial_business`, `public_venues`, and `residential` remain available for compatibility.
+
+The CLI still accepts `--profiles` and `--profile`, but new usage can read more naturally as
+`--facility-type` and `--subtype`. For example, `--facility-type manufacturing --country PH`
+searches manufacturing facilities in the Philippines, while `--subtype light_manufacturing`
+narrows that run to light industrial facilities. Source-tied phrases such as evacuated employees,
+trapped workers, rescued students, evacuated diners, and patrons inside a venue are acceptable
+real-time occupancy proxies, while accepted observations remain gated by exact URL, exact quote,
+count, facility identity, locality/country, and georeference validation.
 
 Qualifying evidence should come from source types that can plausibly document a count-bearing
 event or incident: news articles, wire-service stories, official public-safety or government
@@ -148,54 +161,73 @@ unsourced social reposts are context only; they may provide leads, but not accep
 
 ## Broad Lead Harvest
 
-For country-wide discovery, start with a permissive lead harvest. This mirrors a broad ChatGPT-style
-extraction prompt: collect many commercial/business occupancy leads, allow missing metadata as
-`Unknown` or `Not provided`, and keep subgroup counts when a source breaks them out. Lead harvests
-are not final accepted observations; they are reviewable candidates that can later be promoted into
-strict `InvestigationRun` artifacts.
+For country-wide discovery, start with a permissive lead harvest. This mirrors a broad
+ChatGPT-style extraction prompt: collect many facility-specific occupancy leads, allow missing
+metadata as `Unknown` or `Not provided`, and keep subgroup counts when a source breaks them out.
+Lead harvests are not final accepted observations; they are reviewable candidates that can later
+be promoted into strict `InvestigationRun` artifacts.
 
 Prepare a broad lead prompt:
 
 ```powershell
-python -m pdt_observer harvest prepare --country PH --profiles commercial_business --target 20 --output work/ph-commercial-leads.md
+python -m pdt_observer harvest prepare --country PH --facility-type manufacturing --target 20 --output work/ph-manufacturing-leads.md
 ```
 
 Or run the harvest end-to-end through Codex CLI without manual shell piping:
 
 ```powershell
-python -m pdt_observer harvest run --country PH --profiles commercial_business --target 20
+python -m pdt_observer harvest run --country PH --facility-type manufacturing --target 20
 ```
 
-For region-specific or facility-specific pilots, add `--locality` and `--profile`:
+For region-specific or subtype-specific pilots, add `--locality` and `--subtype`:
 
 ```powershell
-python -m pdt_observer harvest run --country US --locality Tennessee --profiles commercial_business --profile factories_warehouses --target 5
+python -m pdt_observer harvest run --country US --locality Tennessee --facility-type schools --subtype university_college --target 5
 ```
 
 `harvest run` writes the rendered prompt under `work/`, the JSON lead output under `lead_runs/`,
-and a run manifest under `harvest_runs/`. The manifest records the run ID, scope, profile,
-Codex command, output paths, exit code, validation result, summary, and failure message when
-applicable.
+activity logs under `harvest_logs/`, and a run manifest under `harvest_runs/`. The manifest records
+the run ID, scope, facility type, optional subtype, Codex command, output paths, log path, exit
+code, validation result, summary, and failure or cancellation message when applicable.
 
 If you prefer to run Codex manually, pass the prepared prompt through Codex CLI with web search:
 
 ```powershell
-codex --search exec --sandbox workspace-write --cd . -o lead_runs/ph-commercial-001.json - < work/ph-commercial-leads.md
+codex --search exec --sandbox workspace-write --cd . -o lead_runs/ph-manufacturing-001.json - < work/ph-manufacturing-leads.md
 ```
 
 Codex should return only the JSON array, and `-o` writes the final response to
-`lead_runs/ph-commercial-001.json`. Validate and summarize it:
+`lead_runs/ph-manufacturing-001.json`. Validate and summarize it:
 
 ```powershell
-python -m pdt_observer leads validate lead_runs/ph-commercial-001.json
-python -m pdt_observer leads summarize lead_runs/ph-commercial-001.json
+python -m pdt_observer leads validate lead_runs/ph-manufacturing-001.json
+python -m pdt_observer leads summarize lead_runs/ph-manufacturing-001.json
 ```
 
-Run one harvest per enabled facility profile in a profile set:
+Run one harvest per enabled subtype in a facility type:
 
 ```powershell
-python -m pdt_observer harvest batch-run --country US --locality Tennessee --profiles profiles/initial_facility_types.json --target 10
+python -m pdt_observer harvest batch-run --country US --locality Tennessee --facility-type restaurants --target 10
 ```
+
+Run a country-anchored campaign across multiple localities and facility types:
+
+```powershell
+python -m pdt_observer harvest campaign-run \
+  --country PH \
+  --locality Manila \
+  --locality Makati \
+  --locality "Cebu City" \
+  --facility-type schools \
+  --facility-type manufacturing \
+  --facility-type restaurants \
+  --target 10
+```
+
+`campaign-run` runs one child harvest per locality/facility-type pair. If no `--locality` is
+provided, it runs countrywide once per selected facility type. Campaign manifests are written to
+`harvest_runs/<campaign_id>.campaign.json` and summarize planned, completed, failed, and total
+lead counts across all child runs.
 
 Export lead outputs for review:
 
@@ -216,23 +248,41 @@ and georeference details are completed well enough for strict validation.
 ## Harvest Flow
 
 ```text
-User chooses scope
+User chooses harvest level
   |
-  |  country + optional locality + profile set + target count
+  +--> run
+  |      country + optional locality + one facility type + optional subtype
+  |
+  +--> batch-run
+  |      country + optional locality + one facility type expanded across subtypes
+  |
+  +--> campaign-run
+         one country + N localities + N facility types
+              |
+              |  creates one child run per locality/facility-type pair
+              v
+         harvest_runs/<campaign-id>.campaign.json
+              |
+              |  lists child run IDs and aggregate summary
+              v
+
+Child harvest run
+  |
+  |  country + optional locality + facility type + target count
   v
 python -m pdt_observer harvest prepare
   |
   |  writes/reprints a reusable Codex prompt
   v
-work/<country>-commercial-leads.md
+work/<country>-<facility-type>-leads.md
   |
   |  Codex CLI/Desktop runs prompt with web search
   v
-lead_runs/<country>-commercial-001.json
+lead_runs/<country>-<facility-type>-001.json
   |
   |  run metadata and validation summary
   v
-harvest_runs/<country>-commercial-001.json
+harvest_runs/<country>-<facility-type>-001.json
   |
   |  permissive lead schema:
   |  - partial metadata allowed

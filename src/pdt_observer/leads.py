@@ -200,6 +200,25 @@ def _bullet_list(values: tuple[str, ...]) -> str:
 
 
 def _profile_scope_guidance(profile_set: BuildingProfileSet) -> str:
+    if profile_set.profile_set_id == "schools":
+        return (
+            "Include incident-tied counts for school buildings and campus facilities. Do not treat "
+            "ordinary enrollment, attendance, campus population, or seating capacity as occupancy "
+            "observations unless the count is tied to a specific incident or evacuation."
+        )
+    if profile_set.profile_set_id == "manufacturing":
+        return (
+            "Include incident-tied counts for factories, plants, mills, workshops, and industrial "
+            "production facilities. Evacuated workers, trapped employees, and rescued crew members "
+            "are acceptable occupancy proxies. Do not treat workforce size or production capacity "
+            "as occupancy observations."
+        )
+    if profile_set.profile_set_id == "restaurants":
+        return (
+            "Include incident-tied counts for restaurants, cafes, quick-service outlets, bars, and "
+            "nightlife venues. Customers, patrons, diners, employees, and evacuated people are "
+            "acceptable occupancy groups when tied to the incident."
+        )
     if profile_set.profile_set_id == "commercial_business":
         return (
             "Do not extract residential buildings or outdoor public open spaces unless the source "
@@ -212,7 +231,7 @@ def _profile_scope_guidance(profile_set: BuildingProfileSet) -> str:
             "or residential portion of a mixed-use building."
         )
     return (
-        "Do not extract records outside this profile set unless the source ties the count to a "
+        "Do not extract records outside this facility type unless the source ties the count to a "
         "matching named facility."
     )
 
@@ -248,16 +267,16 @@ def render_lead_harvest_prompt(
 
 You are a specialized geospatial data extraction engine. Your objective is to search online news
 and public incident sources, inspect unstructured article text, and extract real-time occupancy
-lead records for facilities matching the selected profile set.
+lead records for facilities matching the selected PDT facility type and optional subtype.
 
 Target: {target} lead records.
 Country: {country_name} (`{country}`).
 Scope: {locality_scope}
-Profile set: {profile_set.label} (`{profile_set.profile_set_id}`).
+Facility type: {profile_set.label} (`{profile_set.profile_set_id}`).
 
 ## Inclusion Filter
 
-Only extract records for facilities matching this profile set:
+Only extract records for facilities matching this facility type or selected subtype:
 {_bullet_list(facility_labels)}
 
 Facility aliases and examples:

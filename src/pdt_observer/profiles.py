@@ -5,6 +5,8 @@ from pathlib import Path
 
 from pdt_observer.models import BuildingProfileSet, BuildingTypeProfile
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
 _PREFERRED_SOURCE_TYPES = (
     "local or national news article",
     "wire-service article",
@@ -174,19 +176,22 @@ PUBLIC_VENUE_PROFILES = BuildingProfileSet(
     ),
 )
 
-COMMERCIAL_BUSINESS_PROFILES = BuildingProfileSet.model_validate_json(
-    (Path(__file__).resolve().parents[2] / "profiles" / "commercial_business.json").read_text(
-        encoding="utf-8"
+def _load_profile_set(filename: str) -> BuildingProfileSet:
+    return BuildingProfileSet.model_validate_json(
+        (_REPO_ROOT / "profiles" / filename).read_text(encoding="utf-8")
     )
-)
 
-RESIDENTIAL_PROFILES = BuildingProfileSet.model_validate_json(
-    (Path(__file__).resolve().parents[2] / "profiles" / "residential.json").read_text(
-        encoding="utf-8"
-    )
-)
+
+COMMERCIAL_BUSINESS_PROFILES = _load_profile_set("commercial_business.json")
+RESIDENTIAL_PROFILES = _load_profile_set("residential.json")
+SCHOOLS_PROFILES = _load_profile_set("schools.json")
+MANUFACTURING_PROFILES = _load_profile_set("manufacturing.json")
+RESTAURANTS_PROFILES = _load_profile_set("restaurants.json")
 
 BUILTIN_PROFILE_SETS = {
+    SCHOOLS_PROFILES.profile_set_id: SCHOOLS_PROFILES,
+    MANUFACTURING_PROFILES.profile_set_id: MANUFACTURING_PROFILES,
+    RESTAURANTS_PROFILES.profile_set_id: RESTAURANTS_PROFILES,
     PUBLIC_VENUE_PROFILES.profile_set_id: PUBLIC_VENUE_PROFILES,
     COMMERCIAL_BUSINESS_PROFILES.profile_set_id: COMMERCIAL_BUSINESS_PROFILES,
     RESIDENTIAL_PROFILES.profile_set_id: RESIDENTIAL_PROFILES,

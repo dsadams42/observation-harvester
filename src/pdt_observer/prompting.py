@@ -140,7 +140,7 @@ the local Python validation harness in this repository. Do not use external API 
 - Locality: {item.locality}
 - Country: {country_name} (`{item.country}`)
 - Observation type: {item.observation_type}
-- Facility profile: {profile.label} (`{profile.profile_id}`)
+- Subtype: {profile.label} (`{profile.profile_id}`)
 - Continue only while `should_continue` is `true`; current value: {status.should_continue}
 - Accepted observations still needed: {status.remaining["accepted_needed"]}
 - Sources remaining: {status.remaining["sources_remaining"]}
@@ -151,7 +151,7 @@ the local Python validation harness in this repository. Do not use external API 
 ## Objective
 
 Find explicit historical headcounts of people physically present, trapped, rescued, or evacuated
-from facilities matching this assigned profile. Evacuated, trapped, and rescued groups are
+from facilities matching this assigned subtype. Evacuated, trapped, and rescued groups are
 acceptable real-time occupancy proxies when the source ties the count to a named facility.
 
 Profile guidance:

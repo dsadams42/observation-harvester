@@ -13,6 +13,7 @@ build/
 batches/
 exports/
 harvest_runs/
+harvest_logs/
 lead_runs/
 review/
 runs/

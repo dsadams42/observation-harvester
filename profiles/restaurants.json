@@ -1,0 +1,148 @@
+{
+  "profile_set_id": "restaurants",
+  "label": "Restaurants",
+  "profiles": [
+    {
+      "profile_id": "full_service_restaurants",
+      "label": "Full-service restaurants",
+      "source_search_prompt": "Find incident reports with quoted count-bearing phrases such as \"people were inside\", \"customers were inside\", \"patrons were inside\", \"diners were evacuated\", or \"inside the restaurant when\" for full-service restaurants, cafes, diners, bistros, and family restaurants. Prioritize news articles, official reports, and official incident announcements; treat restaurant guides, review pages, directory listings, seating capacity, and generic venue pages as context only.",
+      "preferred_source_types": [
+        "local or national news article",
+        "wire-service article",
+        "official emergency or public-safety incident report",
+        "official health, fire, or code enforcement report",
+        "official restaurant statement with a count-bearing incident detail"
+      ],
+      "context_only_source_types": [
+        "Wikipedia or encyclopedia page",
+        "restaurant directory, review, travel guide, listicle, or map listing",
+        "venue marketing or about page without a count-bearing event or incident",
+        "capacity, seating-chart, or reservation page",
+        "social media repost without an original authoritative source"
+      ],
+      "positive_evidence_patterns": [
+        "people were inside",
+        "customers were inside",
+        "patrons were inside",
+        "diners were inside",
+        "people were evacuated",
+        "customers were evacuated",
+        "diners were evacuated",
+        "people were rescued",
+        "inside the restaurant when",
+        "patrons inside"
+      ],
+      "negative_evidence_patterns": [
+        "capacity",
+        "seats",
+        "reservation",
+        "address",
+        "reviews"
+      ],
+      "venue_aliases": [
+        "restaurant",
+        "cafe",
+        "diner",
+        "bistro",
+        "family restaurant",
+        "eatery"
+      ],
+      "priority": 10
+    },
+    {
+      "profile_id": "quick_service_restaurants",
+      "label": "Quick-service restaurants",
+      "source_search_prompt": "Find incident reports with quoted count-bearing phrases such as \"employees were inside\", \"customers were inside\", \"people were evacuated\", \"workers were rescued\", or \"inside the fast-food restaurant when\" for fast-food restaurants, quick-service restaurants, takeout shops, food courts, coffee shops, and chain restaurant outlets. Prioritize news articles, official reports, and official incident announcements; treat restaurant guides, directory listings, seating capacity, and generic venue pages as context only.",
+      "preferred_source_types": [
+        "local or national news article",
+        "wire-service article",
+        "official emergency or public-safety incident report",
+        "official health, fire, or code enforcement report",
+        "official restaurant or franchise statement with a count-bearing incident detail"
+      ],
+      "context_only_source_types": [
+        "Wikipedia or encyclopedia page",
+        "restaurant directory, review, travel guide, listicle, or map listing",
+        "venue marketing or about page without a count-bearing event or incident",
+        "capacity, seating-chart, or reservation page",
+        "social media repost without an original authoritative source"
+      ],
+      "positive_evidence_patterns": [
+        "people were inside",
+        "customers were inside",
+        "employees were inside",
+        "workers were inside",
+        "people were evacuated",
+        "customers were evacuated",
+        "employees were evacuated",
+        "workers were rescued",
+        "inside the fast-food restaurant when",
+        "employees inside"
+      ],
+      "negative_evidence_patterns": [
+        "capacity",
+        "seats",
+        "employees nationwide",
+        "store count",
+        "reviews"
+      ],
+      "venue_aliases": [
+        "fast-food restaurant",
+        "quick-service restaurant",
+        "takeout shop",
+        "food court",
+        "coffee shop",
+        "chain restaurant"
+      ],
+      "priority": 20
+    },
+    {
+      "profile_id": "bars_nightlife",
+      "label": "Bars and nightlife",
+      "source_search_prompt": "Find incident reports with quoted count-bearing phrases such as \"patrons were inside\", \"people were inside\", \"customers were evacuated\", \"people were rescued\", or \"inside the bar when\" for bars, pubs, breweries, clubs, lounges, nightclubs, and nightlife venues. Prioritize news articles, official reports, and official incident announcements; treat nightlife guides, directory listings, venue capacity, and generic venue pages as context only.",
+      "preferred_source_types": [
+        "local or national news article",
+        "wire-service article",
+        "official emergency or public-safety incident report",
+        "official fire, police, or code enforcement report",
+        "official venue statement with a count-bearing incident detail"
+      ],
+      "context_only_source_types": [
+        "Wikipedia or encyclopedia page",
+        "bar, nightlife, travel guide, listicle, or map listing",
+        "venue marketing or about page without a count-bearing event or incident",
+        "capacity, seating-chart, or ticketing page",
+        "social media repost without an original authoritative source"
+      ],
+      "positive_evidence_patterns": [
+        "patrons were inside",
+        "people were inside",
+        "customers were inside",
+        "guests were inside",
+        "patrons were evacuated",
+        "people were evacuated",
+        "customers were evacuated",
+        "people were rescued",
+        "inside the bar when",
+        "inside the nightclub when"
+      ],
+      "negative_evidence_patterns": [
+        "capacity",
+        "seats",
+        "tickets sold",
+        "address",
+        "reviews"
+      ],
+      "venue_aliases": [
+        "bar",
+        "pub",
+        "brewery",
+        "club",
+        "lounge",
+        "nightclub",
+        "nightlife venue"
+      ],
+      "priority": 30
+    }
+  ]
+}

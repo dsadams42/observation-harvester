@@ -61,6 +61,7 @@ class HarvestRunStatus(StrEnum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class DayPart(StrEnum):
@@ -328,6 +329,7 @@ class HarvestRunManifest(StrictModel):
     validation_valid: bool | None = None
     summary: dict[str, object] | None = None
     error_message: str | None = None
+    log_path: str | None = None
 
 
 class HarvestBatchRunManifest(StrictModel):
@@ -343,6 +345,23 @@ class HarvestBatchRunManifest(StrictModel):
     completed_at: str | None = None
     summary: dict[str, object] | None = None
     error_message: str | None = None
+    log_path: str | None = None
+
+
+class HarvestCampaignRunManifest(StrictModel):
+    campaign_id: str = Field(min_length=1)
+    status: HarvestRunStatus
+    country: str = Field(min_length=2)
+    localities: tuple[str, ...] = ()
+    facility_types: tuple[str, ...] = Field(min_length=1)
+    target: int = Field(ge=1)
+    child_run_ids: tuple[str, ...]
+    child_manifest_paths: tuple[str, ...]
+    started_at: str = Field(min_length=1)
+    completed_at: str | None = None
+    summary: dict[str, object] | None = None
+    error_message: str | None = None
+    log_path: str | None = None
 
 
 class ReviewQueueItem(StrictModel):

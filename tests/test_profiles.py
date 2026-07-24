@@ -59,6 +59,26 @@ def test_residential_profile_set_loads_from_builtin() -> None:
     ]
 
 
+def test_pdt_facility_type_profile_sets_load_from_builtin() -> None:
+    schools = get_profile_set("schools")
+    manufacturing = get_profile_set("manufacturing")
+    restaurants = get_profile_set("restaurants")
+
+    assert [profile.profile_id for profile in schools.profiles] == [
+        "primary_secondary_education",
+        "university_college",
+    ]
+    assert [profile.profile_id for profile in manufacturing.profiles] == [
+        "light_manufacturing",
+        "heavy_manufacturing",
+    ]
+    assert [profile.profile_id for profile in restaurants.profiles] == [
+        "full_service_restaurants",
+        "quick_service_restaurants",
+        "bars_nightlife",
+    ]
+
+
 def test_builtin_commercial_business_profiles_match_json() -> None:
     builtin = get_profile_set("commercial_business")
     from_json = BuildingProfileSet.model_validate_json(
@@ -75,6 +95,16 @@ def test_builtin_residential_profiles_match_json() -> None:
     )
 
     assert builtin == from_json
+
+
+def test_builtin_pdt_facility_type_profiles_match_json() -> None:
+    for profile_set_id in ("schools", "manufacturing", "restaurants"):
+        builtin = get_profile_set(profile_set_id)
+        from_json = BuildingProfileSet.model_validate_json(
+            Path(f"profiles/{profile_set_id}.json").read_text(encoding="utf-8")
+        )
+
+        assert builtin == from_json
 
 
 def test_custom_profile_set_can_load_from_path(tmp_path: Path) -> None:
@@ -154,6 +184,30 @@ def test_residential_profiles_include_residential_proxy_phrases() -> None:
     assert "condo" in apartments.venue_aliases
     assert "families displaced" in houses.positive_evidence_patterns
     assert "population" in houses.negative_evidence_patterns
+
+
+def test_pdt_facility_type_profiles_include_subtype_guidance() -> None:
+    schools = get_profile_set("schools")
+    manufacturing = get_profile_set("manufacturing")
+    restaurants = get_profile_set("restaurants")
+    university = next(
+        profile for profile in schools.profiles if profile.profile_id == "university_college"
+    )
+    heavy = next(
+        profile for profile in manufacturing.profiles if profile.profile_id == "heavy_manufacturing"
+    )
+    quick_service = next(
+        profile
+        for profile in restaurants.profiles
+        if profile.profile_id == "quick_service_restaurants"
+    )
+
+    assert "students were evacuated" in university.positive_evidence_patterns
+    assert "campus population" in university.negative_evidence_patterns
+    assert "workers were trapped" in heavy.positive_evidence_patterns
+    assert "workforce size" in heavy.negative_evidence_patterns
+    assert "employees were evacuated" in quick_service.positive_evidence_patterns
+    assert "fast-food restaurant" in quick_service.venue_aliases
 
 
 def test_public_venue_profiles_include_evidence_first_phrases() -> None:

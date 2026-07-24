@@ -4,6 +4,8 @@ import json
 import stat
 from pathlib import Path
 
+import pytest
+
 from pdt_observer.cli import main
 from pdt_observer.models import InvestigationResult
 
@@ -94,7 +96,7 @@ def test_cli_batch_create_and_work_claim(tmp_path, capsys) -> None:
         [
             "work",
             "claim",
-            "--profile",
+            "--subtype",
             "restaurants_bars",
             "--claimed-by",
             "codex-restaurants",
@@ -226,6 +228,37 @@ def test_cli_harvest_prepare_can_focus_one_profile(tmp_path, capsys) -> None:
     assert "shopping center" not in captured.out
 
 
+def test_cli_harvest_prepare_accepts_facility_type_and_subtype_aliases(tmp_path, capsys) -> None:
+    output = tmp_path / "tn-university.md"
+
+    exit_code = main(
+        [
+            "harvest",
+            "prepare",
+            "--country",
+            "US",
+            "--locality",
+            "Tennessee",
+            "--facility-type",
+            "schools",
+            "--subtype",
+            "university_college",
+            "--target",
+            "5",
+            "--output",
+            str(output),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert output.is_file()
+    assert "Facility type: Schools (`schools`)." in captured.out
+    assert "- University and college" in captured.out
+    assert "- Primary and secondary education" not in captured.out
+    assert "campus population" in captured.out
+
+
 def test_cli_leads_validate_and_summarize(capsys) -> None:
     exit_code = main(["leads", "validate", "examples/ph_commercial_leads.json"])
     captured = capsys.readouterr()
@@ -314,6 +347,98 @@ output.write_text(json.dumps([
     assert (tmp_path / "work/us-tn-factories.md").is_file()
     assert (tmp_path / "lead_runs/us-tn-factories.json").is_file()
     assert (tmp_path / "harvest_runs/us-tn-factories.json").is_file()
+
+
+def test_cli_harvest_campaign_run_invokes_codex_for_each_child(tmp_path, capsys) -> None:
+    fake_codex = tmp_path / "fake_codex.py"
+    fake_codex.write_text(
+        """#!/usr/bin/env python3
+import json
+import pathlib
+import sys
+
+output = pathlib.Path(sys.argv[sys.argv.index("-o") + 1])
+sys.stdin.read()
+output.parent.mkdir(parents=True, exist_ok=True)
+output.write_text(json.dumps([
+  {
+    "is_valid_occupancy_report": True,
+    "source_url": "https://example.test/story",
+    "source_title": "Workers evacuated",
+    "source_type": "news",
+    "evidence_quote": "Officials said 12 workers were evacuated from the warehouse.",
+    "incident_date": "2026-01-02",
+    "incident_time": "03:30 PM",
+    "occupancy_data": [{"count": 12, "group_type": "workers evacuated"}],
+    "location": {
+      "facility_name": "Example Warehouse",
+      "specific_address_or_landmark": "Industrial Drive",
+      "city_or_region": "Tennessee",
+      "country": "US"
+    },
+    "confidence": "high",
+    "is_facility_level": True,
+    "is_regional_aggregate": False,
+    "review_flags": [],
+    "review_notes": None
+  }
+]))
+""",
+        encoding="utf-8",
+    )
+    fake_codex.chmod(fake_codex.stat().st_mode | stat.S_IXUSR)
+
+    exit_code = main(
+        [
+            "harvest",
+            "campaign-run",
+            "--country",
+            "US",
+            "--locality",
+            "Tennessee",
+            "--locality",
+            "Kentucky",
+            "--facility-type",
+            "schools",
+            "--facility-type",
+            "manufacturing",
+            "--target",
+            "3",
+            "--workspace",
+            str(tmp_path),
+            "--campaign-id",
+            "us-south-campaign",
+            "--codex-bin",
+            str(fake_codex),
+        ]
+    )
+    captured = capsys.readouterr()
+    manifest = json.loads(captured.out)
+
+    assert exit_code == 0
+    assert manifest["status"] == "completed"
+    assert manifest["summary"] == {
+        "planned_run_count": 4,
+        "completed_count": 4,
+        "failed_count": 0,
+        "lead_count": 4,
+    }
+    assert manifest["child_run_ids"] == [
+        "us-south-campaign-tennessee-schools",
+        "us-south-campaign-tennessee-manufacturing",
+        "us-south-campaign-kentucky-schools",
+        "us-south-campaign-kentucky-manufacturing",
+    ]
+    assert (tmp_path / "harvest_runs/us-south-campaign.campaign.json").is_file()
+
+
+def test_cli_harvest_campaign_run_requires_facility_type(capsys) -> None:
+    with pytest.raises(SystemExit) as exc:
+        main(["harvest", "campaign-run", "--country", "US"])
+    captured = capsys.readouterr()
+
+    assert exc.value.code == 2
+    assert "--facility-type" in captured.err
 
 
 def test_cli_leads_export_csv_and_jsonl(tmp_path, capsys) -> None:

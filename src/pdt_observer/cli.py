@@ -8,7 +8,7 @@ from pathlib import Path
 
 from pdt_observer.agent import load_task, run_agent_investigation, run_offline_demo
 from pdt_observer.config import MissingAPIKeyError
-from pdt_observer.harvest import run_harvest, run_harvest_batch
+from pdt_observer.harvest import run_harvest, run_harvest_batch, run_harvest_campaign
 from pdt_observer.leads import (
     export_leads,
     leads_to_json,
@@ -67,7 +67,12 @@ def build_parser() -> argparse.ArgumentParser:
     batch_create = batch_subparsers.add_parser("create", help="Create profile work items.")
     batch_create.add_argument("--locality", required=True)
     batch_create.add_argument("--country", required=True)
-    batch_create.add_argument("--profiles", default="public_venues")
+    batch_create.add_argument(
+        "--profiles",
+        "--facility-type",
+        dest="profiles",
+        default="schools",
+    )
     batch_create.add_argument("--batch-id")
     batch_create.add_argument("--source-hint", action="append", default=[])
     batch_create.add_argument("--workspace", type=Path, default=Path("."))
@@ -83,12 +88,12 @@ def build_parser() -> argparse.ArgumentParser:
     work_list = work_subparsers.add_parser("list", help="List work items.")
     work_list.add_argument("--workspace", type=Path, default=Path("."))
     work_list.add_argument("--status", choices=[status.value for status in WorkStatus])
-    work_list.add_argument("--profile")
+    work_list.add_argument("--profile", "--subtype", dest="profile")
     work_list.add_argument("--locality")
     work_list.add_argument("--country")
     work_claim = work_subparsers.add_parser("claim", help="Claim the next open work item.")
     work_claim.add_argument("--workspace", type=Path, default=Path("."))
-    work_claim.add_argument("--profile")
+    work_claim.add_argument("--profile", "--subtype", dest="profile")
     work_claim.add_argument("--locality")
     work_claim.add_argument("--country")
     work_claim.add_argument("--work-item-id")
@@ -98,7 +103,7 @@ def build_parser() -> argparse.ArgumentParser:
     work_status.add_argument("--work-item-id", required=True)
     work_prompt = work_subparsers.add_parser(
         "prompt",
-        help="Render a profile-specific Codex prompt for a work item.",
+        help="Render a subtype-specific Codex prompt for a work item.",
     )
     work_prompt.add_argument("--workspace", type=Path, default=Path("."))
     work_prompt.add_argument("--work-item-id", required=True)
@@ -166,11 +171,22 @@ def build_parser() -> argparse.ArgumentParser:
     harvest_subparsers = harvest.add_subparsers(dest="harvest_command", required=True)
     harvest_prepare = harvest_subparsers.add_parser(
         "prepare",
-        help="Render a broad country/profile lead-harvest prompt.",
+        help="Render a broad country/facility-type lead-harvest prompt.",
     )
     harvest_prepare.add_argument("--country", required=True)
-    harvest_prepare.add_argument("--profiles", default="commercial_business")
-    harvest_prepare.add_argument("--profile")
+    harvest_prepare.add_argument(
+        "--profiles",
+        "--facility-type",
+        dest="profiles",
+        default="schools",
+        help="Top-level facility type to harvest.",
+    )
+    harvest_prepare.add_argument(
+        "--profile",
+        "--subtype",
+        dest="profile",
+        help="Optional focused subtype within the facility type.",
+    )
     harvest_prepare.add_argument("--target", type=int, default=20)
     harvest_prepare.add_argument("--locality")
     harvest_prepare.add_argument("--output", type=Path)
@@ -179,8 +195,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Render and execute one broad lead harvest through Codex CLI.",
     )
     harvest_run.add_argument("--country", required=True)
-    harvest_run.add_argument("--profiles", default="commercial_business")
-    harvest_run.add_argument("--profile")
+    harvest_run.add_argument(
+        "--profiles",
+        "--facility-type",
+        dest="profiles",
+        default="schools",
+        help="Top-level facility type to harvest.",
+    )
+    harvest_run.add_argument(
+        "--profile",
+        "--subtype",
+        dest="profile",
+        help="Optional focused subtype within the facility type.",
+    )
     harvest_run.add_argument("--target", type=int, default=20)
     harvest_run.add_argument("--locality")
     harvest_run.add_argument("--workspace", type=Path, default=Path("."))
@@ -188,15 +215,38 @@ def build_parser() -> argparse.ArgumentParser:
     harvest_run.add_argument("--codex-bin", default="codex")
     harvest_batch_run = harvest_subparsers.add_parser(
         "batch-run",
-        help="Run one focused harvest per enabled profile in a profile set.",
+        help="Run one focused harvest per enabled subtype in a facility type.",
     )
     harvest_batch_run.add_argument("--country", required=True)
-    harvest_batch_run.add_argument("--profiles", default="commercial_business")
+    harvest_batch_run.add_argument(
+        "--profiles",
+        "--facility-type",
+        dest="profiles",
+        default="schools",
+        help="Top-level facility type to harvest.",
+    )
     harvest_batch_run.add_argument("--target", type=int, default=20)
     harvest_batch_run.add_argument("--locality")
     harvest_batch_run.add_argument("--workspace", type=Path, default=Path("."))
     harvest_batch_run.add_argument("--batch-id")
     harvest_batch_run.add_argument("--codex-bin", default="codex")
+    harvest_campaign_run = harvest_subparsers.add_parser(
+        "campaign-run",
+        help="Run one harvest per selected locality/facility-type pair.",
+    )
+    harvest_campaign_run.add_argument("--country", required=True)
+    harvest_campaign_run.add_argument("--locality", action="append", default=[])
+    harvest_campaign_run.add_argument(
+        "--facility-type",
+        dest="facility_types",
+        action="append",
+        required=True,
+        help="Top-level facility type to harvest. Repeat for multiple facility types.",
+    )
+    harvest_campaign_run.add_argument("--target", type=int, default=20)
+    harvest_campaign_run.add_argument("--workspace", type=Path, default=Path("."))
+    harvest_campaign_run.add_argument("--campaign-id")
+    harvest_campaign_run.add_argument("--codex-bin", default="codex")
 
     leads = subparsers.add_parser("leads", help="Validate and summarize broad lead JSON arrays.")
     leads_subparsers = leads.add_subparsers(dest="leads_command", required=True)
@@ -426,6 +476,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             print(batch_run_manifest.model_dump_json(indent=2))
             return 0 if batch_run_manifest.status == HarvestRunStatus.COMPLETED else 1
+        if args.command == "harvest" and args.harvest_command == "campaign-run":
+            campaign_manifest = run_harvest_campaign(
+                root=args.workspace,
+                country=args.country,
+                localities=tuple(args.locality),
+                facility_types=tuple(args.facility_types),
+                target=args.target,
+                campaign_id=args.campaign_id,
+                codex_bin=args.codex_bin,
+            )
+            print(campaign_manifest.model_dump_json(indent=2))
+            return 0 if campaign_manifest.status == HarvestRunStatus.COMPLETED else 1
         if args.command == "leads" and args.leads_command == "validate":
             lead_items = load_leads(args.lead_file)
             if args.pretty:

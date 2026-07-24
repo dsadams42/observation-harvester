@@ -1,0 +1,104 @@
+{
+  "profile_set_id": "schools",
+  "label": "Schools",
+  "profiles": [
+    {
+      "profile_id": "primary_secondary_education",
+      "label": "Primary and secondary education",
+      "source_search_prompt": "Find incident reports with quoted count-bearing phrases such as \"students were inside\", \"children were inside\", \"students were evacuated\", \"pupils were evacuated\", or \"inside the school when\" for elementary schools, primary schools, middle schools, high schools, secondary schools, preschools, and childcare centers. Prioritize news articles, official reports, and official attendance announcements; treat enrollment, directory, map, and generic school profile pages as context only.",
+      "preferred_source_types": [
+        "local or national news article",
+        "wire-service article",
+        "official emergency or public-safety incident report",
+        "official education department incident report",
+        "official school district or school incident announcement"
+      ],
+      "context_only_source_types": [
+        "Wikipedia or encyclopedia page",
+        "school directory or map listing",
+        "generic school profile page without a count-bearing event or incident",
+        "enrollment, capacity, or annual statistics page",
+        "social media repost without an original authoritative source"
+      ],
+      "positive_evidence_patterns": [
+        "students were inside",
+        "children were inside",
+        "pupils were inside",
+        "students were evacuated",
+        "children were evacuated",
+        "pupils were evacuated",
+        "students were rescued",
+        "inside the school when",
+        "students inside",
+        "children inside"
+      ],
+      "negative_evidence_patterns": [
+        "enrollment",
+        "student enrollment",
+        "school capacity",
+        "graduation year",
+        "address"
+      ],
+      "venue_aliases": [
+        "elementary school",
+        "primary school",
+        "middle school",
+        "high school",
+        "secondary school",
+        "preschool",
+        "daycare",
+        "childcare center"
+      ],
+      "priority": 10
+    },
+    {
+      "profile_id": "university_college",
+      "label": "University and college",
+      "source_search_prompt": "Find incident reports with quoted count-bearing phrases such as \"students were inside\", \"people were evacuated\", \"occupants were evacuated\", \"students were rescued\", or \"inside the campus building when\" for universities, colleges, dormitories, lecture halls, laboratories, libraries, and campus buildings. Prioritize news articles, official reports, and official campus safety announcements; treat enrollment, rankings, directory, and generic campus pages as context only.",
+      "preferred_source_types": [
+        "local or national news article",
+        "wire-service article",
+        "official campus safety incident report",
+        "official emergency or public-safety incident report",
+        "official university or college announcement"
+      ],
+      "context_only_source_types": [
+        "Wikipedia or encyclopedia page",
+        "campus directory or map listing",
+        "generic campus profile page without a count-bearing event or incident",
+        "enrollment, capacity, ranking, or statistics page",
+        "social media repost without an original authoritative source"
+      ],
+      "positive_evidence_patterns": [
+        "students were inside",
+        "people were inside",
+        "occupants were inside",
+        "students were evacuated",
+        "people were evacuated",
+        "occupants were evacuated",
+        "students were rescued",
+        "inside the campus building when",
+        "inside the dormitory when",
+        "people inside"
+      ],
+      "negative_evidence_patterns": [
+        "enrollment",
+        "student population",
+        "campus population",
+        "seating capacity",
+        "ranking"
+      ],
+      "venue_aliases": [
+        "university",
+        "college",
+        "campus",
+        "dormitory",
+        "lecture hall",
+        "laboratory",
+        "library",
+        "student center"
+      ],
+      "priority": 20
+    }
+  ]
+}

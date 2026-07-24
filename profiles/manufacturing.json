@@ -1,0 +1,104 @@
+{
+  "profile_set_id": "manufacturing",
+  "label": "Manufacturing",
+  "profiles": [
+    {
+      "profile_id": "light_manufacturing",
+      "label": "Light manufacturing",
+      "source_search_prompt": "Find incident reports with quoted count-bearing phrases such as \"workers were inside\", \"employees were evacuated\", \"workers were trapped\", \"employees were rescued\", or \"inside the factory when\" for light manufacturing plants, assembly plants, electronics factories, garment factories, food processing plants, packaging plants, and small industrial workshops. Prioritize news articles, official reports, and labor or safety regulator incident reports; treat production capacity, workforce size, directory, and company profile pages as context only.",
+      "preferred_source_types": [
+        "local or national news article",
+        "wire-service article",
+        "official emergency or public-safety incident report",
+        "official workplace safety or labor regulator incident report",
+        "official company incident statement with a count-bearing detail"
+      ],
+      "context_only_source_types": [
+        "Wikipedia or encyclopedia page",
+        "industrial directory or map listing",
+        "company profile page without a count-bearing event or incident",
+        "production capacity, annual output, or workforce size page",
+        "social media repost without an original authoritative source"
+      ],
+      "positive_evidence_patterns": [
+        "workers were inside",
+        "employees were inside",
+        "workers were evacuated",
+        "employees were evacuated",
+        "workers were trapped",
+        "employees were trapped",
+        "workers were rescued",
+        "inside the factory when",
+        "inside the plant when",
+        "workers inside"
+      ],
+      "negative_evidence_patterns": [
+        "production capacity",
+        "annual output",
+        "workforce size",
+        "number of employees",
+        "floor area"
+      ],
+      "venue_aliases": [
+        "factory",
+        "plant",
+        "assembly plant",
+        "electronics factory",
+        "garment factory",
+        "food processing plant",
+        "packaging plant",
+        "workshop"
+      ],
+      "priority": 10
+    },
+    {
+      "profile_id": "heavy_manufacturing",
+      "label": "Heavy manufacturing",
+      "source_search_prompt": "Find incident reports with quoted count-bearing phrases such as \"workers were inside\", \"employees were evacuated\", \"workers were trapped\", \"crew members were rescued\", or \"inside the mill when\" for steel mills, chemical plants, refineries, cement plants, shipyards, metal works, foundries, and large industrial plants. Prioritize news articles, official reports, and safety regulator incident reports; treat production capacity, workforce size, directory, and company profile pages as context only.",
+      "preferred_source_types": [
+        "local or national news article",
+        "wire-service article",
+        "official emergency or public-safety incident report",
+        "official workplace safety or labor regulator incident report",
+        "official environmental or industrial safety incident report"
+      ],
+      "context_only_source_types": [
+        "Wikipedia or encyclopedia page",
+        "industrial directory or map listing",
+        "company profile page without a count-bearing event or incident",
+        "production capacity, annual output, or workforce size page",
+        "social media repost without an original authoritative source"
+      ],
+      "positive_evidence_patterns": [
+        "workers were inside",
+        "employees were inside",
+        "crew members were inside",
+        "workers were evacuated",
+        "employees were evacuated",
+        "workers were trapped",
+        "crew members were rescued",
+        "inside the mill when",
+        "inside the refinery when",
+        "workers inside"
+      ],
+      "negative_evidence_patterns": [
+        "production capacity",
+        "annual output",
+        "workforce size",
+        "number of employees",
+        "tonnes per year"
+      ],
+      "venue_aliases": [
+        "steel mill",
+        "chemical plant",
+        "refinery",
+        "cement plant",
+        "shipyard",
+        "metal works",
+        "foundry",
+        "industrial plant"
+      ],
+      "priority": 20
+    }
+  ]
+}

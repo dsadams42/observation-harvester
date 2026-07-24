@@ -787,11 +787,19 @@ output.write_text("[]")
 
 
 def test_launcher_references_bootstrap_steps() -> None:
-    launcher = Path("Observation Harvester.command").read_text(encoding="utf-8")
+    mac_launcher = Path("Observation Harvester.command").read_text(encoding="utf-8")
+    windows_launcher = Path("Observation Harvester.bat").read_text(encoding="utf-8")
 
-    assert ".venv" in launcher
-    assert '.[app]' in launcher
-    assert "command -v codex" in launcher
-    assert "APP_PORT" in launcher
-    assert "8771" in launcher
-    assert "python -m pdt_observer app" in launcher
+    assert ".venv" in mac_launcher
+    assert '.[app]' in mac_launcher
+    assert "command -v codex" in mac_launcher
+    assert "APP_PORT" in mac_launcher
+    assert "8771" in mac_launcher
+    assert "python -m pdt_observer app" in mac_launcher
+
+    assert ".venv\\Scripts\\python.exe" in windows_launcher
+    assert '.[app]' in windows_launcher
+    assert "where codex" in windows_launcher
+    assert "OBSERVATION_HARVESTER_PORT" in windows_launcher
+    assert "8771" in windows_launcher
+    assert "python -m pdt_observer app" in windows_launcher

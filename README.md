@@ -60,8 +60,14 @@ On macOS, double-click:
 Observation Harvester.command
 ```
 
-The launcher creates `.venv` if needed, installs `.[app]`, checks that `codex` is on `PATH`,
-starts the local server, and opens:
+On Windows, double-click:
+
+```text
+Observation Harvester.bat
+```
+
+The launchers create `.venv` if needed, install `.[app]`, check that `codex` is on `PATH`,
+start the local server, and open:
 
 ```text
 http://127.0.0.1:8771

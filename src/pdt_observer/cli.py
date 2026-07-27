@@ -70,7 +70,10 @@ def load_run(path: Path) -> InvestigationRun:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pdt-observer",
-        description="Run a bounded PDT observation-harvesting investigation.",
+        description=(
+            "Run OASIS, the Observation Acquisition and Spatial Information "
+            "Synthesis workbench."
+        ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("demo", help="Run the deterministic offline Milltown demo.")

@@ -212,7 +212,9 @@ def test_index_page_contains_local_app_controls(tmp_path: Path) -> None:
     html = response.text
 
     assert response.status_code == 200
-    assert "Observation Harvester" in html
+    assert "<title>OASIS</title>" in html
+    assert "Observation Acquisition and Spatial Information Synthesis" in html
+    assert 'src="/assets/oasis-logo.jpg"' in html
     assert "Country" in html
     assert "Facility Type" in html
     assert "Subtype" in html
@@ -220,6 +222,11 @@ def test_index_page_contains_local_app_controls(tmp_path: Path) -> None:
     assert "Regions or Localities" in html
     assert "Agentic Workbench" in html
     assert "Geometry Studio" in html
+
+    logo = client.get("/assets/oasis-logo.jpg")
+    assert logo.status_code == 200
+    assert logo.headers["content-type"] == "image/jpeg"
+    assert logo.content.startswith(b"\xff\xd8\xff")
     assert 'role="tablist"' in html
     assert 'data-workspace="workbench"' in html
     assert 'data-workspace="geometry"' in html
@@ -659,7 +666,7 @@ def test_sample_transcript_combines_pipeline_stages_and_downloads(tmp_path: Path
     download = client.get(f"/api/samples/{sample_set_id}/transcript.txt")
 
     assert transcript.status_code == 200
-    assert "OBSERVATION HARVESTER PIPELINE TRANSCRIPT" in transcript.text
+    assert "OASIS PIPELINE TRANSCRIPT" in transcript.text
     assert "=== INITIAL HARVEST ===" in transcript.text
     assert "=== EVIDENCE QAQC ===" in transcript.text
     assert "=== ADDRESS ENRICHMENT ===" in transcript.text
@@ -1457,14 +1464,17 @@ output.write_text("[]")
 
 
 def test_launcher_references_bootstrap_steps() -> None:
-    mac_launcher = Path("Observation Harvester.command").read_text(encoding="utf-8")
-    windows_launcher = Path("Observation Harvester.bat").read_text(encoding="utf-8")
+    mac_launcher = Path("OASIS.command").read_text(encoding="utf-8")
+    windows_launcher = Path("OASIS.bat").read_text(encoding="utf-8")
+    legacy_mac_launcher = Path("Observation Harvester.command").read_text(encoding="utf-8")
+    legacy_windows_launcher = Path("Observation Harvester.bat").read_text(encoding="utf-8")
 
     assert ".venv" in mac_launcher
     assert "ensurepip --upgrade" in mac_launcher
     assert '.[app]' in mac_launcher
     assert "command -v codex" in mac_launcher
     assert "APP_PORT" in mac_launcher
+    assert "OASIS_PORT" in mac_launcher
     assert "8771" in mac_launcher
     assert "python -m pdt_observer app" in mac_launcher
 
@@ -1473,9 +1483,13 @@ def test_launcher_references_bootstrap_steps() -> None:
     assert '--workspace "%WORKSPACE_DIR%"' in windows_launcher
     assert "ensurepip --upgrade" in windows_launcher
     assert '.[app]' in windows_launcher
+    assert "OASIS_CODEX_BIN" in windows_launcher
     assert "OBSERVATION_HARVESTER_CODEX_BIN" in windows_launcher
     assert "where codex.exe" in windows_launcher
     assert '--codex-bin "%CODEX_BIN%"' in windows_launcher
     assert "OBSERVATION_HARVESTER_PORT" in windows_launcher
+    assert "OASIS_PORT" in windows_launcher
     assert "8771" in windows_launcher
     assert '".venv\\Scripts\\python.exe" -m pdt_observer app' in windows_launcher
+    assert "OASIS.command" in legacy_mac_launcher
+    assert "OASIS.bat" in legacy_windows_launcher

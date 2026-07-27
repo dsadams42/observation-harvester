@@ -238,7 +238,7 @@ def create_observation_agent(
     from agents import Agent
 
     return Agent(
-        name="PDT observation harvester",
+        name="OASIS observation investigator",
         model=settings.agent_model,
         instructions=AGENT_INSTRUCTIONS,
         tools=_make_agent_tools(source_service, geocoder),

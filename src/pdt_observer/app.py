@@ -3753,6 +3753,26 @@ INDEX_HTML = r"""<!doctype html>
       border-color: var(--accent);
       background: var(--selected);
     }
+    .geometry-queue-tabs {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      overflow: hidden;
+      margin-bottom: 8px;
+    }
+    .geometry-queue-tabs button {
+      border: 0;
+      border-radius: 0;
+      background: var(--input-bg);
+      color: var(--muted);
+      padding: 8px;
+      min-height: 42px;
+    }
+    .geometry-queue-tabs button.active {
+      background: var(--accent);
+      color: var(--button-text);
+    }
     .extent-summary {
       border: 1px solid var(--line);
       border-radius: 6px;
@@ -4117,6 +4137,25 @@ INDEX_HTML = r"""<!doctype html>
       </div>
       <div class="geometry-layout">
         <div>
+          <div class="geometry-queue-tabs" role="tablist" aria-label="Geometry observation queues">
+            <button
+              id="geocodedQueueTab"
+              class="active"
+              type="button"
+              role="tab"
+              aria-selected="true"
+            >
+              Geocoded <span id="geocodedQueueCount">0</span>
+            </button>
+            <button
+              id="manualQueueTab"
+              type="button"
+              role="tab"
+              aria-selected="false"
+            >
+              Needs Manual Geocoding <span id="manualQueueCount">0</span>
+            </button>
+          </div>
           <div class="geometry-list" id="geometryList"></div>
           <div class="coordinate-resolver">
             <h3>Resolve Selected Coordinate</h3>
@@ -4260,6 +4299,7 @@ INDEX_HTML = r"""<!doctype html>
       coordinatePlacementMode: false,
       selectedCandidateOptions: [],
       pendingCoordinatePreview: null,
+      geometryListTab: 'geocoded',
       themePreference: 'system',
       workflow: null,
       activeWorkspace: 'workbench',
@@ -5321,8 +5361,61 @@ INDEX_HTML = r"""<!doctype html>
       }
     }
 
+    function needsManualGeocoding(item) {
+      if (!item || item.geometry_status === 'skipped') return false;
+      if (pointFromGeometry(item)) return false;
+      return (
+        item.geometry_status === 'needs_review' ||
+        Boolean(item.geometry?.spatial_validation?.requires_human_intervention)
+      );
+    }
+
+    function geocodedGeometryItems() {
+      return state.geometryItems.filter((item) => Boolean(pointFromGeometry(item)));
+    }
+
+    function manualGeometryItems() {
+      return state.geometryItems.filter((item) => needsManualGeocoding(item));
+    }
+
+    function geometryItemsForActiveTab() {
+      return state.geometryListTab === 'manual'
+        ? manualGeometryItems()
+        : geocodedGeometryItems();
+    }
+
+    function setGeometryListTab(tab) {
+      state.geometryListTab = tab === 'manual' ? 'manual' : 'geocoded';
+      renderGeometryList();
+    }
+
+    function chooseGeometryListTabForLoadedItems() {
+      state.geometryListTab = manualGeometryItems().length ? 'manual' : 'geocoded';
+    }
+
+    function renderGeometryQueueTabs() {
+      const geocodedCount = geocodedGeometryItems().length;
+      const manualCount = manualGeometryItems().length;
+      $('geocodedQueueCount').textContent = geocodedCount;
+      $('manualQueueCount').textContent = manualCount;
+      $('geocodedQueueTab').classList.toggle('active', state.geometryListTab === 'geocoded');
+      $('manualQueueTab').classList.toggle('active', state.geometryListTab === 'manual');
+      $('geocodedQueueTab').setAttribute(
+        'aria-selected',
+        String(state.geometryListTab === 'geocoded')
+      );
+      $('manualQueueTab').setAttribute(
+        'aria-selected',
+        String(state.geometryListTab === 'manual')
+      );
+    }
+
     function renderGeometryList() {
-      $('geometryList').innerHTML = state.geometryItems.map((item) => {
+      const listedItems = geometryItemsForActiveTab();
+      const emptyMessage = state.geometryListTab === 'manual'
+        ? 'No observations need manual geocoding.'
+        : 'No geocoded observations yet.';
+      $('geometryList').innerHTML = listedItems.map((item) => {
         const lead = item.lead;
         const addressStatus = item.address_status || 'not_run';
         const label = `${lead.location.facility_name} - ${addressStatus} - ` +
@@ -5332,11 +5425,12 @@ INDEX_HTML = r"""<!doctype html>
           ${label}<br>${lead.location.city_or_region}, ${lead.location.country} -
           ${geometryRoundLabel(item)}
         </button>`;
-      }).join('') || '<div class="status">No QAQC-approved observations loaded.</div>';
+      }).join('') || `<div class="status">${emptyMessage}</div>`;
       for (const button of $('geometryList').querySelectorAll('button[data-geometry]')) {
         button.addEventListener('click', () => selectGeometryItem(button.dataset.geometry));
       }
       renderInterventionQueue();
+      renderGeometryQueueTabs();
       updateGeometrySummary();
     }
 
@@ -5653,7 +5747,9 @@ INDEX_HTML = r"""<!doctype html>
       const payload = await api(`/api/runs/${state.currentRunId}/geometry-items`);
       state.geometryItems = payload.items || [];
       $('jsonOutput').value = JSON.stringify(state.geometryItems, null, 2);
-      state.selectedGeometryItemId = state.geometryItems[0]?.item_id || null;
+      chooseGeometryListTabForLoadedItems();
+      state.selectedGeometryItemId =
+        geometryItemsForActiveTab()[0]?.item_id || state.geometryItems[0]?.item_id || null;
       renderGeometryList();
       if (state.selectedGeometryItemId) selectGeometryItem(state.selectedGeometryItemId);
       else {
@@ -5681,7 +5777,9 @@ INDEX_HTML = r"""<!doctype html>
         : `/api/runs/${state.currentRunId}/geometry-items`;
       const payload = await api(path);
       state.geometryItems = payload.items || [];
-      state.selectedGeometryItemId = state.geometryItems[0]?.item_id || null;
+      chooseGeometryListTabForLoadedItems();
+      state.selectedGeometryItemId =
+        geometryItemsForActiveTab()[0]?.item_id || state.geometryItems[0]?.item_id || null;
       renderGeometryList();
       $('jsonOutput').value = JSON.stringify(state.geometryItems, null, 2);
       setAutomatedGeocodeStatus(
@@ -5702,7 +5800,9 @@ INDEX_HTML = r"""<!doctype html>
       initMap();
       const payload = await api(`/api/samples/${state.currentSampleSetId}/geometry-items`);
       state.geometryItems = payload.items || [];
-      state.selectedGeometryItemId = state.geometryItems[0]?.item_id || null;
+      chooseGeometryListTabForLoadedItems();
+      state.selectedGeometryItemId =
+        geometryItemsForActiveTab()[0]?.item_id || state.geometryItems[0]?.item_id || null;
       renderGeometryList();
       if (state.selectedGeometryItemId) selectGeometryItem(state.selectedGeometryItemId);
       else {
@@ -5755,8 +5855,11 @@ INDEX_HTML = r"""<!doctype html>
       item.geometries = payload.geometry.geometries || [];
       item.area_m2 = payload.geometry.area_m2;
       item.geocode_query = query;
-      if (payload.geometry.point) setMarker(payload.geometry.point);
-      else {
+      if (payload.geometry.point) {
+        setMarker(payload.geometry.point);
+        state.geometryListTab = 'geocoded';
+      } else {
+        state.geometryListTab = 'manual';
         const assessment = (payload.spatial_validation.assessments || []).find(
           (candidate) => candidate.latitude != null && candidate.longitude != null
         );
@@ -5811,10 +5914,12 @@ INDEX_HTML = r"""<!doctype html>
             payload.address_retry.address.formatted_address || item.geocode_query;
         }
         if (payload.research_resolved && payload.geometry.point) {
+          state.geometryListTab = 'geocoded';
           setMarker(payload.geometry.point);
           $('coordinateDraftStatus').textContent =
             'Focused research produced and saved an in-scope coordinate.';
         } else {
+          state.geometryListTab = 'manual';
           $('coordinateDraftStatus').textContent =
             'Focused research completed. Review the ranked candidates below.';
         }
@@ -5975,6 +6080,7 @@ INDEX_HTML = r"""<!doctype html>
         ) {
           setMarker(pointFromGeometry(selected));
         }
+        state.geometryListTab = manualGeometryItems().length ? 'manual' : 'geocoded';
         renderGeometryList();
         updateGeometrySummary();
         if (state.activeWorkspace === 'geometry' && state.sampleExtentVisible) {
@@ -6178,6 +6284,11 @@ INDEX_HTML = r"""<!doctype html>
       item.geometry_status = payload.geometry.geometry_status;
       item.geometries = payload.geometry.geometries || [];
       item.area_m2 = payload.geometry.area_m2;
+      if (geometryStatus === 'point_confirmed' && pointFromGeometry(item)) {
+        state.geometryListTab = 'geocoded';
+      } else if (needsManualGeocoding(item)) {
+        state.geometryListTab = 'manual';
+      }
       renderGeometryList();
       $('resolutionReason').textContent = resolutionExplanation(item);
       renderCandidateOptions(item);
@@ -6334,6 +6445,8 @@ INDEX_HTML = r"""<!doctype html>
       $('loadAugmentedSampleButton').addEventListener('click', () => {
         loadAugmentedSampleGeometry().catch((error) => setGeometryStatus(error.message, 'error'));
       });
+      $('geocodedQueueTab').addEventListener('click', () => setGeometryListTab('geocoded'));
+      $('manualQueueTab').addEventListener('click', () => setGeometryListTab('manual'));
       $('geocodeButton').addEventListener('click', () => {
         geocodeAcceptedObservations().catch(
           (error) => setAutomatedGeocodeStatus(error.message, 'error')

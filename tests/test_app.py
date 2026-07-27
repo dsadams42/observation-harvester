@@ -242,6 +242,14 @@ def test_index_page_contains_local_app_controls(tmp_path: Path) -> None:
     assert "Download Verified CSV" in html
     assert "Coordinate Assignment Required" in html
     assert 'id="interventionList"' in html
+    assert 'id="geocodedQueueTab"' in html
+    assert 'id="manualQueueTab"' in html
+    assert "Geocoded" in html
+    assert "Needs Manual Geocoding" in html
+    assert "geometryItemsForActiveTab" in html
+    assert "needsManualGeocoding" in html
+    assert "setGeometryListTab('geocoded')" in html
+    assert "setGeometryListTab('manual')" in html
     assert "Geocode All" in html
     assert "Project Workflow" in html
     assert "Recommended next:" in html

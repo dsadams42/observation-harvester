@@ -4,8 +4,10 @@ import csv
 import io
 import json
 import math
+import re
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable, Sequence
@@ -29,6 +31,41 @@ GEOMETRY_LIST_ADAPTER: TypeAdapter[tuple[GeometryReviewItem, ...]] = TypeAdapter
 )
 
 Geocoder = Callable[[str], dict[str, Any] | None]
+
+_LOCALITY_STOPWORDS = {
+    "and",
+    "area",
+    "district",
+    "excluding",
+    "greater",
+    "metropolitan",
+    "north",
+    "northeast",
+    "northwest",
+    "province",
+    "region",
+    "regional",
+    "south",
+    "southeast",
+    "southwest",
+    "state",
+    "the",
+    "west",
+    "east",
+}
+_CENTROID_RESULT_TYPES = {
+    "administrative",
+    "city",
+    "country",
+    "county",
+    "municipality",
+    "postcode",
+    "province",
+    "region",
+    "state",
+    "town",
+    "village",
+}
 
 
 def geometry_review_path(root: Path, child_run_id: str) -> Path:
@@ -81,6 +118,61 @@ def geocode_query_for_lead(lead: Any) -> str:
     return ", ".join(part for part in parts if part and part != "Unknown")
 
 
+def parse_coordinate_text(value: str) -> tuple[float, float, bool]:
+    text = urllib.parse.unquote(value.strip())
+    if not text:
+        raise ValueError("Paste a latitude and longitude or a Google Maps URL.")
+    patterns = (
+        r"@([+-]?\d+(?:\.\d+)?),\s*([+-]?\d+(?:\.\d+)?)",
+        r"[?&](?:query|q|ll)=([+-]?\d+(?:\.\d+)?),\s*([+-]?\d+(?:\.\d+)?)",
+    )
+    latitude: float | None = None
+    longitude: float | None = None
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match is not None:
+            latitude = float(match.group(1))
+            longitude = float(match.group(2))
+            break
+    if latitude is None or longitude is None:
+        directional = re.search(
+            r"([+-]?\d+(?:\.\d+)?)\s*°?\s*([NS])\s*[,;]?\s*"
+            r"([+-]?\d+(?:\.\d+)?)\s*°?\s*([EW])",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if directional is not None:
+            latitude = abs(float(directional.group(1))) * (
+                -1 if directional.group(2).casefold() == "s" else 1
+            )
+            longitude = abs(float(directional.group(3))) * (
+                -1 if directional.group(4).casefold() == "w" else 1
+            )
+    if latitude is None or longitude is None:
+        decimal = re.fullmatch(
+            r"\s*([+-]?\d+(?:\.\d+)?)\s*[,;]\s*"
+            r"([+-]?\d+(?:\.\d+)?)\s*",
+            text,
+        )
+        if decimal is not None:
+            latitude = float(decimal.group(1))
+            longitude = float(decimal.group(2))
+    if latitude is None or longitude is None:
+        raise ValueError(
+            "Coordinates were not recognized. Use latitude, longitude; "
+            "directional coordinates; or a Google Maps URL."
+        )
+    reversed_order = False
+    if abs(latitude) > 90 and abs(longitude) <= 90:
+        latitude, longitude = longitude, latitude
+        reversed_order = True
+    if not -90 <= latitude <= 90:
+        raise ValueError("Latitude must be between -90 and 90.")
+    if not -180 <= longitude <= 180:
+        raise ValueError("Longitude must be between -180 and 180.")
+    return latitude, longitude, reversed_order
+
+
 def approved_records_for_child(
     root: Path,
     manifest: HarvestRunManifest,
@@ -127,6 +219,11 @@ def merge_geometry_items(
         saved = by_child[child_run_id].get(str(record["item_id"]))
         payload = dict(record)
         payload["geometry"] = saved.model_dump(mode="json") if saved is not None else None
+        payload["geometries"] = (
+            list(saved.geometries or geometry_set(saved.point, saved.polygon_geojson))
+            if saved is not None
+            else []
+        )
         payload["geometry_status"] = (
             saved.geometry_status.value if saved is not None else GeometryStatus.NEEDS_REVIEW.value
         )
@@ -169,6 +266,24 @@ def polygon_area_m2(polygon_geojson: dict[str, Any]) -> float:
         next_point = projected[(index + 1) % len(projected)]
         area += current[0] * next_point[1] - next_point[0] * current[1]
     return abs(area) / 2.0
+
+
+def geometry_set(
+    point: GeometryPoint | None,
+    polygon_geojson: dict[str, Any] | None,
+) -> tuple[dict[str, object], ...]:
+    geometries: list[dict[str, object]] = []
+    if point is not None:
+        geometries.append(
+            {
+                "type": "Point",
+                "coordinates": [point.longitude, point.latitude],
+                "source": point.source,
+            }
+        )
+    if polygon_geojson is not None:
+        geometries.append(dict(polygon_geojson))
+    return tuple(geometries)
 
 
 def verified_json(records: Sequence[dict[str, Any]]) -> str:
@@ -287,12 +402,22 @@ class NominatimGeocoder:
     def __call__(self, query: str) -> dict[str, Any] | None:
         with self._lock:
             cache = self._load_cache()
-            if query in cache:
-                return cache[query]
+            cached = cache.get(query)
+            if isinstance(cached, dict) and cached.get("cache_version") == 2:
+                return cached
             elapsed = time.monotonic() - self._last_request_at
             if elapsed < self.min_interval_seconds:
                 time.sleep(self.min_interval_seconds - elapsed)
-            params = urllib.parse.urlencode({"q": query, "format": "jsonv2", "limit": "1"})
+            parameters = {
+                "q": query,
+                "format": "jsonv2",
+                "limit": "5",
+                "addressdetails": "1",
+            }
+            country_match = re.search(r"(?:^|,\s*)([A-Za-z]{2})\s*$", query)
+            if country_match is not None:
+                parameters["countrycodes"] = country_match.group(1).lower()
+            params = urllib.parse.urlencode(parameters)
             request = urllib.request.Request(
                 f"https://nominatim.openstreetmap.org/search?{params}",
                 headers={
@@ -302,21 +427,218 @@ class NominatimGeocoder:
             self._last_request_at = time.monotonic()
             with urllib.request.urlopen(request, timeout=10) as response:
                 payload = json.loads(response.read().decode("utf-8"))
-            first = payload[0] if isinstance(payload, list) and payload else None
+            candidates = []
+            if isinstance(payload, list):
+                for candidate in payload:
+                    if (
+                        not isinstance(candidate, dict)
+                        or "lat" not in candidate
+                        or "lon" not in candidate
+                    ):
+                        continue
+                    candidates.append(
+                        {
+                            "display_name": candidate.get("display_name", ""),
+                            "latitude": float(candidate["lat"]),
+                            "longitude": float(candidate["lon"]),
+                            "provider": "nominatim",
+                            "query": query,
+                            "category": candidate.get("category"),
+                            "type": candidate.get("type"),
+                            "name": candidate.get("name"),
+                            "importance": candidate.get("importance"),
+                            "address": candidate.get("address", {}),
+                        }
+                    )
+            first = candidates[0] if candidates else None
             result = (
                 {
-                    "display_name": first.get("display_name", ""),
-                    "latitude": float(first["lat"]),
-                    "longitude": float(first["lon"]),
-                    "provider": "nominatim",
-                    "query": query,
+                    **first,
+                    "candidates": candidates,
+                    "cache_version": 2,
                 }
-                if isinstance(first, dict) and "lat" in first and "lon" in first
+                if first is not None
                 else None
             )
             cache[query] = result
             self._write_cache(cache)
             return result
+
+    def reverse(self, latitude: float, longitude: float) -> dict[str, Any] | None:
+        cache_key = f"reverse:{latitude:.7f},{longitude:.7f}"
+        with self._lock:
+            cache = self._load_cache()
+            cached = cache.get(cache_key)
+            if isinstance(cached, dict) and cached.get("cache_version") == 2:
+                return cached
+            elapsed = time.monotonic() - self._last_request_at
+            if elapsed < self.min_interval_seconds:
+                time.sleep(self.min_interval_seconds - elapsed)
+            parameters = urllib.parse.urlencode(
+                {
+                    "lat": f"{latitude:.7f}",
+                    "lon": f"{longitude:.7f}",
+                    "format": "jsonv2",
+                    "addressdetails": "1",
+                    "zoom": "18",
+                }
+            )
+            request = urllib.request.Request(
+                f"https://nominatim.openstreetmap.org/reverse?{parameters}",
+                headers={
+                    "User-Agent": "pdt-observer-local-app/0.1 "
+                    "(user-triggered coordinate review)"
+                },
+            )
+            self._last_request_at = time.monotonic()
+            try:
+                with urllib.request.urlopen(request, timeout=10) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+            except urllib.error.HTTPError as exc:
+                if exc.code == 404:
+                    cache[cache_key] = None
+                    self._write_cache(cache)
+                    return None
+                raise
+            if not isinstance(payload, dict) or "lat" not in payload or "lon" not in payload:
+                result = None
+            else:
+                result = {
+                    "display_name": payload.get("display_name", ""),
+                    "latitude": float(payload["lat"]),
+                    "longitude": float(payload["lon"]),
+                    "provider": "nominatim-reverse",
+                    "query": cache_key,
+                    "category": payload.get("category"),
+                    "type": payload.get("type"),
+                    "name": payload.get("name"),
+                    "importance": payload.get("importance"),
+                    "address": payload.get("address", {}),
+                    "cache_version": 2,
+                }
+            cache[cache_key] = result
+            self._write_cache(cache)
+            return result
+
+
+def _normalized_words(value: str) -> set[str]:
+    return {
+        word
+        for word in re.findall(r"[^\W\d_]+", value.casefold(), flags=re.UNICODE)
+        if len(word) >= 3
+    }
+
+
+def _candidate_scope_status(
+    candidate: dict[str, Any],
+    *,
+    expected_country: str,
+    expected_locality: str | None,
+) -> tuple[str, str]:
+    address = candidate.get("address")
+    address = address if isinstance(address, dict) else {}
+    country_code = str(address.get("country_code") or "").casefold()
+    country_name = str(address.get("country") or "").casefold()
+    expected_country_folded = expected_country.casefold().strip()
+    if len(expected_country_folded) == 2 and country_code:
+        if country_code != expected_country_folded:
+            return "out_of_scope", f"Result country code is {country_code}, not {expected_country}."
+    elif (
+        len(expected_country_folded) > 2
+        and country_name
+        and expected_country_folded not in country_name
+        and country_name not in expected_country_folded
+    ):
+        return "out_of_scope", f"Result country is {country_name}, not {expected_country}."
+
+    if expected_locality:
+        locality_words = _normalized_words(expected_locality) - _LOCALITY_STOPWORDS
+        administrative_text = " ".join(
+            [
+                str(candidate.get("display_name") or ""),
+                *(str(value) for value in address.values()),
+            ]
+        )
+        administrative_words = _normalized_words(administrative_text)
+        if locality_words and not locality_words.intersection(administrative_words):
+            return (
+                "out_of_scope",
+                f"Result does not match requested locality {expected_locality}.",
+            )
+
+    result_type = str(candidate.get("type") or "").casefold()
+    if result_type in _CENTROID_RESULT_TYPES:
+        return (
+            "requires_human",
+            f"Result type {result_type} is an administrative centroid, not a facility coordinate.",
+        )
+    if not address:
+        return (
+            "requires_human",
+            "Provider returned no structured administrative components for validation.",
+        )
+    return "accepted", "Country, locality, and result type passed spatial validation."
+
+
+def spatially_validate_geocode_result(
+    result: dict[str, Any] | None,
+    *,
+    expected_country: str,
+    expected_locality: str | None,
+) -> tuple[dict[str, Any] | None, dict[str, object]]:
+    if result is None:
+        return None, {
+            "status": "no_match",
+            "requires_human_intervention": True,
+            "reason": "The geocoder returned no candidates.",
+            "candidate_count": 0,
+        }
+    raw_candidates = result.get("candidates")
+    candidates = (
+        [candidate for candidate in raw_candidates if isinstance(candidate, dict)]
+        if isinstance(raw_candidates, list)
+        else [result]
+    )
+    assessments: list[dict[str, object]] = []
+    accepted: dict[str, Any] | None = None
+    for candidate in candidates:
+        status, reason = _candidate_scope_status(
+            candidate,
+            expected_country=expected_country,
+            expected_locality=expected_locality,
+        )
+        assessments.append(
+            {
+                "display_name": str(candidate.get("display_name") or ""),
+                "status": status,
+                "reason": reason,
+                "latitude": candidate.get("latitude"),
+                "longitude": candidate.get("longitude"),
+            }
+        )
+        if status == "accepted" and accepted is None:
+            accepted = candidate
+    if accepted is not None:
+        return accepted, {
+            "status": "accepted",
+            "requires_human_intervention": False,
+            "reason": "A geocoder candidate passed spatial validation.",
+            "candidate_count": len(candidates),
+            "assessments": assessments,
+        }
+    statuses = {str(assessment["status"]) for assessment in assessments}
+    status = "out_of_scope" if statuses == {"out_of_scope"} else "requires_human"
+    return None, {
+        "status": status,
+        "requires_human_intervention": True,
+        "reason": (
+            "All candidates were outside the requested geographic scope."
+            if status == "out_of_scope"
+            else "No candidate was specific and complete enough for automatic acceptance."
+        ),
+        "candidate_count": len(candidates),
+        "assessments": assessments,
+    }
 
 
 def geometry_item_from_payload(
@@ -327,6 +649,7 @@ def geometry_item_from_payload(
     polygon_geojson: dict[str, Any] | None,
     geometry_status: GeometryStatus,
     geocode_result: dict[str, Any] | None = None,
+    spatial_validation: dict[str, Any] | None = None,
     review_notes: str | None = None,
 ) -> GeometryReviewItem:
     child_run_id, lead_index = parse_geometry_item_id(item_id)
@@ -339,7 +662,9 @@ def geometry_item_from_payload(
         geocode_result=geocode_result,
         point=point,
         polygon_geojson=polygon_geojson,
+        geometries=geometry_set(point, polygon_geojson),
         area_m2=area,
+        spatial_validation=spatial_validation,
         geometry_status=geometry_status,
         review_notes=review_notes,
     )

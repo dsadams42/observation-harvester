@@ -1,7 +1,8 @@
 @echo off
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 
 set "APP_DIR=%~dp0"
+set "WORKSPACE_DIR=%APP_DIR:~0,-1%"
 cd /d "%APP_DIR%"
 
 echo Observation Harvester
@@ -48,22 +49,52 @@ if errorlevel 1 (
   exit /b 1
 )
 
+".venv\Scripts\python.exe" -m pip --version >nul 2>nul
+if errorlevel 1 (
+  echo Bootstrapping pip in the local virtual environment...
+  ".venv\Scripts\python.exe" -m ensurepip --upgrade
+  if errorlevel 1 (
+    echo Failed to bootstrap pip in .venv.
+    pause
+    exit /b 1
+  )
+)
+
 echo Installing/updating local app dependencies...
-python -m pip install -e ".[app]"
+".venv\Scripts\python.exe" -m pip install -e ".[app]"
 if errorlevel 1 (
   echo Failed to install app dependencies.
   pause
   exit /b 1
 )
 
-where codex >nul 2>nul
-if errorlevel 1 (
+set "CODEX_BIN=%OBSERVATION_HARVESTER_CODEX_BIN%"
+if not "%CODEX_BIN%"=="" if not exist "%CODEX_BIN%" set "CODEX_BIN="
+
+if "%CODEX_BIN%"=="" (
+  for /f "delims=" %%I in ('where codex.exe 2^>nul') do (
+    if "!CODEX_BIN!"=="" set "CODEX_BIN=%%I"
+  )
+)
+
+if "%CODEX_BIN%"=="" (
   echo.
   echo Codex CLI was not found on PATH.
   echo Install Codex CLI from:
   echo https://chatgpt.com/codex
   echo.
   echo Then authenticate Codex CLI and double-click this launcher again.
+  pause
+  exit /b 1
+)
+
+"%CODEX_BIN%" --version >nul 2>nul
+if errorlevel 1 (
+  echo.
+  echo The Codex CLI path could not be executed:
+  echo %CODEX_BIN%
+  echo Set OBSERVATION_HARVESTER_CODEX_BIN to a working codex.exe.
+  echo.
   pause
   exit /b 1
 )
@@ -79,5 +110,5 @@ echo Starting Observation Harvester at http://127.0.0.1:%APP_PORT%
 echo Keep this Command Prompt window open while using the app.
 echo.
 
-python -m pdt_observer app --workspace "%APP_DIR%" --port "%APP_PORT%"
+".venv\Scripts\python.exe" -m pdt_observer app --workspace "%WORKSPACE_DIR%" --port "%APP_PORT%" --codex-bin "%CODEX_BIN%"
 pause

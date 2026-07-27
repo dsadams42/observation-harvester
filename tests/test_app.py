@@ -6,10 +6,11 @@ import subprocess
 import time
 from collections.abc import Sequence
 from pathlib import Path
+from unittest.mock import patch
 
 from starlette.testclient import TestClient
 
-from pdt_observer.app import create_app
+from pdt_observer.app import ActiveCodexRegistry, create_app
 
 LEAD_PAYLOAD = [
     {
@@ -145,6 +146,65 @@ def failing_runner(
     return subprocess.CompletedProcess(command, 2, stdout="", stderr="codex failed")
 
 
+def test_active_codex_registry_sends_prompts_as_utf8(tmp_path: Path) -> None:
+    prompt = "Georgia’s GEMA/HS technical college search"
+    registry = ActiveCodexRegistry(tmp_path)
+
+    with patch("pdt_observer.app.subprocess.Popen") as popen:
+        process = popen.return_value
+        process.communicate.return_value = ("", "")
+        process.returncode = 0
+
+        result = registry.runner(
+            ["codex", "exec", "-o", str(tmp_path / "georgia.json")],
+            prompt,
+            tmp_path,
+        )
+
+    assert result.returncode == 0
+    assert popen.call_args.kwargs["encoding"] == "utf-8"
+    assert popen.call_args.kwargs["errors"] == "replace"
+    process.communicate.assert_called_once_with(input=prompt)
+
+
+def geographer_and_harvest_runner(
+    command: Sequence[str],
+    prompt: str,
+    cwd: Path,
+) -> subprocess.CompletedProcess[str]:
+    output_path = Path(command[command.index("-o") + 1])
+    if "Minimal Geographic Vernacular Review" in prompt:
+        output_path.write_text(
+            json.dumps(
+                {
+                    "search_languages": ["English"],
+                    "administrative_terms": [],
+                    "public_safety_terms": [
+                        {
+                            "standard_term": "state police",
+                            "local_term": "Tennessee Highway Patrol",
+                            "language": "English",
+                            "usage_note": "Use for state-level incident searches.",
+                        }
+                    ],
+                    "facility_terms": [],
+                    "query_adjustments": ["Tennessee Highway Patrol school evacuation"],
+                    "source_urls": ["https://example.test/agency"],
+                    "commentary": (
+                        "I found a locally relevant public-safety name, so I added it to searches."
+                    ),
+                    "rationale": (
+                        "The local agency name may reveal reports missed by generic terms."
+                    ),
+                }
+            ),
+            encoding="utf-8",
+        )
+    else:
+        output_path.write_text(json.dumps(LEAD_PAYLOAD), encoding="utf-8")
+    return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+
 def test_index_page_contains_local_app_controls(tmp_path: Path) -> None:
     client = TestClient(create_app(workspace=tmp_path, runner=successful_runner, background=False))
 
@@ -158,15 +218,30 @@ def test_index_page_contains_local_app_controls(tmp_path: Path) -> None:
     assert "Subtype" in html
     assert "Campaign" in html
     assert "Regions or Localities" in html
+    assert "Agentic Workbench" in html
+    assert "Geometry Studio" in html
+    assert 'role="tablist"' in html
+    assert 'data-workspace="workbench"' in html
+    assert 'data-workspace="geometry"' in html
+    assert "setWorkspaceTab" in html
+    assert "Run Full Pipeline" in html
+    assert "Coverage ready - human review required" in html
+    assert "paused before gap fill" in html
     assert "Run Harvest" in html
     assert "Copy JSON" in html
     assert "Copy QAQC Prompt" in html
     assert "Run QAQC" in html
     assert "Run Address Enrichment" in html
     assert "Download Verified CSV" in html
-    assert "Geometry Review" in html
+    assert "Coordinate Assignment Required" in html
+    assert 'id="interventionList"' in html
+    assert "Geocode All" in html
+    assert "Project Workflow" in html
+    assert "Recommended next:" in html
+    assert "/workflow-status" in html
+    assert "Geocoding ${index + 1}/${pending.length}" in html
     assert "Sample Set / Coverage" in html
-    assert html.index("Geometry Review") < html.index("Sample Set / Coverage")
+    assert html.index("Geometry Studio") < html.index("Sample Set / Coverage")
     assert "Create Sample Set" in html
     assert "Analyze Coverage" in html
     assert "Run Gap Fill" in html
@@ -185,12 +260,33 @@ def test_index_page_contains_local_app_controls(tmp_path: Path) -> None:
     assert "renderSampleExtent" in html
     assert "geometryRoundLabel" in html
     assert "selectGeometryItem(item.item_id)" in html
-    assert "Manual Address Search" in html
-    assert "Search Address" in html
+    assert "Corrected Address or Place" in html
+    assert "Search Corrected Address" in html
     assert "Save Footprint" in html
     assert "Download Footprints GeoJSON" in html
     assert "Clear All" in html
     assert "Agent Activity" in html
+    assert "Full Pipeline Transcript" in html
+    assert "Download Transcript (.txt)" in html
+    assert "Resolve Selected Coordinate" in html
+    assert "Search Corrected Address" in html
+    assert "Research This Facility" in html
+    assert "Search Google Maps" in html
+    assert "Accept this location" in html
+    assert "Paste Google Maps Coordinates" in html
+    assert "Preview Coordinate" in html
+    assert "/api/geometry/coordinate-preview" in html
+    assert "human_pasted_coordinate" in html
+    assert "renderCandidateOptions" in html
+    assert "/api/geometry/research" in html
+    assert "Place Point on Map" in html
+    assert "Save Coordinate" in html
+    assert "renderGeocodingProgress" in html
+    assert "allow_address_retry: true" in html
+    assert 'id="dialogueOutput"' in html
+    assert "/api/geographer/plan" in html
+    assert "'dialogue'" in html
+    assert "'transcript.txt'" in html
     assert "Cancel Run" in html
     assert "Exit Application" in html
     assert "Theme" in html
@@ -242,6 +338,63 @@ def test_profiles_endpoint_returns_builtin_profile_sets(tmp_path: Path) -> None:
         profile["profile_id"] == "university_college"
         for profile in schools["profiles"]
     )
+    assert any(
+        strategy["strategy_id"] == "incident_evacuation"
+        for strategy in payload["strategies"]
+    )
+    university = next(
+        profile
+        for profile in schools["profiles"]
+        if profile["profile_id"] == "university_college"
+    )
+    assert university["strategy_plan"]["recommendations"]
+
+
+def test_geographer_plan_flows_into_harvest_prompt_and_dialogue(tmp_path: Path) -> None:
+    client = TestClient(
+        create_app(
+            workspace=tmp_path,
+            runner=geographer_and_harvest_runner,
+            background=False,
+        )
+    )
+    planned = client.post(
+        "/api/geographer/plan",
+        json={
+            "country": "US",
+            "locality": "Tennessee",
+            "profiles": "schools",
+            "profile": "primary_secondary_education",
+            "mode": "single",
+        },
+    )
+
+    assert planned.status_code == 200
+    plan_payload = planned.json()
+    assert plan_payload["plan"]["status"] == "completed"
+    assert "Geographer Agent:" in plan_payload["dialogue"]
+
+    harvested = client.post(
+        "/api/harvest/run",
+        json={
+            "country": "US",
+            "locality": "Tennessee",
+            "profiles": "schools",
+            "profile": "primary_secondary_education",
+            "target": 5,
+            "run_id": plan_payload["run_id"],
+            "geographer_plan_path": plan_payload["plan_path"],
+        },
+    )
+
+    assert harvested.status_code == 200
+    manifest = harvested.json()["manifest"]
+    assert manifest["geographer_plan_path"] == plan_payload["plan_path"]
+    prompt = Path(manifest["prompt_path"]).read_text(encoding="utf-8")
+    assert "Geographer Vernacular Adjustments" in prompt
+    assert "Tennessee Highway Patrol" in prompt
+    dialogue = client.get(f"/api/runs/{plan_payload['run_id']}/dialogue")
+    assert "Harvester Agent: I completed the search" in dialogue.text
 
 
 def test_harvest_run_endpoint_returns_manifest_and_leads(tmp_path: Path) -> None:
@@ -265,6 +418,38 @@ def test_harvest_run_endpoint_returns_manifest_and_leads(tmp_path: Path) -> None
     assert payload["leads"][0]["source_type"] == "news"
     assert Path(payload["manifest"]["prompt_path"]).is_file()
     assert Path(payload["manifest"]["lead_path"]).is_file()
+
+
+def test_workflow_status_recommends_next_artifact_backed_stage(tmp_path: Path) -> None:
+    client = TestClient(create_app(workspace=tmp_path, runner=successful_runner, background=False))
+    harvested = client.post(
+        "/api/harvest/run",
+        json={
+            "country": "US",
+            "locality": "Tennessee",
+            "profiles": "commercial_business",
+            "profile": "factories_warehouses",
+            "target": 1,
+        },
+    ).json()
+    run_id = harvested["manifest"]["run_id"]
+
+    workflow = client.get(f"/api/runs/{run_id}/workflow-status")
+
+    assert workflow.status_code == 200
+    payload = workflow.json()
+    stages = {stage["id"]: stage for stage in payload["stages"]}
+    assert stages["harvest"]["status"] == "complete"
+    assert stages["harvest"]["current"] == 1
+    assert stages["harvest"]["total"] == 1
+    assert stages["qaqc"]["status"] == "ready"
+    assert payload["next_action"]["id"] == "run_qaqc"
+
+    assert client.post(f"/api/runs/{run_id}/qaqc-run").status_code == 200
+    updated = client.get(f"/api/runs/{run_id}/workflow-status").json()
+    updated_stages = {stage["id"]: stage for stage in updated["stages"]}
+    assert updated_stages["qaqc"]["status"] == "complete"
+    assert updated["next_action"]["id"] == "run_address"
 
 
 def test_harvest_batch_run_endpoint_returns_child_runs(tmp_path: Path) -> None:
@@ -314,6 +499,53 @@ def test_harvest_campaign_run_endpoint_returns_child_runs(tmp_path: Path) -> Non
     assert any(item["manifest_type"] == "campaign" for item in runs.json()["runs"])
 
 
+def test_geographer_plan_flows_into_campaign_children_and_dialogue(tmp_path: Path) -> None:
+    client = TestClient(
+        create_app(
+            workspace=tmp_path,
+            runner=geographer_and_harvest_runner,
+            background=False,
+        )
+    )
+    planned = client.post(
+        "/api/geographer/plan",
+        json={
+            "country": "US",
+            "localities": ["Tennessee", "Kentucky"],
+            "facility_types": ["schools", "manufacturing"],
+            "mode": "campaign",
+        },
+    )
+    assert planned.status_code == 200
+    plan_payload = planned.json()
+    assert plan_payload["plan"]["localities"] == ["Tennessee", "Kentucky"]
+    assert plan_payload["plan"]["facility_types"] == ["schools", "manufacturing"]
+
+    harvested = client.post(
+        "/api/harvest/campaign-run",
+        json={
+            "country": "US",
+            "localities": ["Tennessee", "Kentucky"],
+            "facility_types": ["schools", "manufacturing"],
+            "target": 3,
+            "campaign_id": plan_payload["run_id"],
+            "geographer_plan_path": plan_payload["plan_path"],
+        },
+    )
+
+    assert harvested.status_code == 200
+    manifest = harvested.json()["manifest"]
+    assert manifest["geographer_plan_path"] == plan_payload["plan_path"]
+    for child_path in manifest["child_manifest_paths"]:
+        child_manifest = json.loads(Path(child_path).read_text(encoding="utf-8"))
+        assert child_manifest["geographer_plan_path"] == plan_payload["plan_path"]
+        prompt = Path(child_manifest["prompt_path"]).read_text(encoding="utf-8")
+        assert "Tennessee Highway Patrol" in prompt
+    dialogue = client.get(f"/api/runs/{plan_payload['run_id']}/dialogue")
+    assert "Geographer Agent:" in dialogue.text
+    assert dialogue.text.count("Harvester Agent: I completed the search") == 4
+
+
 def test_run_detail_leads_export_and_promote_endpoints(tmp_path: Path) -> None:
     client = TestClient(create_app(workspace=tmp_path, runner=successful_runner, background=False))
     created = client.post(
@@ -343,6 +575,9 @@ def test_run_detail_leads_export_and_promote_endpoints(tmp_path: Path) -> None:
     assert "Occupancy Lead QAQC Verification" in qaqc_prompt.text
     assert "https://example.test/story" in qaqc_prompt.text
     assert "Example Warehouse" in qaqc_prompt.text
+    assert "Requested geographic scope" in qaqc_prompt.text
+    assert "Tennessee" in qaqc_prompt.text
+    assert "hard acceptance boundary" in qaqc_prompt.text
     assert promoted.status_code == 200
     assert promoted.json()["run"]["candidate"]["result"]["status"] == "review"
     assert Path(promoted.json()["run_file"]).is_file()
@@ -401,6 +636,140 @@ def test_address_run_endpoint_enriches_qaqc_approved_leads(tmp_path: Path) -> No
     assert verified.json()["items"][0]["address_enrichment"]["formatted_address"].startswith("100")
 
 
+def test_sample_transcript_combines_pipeline_stages_and_downloads(tmp_path: Path) -> None:
+    client = TestClient(create_app(workspace=tmp_path, runner=successful_runner, background=False))
+    created = client.post(
+        "/api/harvest/run",
+        json={
+            "country": "US",
+            "locality": "Tennessee",
+            "profiles": "commercial_business",
+            "profile": "factories_warehouses",
+            "target": 1,
+        },
+    ).json()
+    run_id = created["manifest"]["run_id"]
+    client.post(f"/api/runs/{run_id}/qaqc-run")
+    client.post(f"/api/runs/{run_id}/address-run")
+    sample = client.post("/api/samples/from-run", json={"run_id": run_id}).json()["sample_set"]
+    sample_set_id = sample["sample_set_id"]
+    client.post(f"/api/samples/{sample_set_id}/coverage-run")
+
+    transcript = client.get(f"/api/samples/{sample_set_id}/dialogue")
+    download = client.get(f"/api/samples/{sample_set_id}/transcript.txt")
+
+    assert transcript.status_code == 200
+    assert "OBSERVATION HARVESTER PIPELINE TRANSCRIPT" in transcript.text
+    assert "=== INITIAL HARVEST ===" in transcript.text
+    assert "=== EVIDENCE QAQC ===" in transcript.text
+    assert "=== ADDRESS ENRICHMENT ===" in transcript.text
+    assert "=== COVERAGE ANALYSIS ===" in transcript.text
+    assert download.text == transcript.text
+    assert "attachment;" in download.headers["content-disposition"]
+    assert download.headers["content-disposition"].endswith('pipeline-transcript.txt"')
+
+
+def test_geocode_can_retry_address_research_after_spatial_failure(tmp_path: Path) -> None:
+    def correction_runner(
+        command: Sequence[str],
+        prompt: str,
+        cwd: Path,
+    ) -> subprocess.CompletedProcess[str]:
+        if "Spatial Correction" not in prompt:
+            return successful_runner(command, prompt, cwd)
+        output_path = Path(command[command.index("-o") + 1])
+        records = json.loads(prompt.split("## Input Records", 1)[1].strip())
+        output_path.write_text(
+            json.dumps(
+                [
+                    {
+                        **ADDRESS_PAYLOAD[0],
+                        "item_id": records[0]["item_id"],
+                        "formatted_address": "200 Corrected Plant Road, Nashville, TN, US",
+                        "address_line1": "200 Corrected Plant Road",
+                        "address_source_url": "https://example.test/official-facility",
+                        "review_notes": (
+                            "An official facility page corrected the directory street name."
+                        ),
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    def geocoder(query: str) -> dict[str, object] | None:
+        if "200 Corrected Plant Road" not in query:
+            return {
+                "display_name": "Unrelated Depot, 900 Wrong Lane, Nashville, Tennessee",
+                "latitude": 36.2,
+                "longitude": -86.8,
+                "provider": "mock",
+                "query": query,
+                "name": "Unrelated Depot",
+                "type": "industrial",
+                "address": {
+                    "house_number": "900",
+                    "road": "Wrong Lane",
+                    "state": "Tennessee",
+                    "country_code": "us",
+                },
+            }
+        return {
+            "display_name": query,
+            "latitude": 36.1,
+            "longitude": -86.7,
+            "provider": "mock",
+            "query": query,
+            "type": "industrial",
+            "address": {"state": "Tennessee", "country_code": "us"},
+        }
+
+    client = TestClient(
+        create_app(
+            workspace=tmp_path,
+            runner=correction_runner,
+            geocoder=geocoder,
+            background=False,
+        )
+    )
+    created = client.post(
+        "/api/harvest/run",
+        json={
+            "country": "US",
+            "locality": "Tennessee",
+            "profiles": "commercial_business",
+            "profile": "factories_warehouses",
+            "target": 1,
+        },
+    ).json()
+    run_id = created["manifest"]["run_id"]
+    client.post(f"/api/runs/{run_id}/qaqc-run")
+    client.post(f"/api/runs/{run_id}/address-run")
+    item = client.get(f"/api/runs/{run_id}/geometry-items").json()["items"][0]
+
+    response = client.post(
+        "/api/geometry/geocode",
+        json={
+            "item_id": item["item_id"],
+            "query": item["geocode_query"],
+            "allow_address_retry": True,
+            "conversation_id": run_id,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["address_retry"]["status"] == "corrected"
+    assert payload["geometry"]["point"]["latitude"] == 36.1
+    assert payload["geometry"]["geocode_query"].startswith("200 Corrected Plant Road")
+    address = client.get(f"/api/runs/{run_id}/address-results").json()["results"][0]
+    assert address["formatted_address"].startswith("200 Corrected Plant Road")
+    transcript = client.get(f"/api/runs/{run_id}/dialogue").text
+    assert "=== ADDRESS-SPATIAL CORRECTION ===" in transcript
+    assert "=== AUTOMATED GEOCODING ===" in transcript
+
+
 def test_geometry_geocode_prefers_enriched_address(tmp_path: Path) -> None:
     def geocoder(query: str) -> dict[str, object]:
         assert query == "100 Industrial Drive, Nashville, TN, US"
@@ -410,6 +779,8 @@ def test_geometry_geocode_prefers_enriched_address(tmp_path: Path) -> None:
             "longitude": -86.0,
             "provider": "mock",
             "query": query,
+            "type": "industrial",
+            "address": {"state": "Tennessee", "country_code": "us"},
         }
 
     client = TestClient(
@@ -445,6 +816,254 @@ def test_geometry_geocode_prefers_enriched_address(tmp_path: Path) -> None:
     assert geocoded.json()["geometry"]["point"]["latitude"] == 36.0
 
 
+def test_geometry_geocode_routes_out_of_scope_candidate_to_human_queue(
+    tmp_path: Path,
+) -> None:
+    def geocoder(query: str) -> dict[str, object]:
+        return {
+            "display_name": "Example Warehouse, Birmingham, Alabama, United States",
+            "latitude": 33.52,
+            "longitude": -86.80,
+            "provider": "mock",
+            "query": query,
+            "type": "industrial",
+            "address": {
+                "city": "Birmingham",
+                "state": "Alabama",
+                "country_code": "us",
+            },
+        }
+
+    client = TestClient(
+        create_app(
+            workspace=tmp_path,
+            runner=successful_runner,
+            geocoder=geocoder,
+            background=False,
+        )
+    )
+    created = client.post(
+        "/api/harvest/run",
+        json={
+            "country": "US",
+            "locality": "Tennessee",
+            "profiles": "commercial_business",
+            "profile": "factories_warehouses",
+            "target": 5,
+        },
+    ).json()
+    run_id = created["manifest"]["run_id"]
+    client.post(f"/api/runs/{run_id}/qaqc-run")
+    item = client.get(f"/api/runs/{run_id}/geometry-items").json()["items"][0]
+
+    response = client.post(
+        "/api/geometry/geocode",
+        json={"item_id": item["item_id"], "query": item["geocode_query"]},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["geocode_result"] is None
+    assert payload["spatial_validation"]["status"] == "out_of_scope"
+    assert payload["spatial_validation"]["candidate_options"][0]["confidence"] == (
+        "conflicting"
+    )
+    assert payload["spatial_validation"]["candidate_options"][0]["latitude"] == 33.52
+    assert payload["geometry"]["point"] is None
+    assert payload["geometry"]["spatial_validation"]["requires_human_intervention"] is True
+
+
+def test_geometry_research_reruns_address_agent_for_one_selected_item(
+    tmp_path: Path,
+) -> None:
+    def geocoder(query: str) -> dict[str, object]:
+        return {
+            "display_name": query,
+            "latitude": 36.11,
+            "longitude": -86.71,
+            "provider": "mock",
+            "query": query,
+            "name": "Example Warehouse",
+            "type": "industrial",
+            "address": {
+                "house_number": "100",
+                "road": "Industrial Drive",
+                "state": "Tennessee",
+                "country_code": "us",
+            },
+        }
+
+    client = TestClient(
+        create_app(
+            workspace=tmp_path,
+            runner=successful_runner,
+            geocoder=geocoder,
+            background=False,
+        )
+    )
+    created = client.post(
+        "/api/harvest/run",
+        json={
+            "country": "US",
+            "locality": "Tennessee",
+            "profiles": "commercial_business",
+            "profile": "factories_warehouses",
+            "target": 1,
+        },
+    ).json()
+    run_id = created["manifest"]["run_id"]
+    client.post(f"/api/runs/{run_id}/qaqc-run")
+    client.post(f"/api/runs/{run_id}/address-run")
+    item = client.get(f"/api/runs/{run_id}/geometry-items").json()["items"][0]
+
+    response = client.post(
+        "/api/geometry/research",
+        json={"item_id": item["item_id"], "conversation_id": run_id},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["address_retry"]["status"] == "corrected"
+    assert payload["research_resolved"] is True
+    assert payload["geometry"]["point"]["latitude"] == 36.11
+    assert payload["spatial_validation"]["manual_research"] is True
+    transcript = client.get(f"/api/runs/{run_id}/dialogue").text
+    assert "focused research" in transcript
+
+
+def test_coordinate_preview_parses_and_spatially_checks_google_maps_coordinates(
+    tmp_path: Path,
+) -> None:
+    class PreviewGeocoder:
+        def __call__(self, query: str) -> dict[str, object] | None:
+            return None
+
+        def reverse(self, latitude: float, longitude: float) -> dict[str, object]:
+            assert latitude == 36.11
+            assert longitude == -86.71
+            return {
+                "display_name": (
+                    "Example Warehouse, 100 Industrial Drive, Nashville, Tennessee, US"
+                ),
+                "latitude": latitude,
+                "longitude": longitude,
+                "provider": "mock-reverse",
+                "query": "reverse",
+                "name": "Example Warehouse",
+                "type": "industrial",
+                "address": {
+                    "house_number": "100",
+                    "road": "Industrial Drive",
+                    "city": "Nashville",
+                    "state": "Tennessee",
+                    "country_code": "us",
+                },
+            }
+
+    client = TestClient(
+        create_app(
+            workspace=tmp_path,
+            runner=successful_runner,
+            geocoder=PreviewGeocoder(),
+            background=False,
+        )
+    )
+    created = client.post(
+        "/api/harvest/run",
+        json={
+            "country": "US",
+            "locality": "Tennessee",
+            "profiles": "commercial_business",
+            "profile": "factories_warehouses",
+            "target": 1,
+        },
+    ).json()
+    run_id = created["manifest"]["run_id"]
+    client.post(f"/api/runs/{run_id}/qaqc-run")
+    client.post(f"/api/runs/{run_id}/address-run")
+    item = client.get(f"/api/runs/{run_id}/geometry-items").json()["items"][0]
+
+    response = client.post(
+        "/api/geometry/coordinate-preview",
+        json={
+            "item_id": item["item_id"],
+            "coordinate_text": "https://www.google.com/maps/@36.1100,-86.7100,18z",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["point"] == {
+        "latitude": 36.11,
+        "longitude": -86.71,
+        "source": "google-maps-human",
+    }
+    assert payload["normalized"] == "36.1100000, -86.7100000"
+    assert payload["spatial_validation"]["status"] == "in_scope"
+    assert payload["spatial_validation"]["warning"] is False
+    unchanged = client.get(f"/api/runs/{run_id}/geometry-items").json()["items"][0]
+    assert unchanged["geometry"] is None
+
+
+def test_geometry_geocode_all_reports_successes_and_not_found(tmp_path: Path) -> None:
+    calls: list[str] = []
+
+    def geocoder(query: str) -> dict[str, object] | None:
+        calls.append(query)
+        if len(calls) >= 2:
+            return None
+        return {
+            "display_name": query,
+            "latitude": 36.0,
+            "longitude": -86.0,
+            "provider": "mock",
+            "query": query,
+            "type": "industrial",
+            "address": {"state": "Tennessee", "country_code": "us"},
+        }
+
+    client = TestClient(
+        create_app(
+            workspace=tmp_path,
+            runner=successful_runner,
+            geocoder=geocoder,
+            background=False,
+        )
+    )
+    created = client.post(
+        "/api/harvest/campaign-run",
+        json={
+            "country": "US",
+            "localities": ["Tennessee"],
+            "facility_types": ["schools", "manufacturing"],
+            "target": 2,
+        },
+    ).json()
+    campaign_id = created["manifest"]["campaign_id"]
+    client.post(f"/api/runs/{campaign_id}/qaqc-run")
+    items = client.get(f"/api/runs/{campaign_id}/geometry-items").json()["items"]
+
+    response = client.post(
+        "/api/geometry/geocode-all",
+        json={
+            "items": [
+                {"item_id": item["item_id"], "query": item["geocode_query"]}
+                for item in items
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["requested_count"] == 2
+    assert payload["geocoded_count"] == 1
+    assert payload["not_found_count"] == 1
+    assert payload["error_count"] == 0
+    assert len(payload["items"]) == 2
+    refreshed = client.get(f"/api/runs/{campaign_id}/geometry-items").json()["items"]
+    assert sum(item["geometry_status"] == "point_confirmed" for item in refreshed) == 1
+
+
 def test_geometry_review_endpoints_and_verified_exports(tmp_path: Path) -> None:
     def geocoder(query: str) -> dict[str, object]:
         assert "Example Warehouse" in query
@@ -454,6 +1073,8 @@ def test_geometry_review_endpoints_and_verified_exports(tmp_path: Path) -> None:
             "longitude": -86.0,
             "provider": "mock",
             "query": query,
+            "type": "industrial",
+            "address": {"state": "Tennessee", "country_code": "us"},
         }
 
     client = TestClient(
@@ -512,6 +1133,16 @@ def test_geometry_review_endpoints_and_verified_exports(tmp_path: Path) -> None:
     assert geocoded.json()["geometry"]["point"]["latitude"] == 36.0
     assert saved.json()["geometry"]["geometry_status"] == "footprint_drawn"
     assert saved.json()["geometry"]["area_m2"] > 0
+    assert [geometry["type"] for geometry in saved.json()["geometry"]["geometries"]] == [
+        "Point",
+        "Polygon",
+    ]
+    verified_record = verified_json.json()[0]
+    assert [geometry["type"] for geometry in verified_record["geometries"]] == [
+        "Point",
+        "Polygon",
+    ]
+    assert verified_record["area_m2"] > 0
     assert "Example Warehouse" in verified_json.text
     assert "footprint_drawn" in verified_csv.text
     assert footprints.json()["features"][0]["geometry"]["type"] == "Polygon"
@@ -830,6 +1461,7 @@ def test_launcher_references_bootstrap_steps() -> None:
     windows_launcher = Path("Observation Harvester.bat").read_text(encoding="utf-8")
 
     assert ".venv" in mac_launcher
+    assert "ensurepip --upgrade" in mac_launcher
     assert '.[app]' in mac_launcher
     assert "command -v codex" in mac_launcher
     assert "APP_PORT" in mac_launcher
@@ -837,8 +1469,13 @@ def test_launcher_references_bootstrap_steps() -> None:
     assert "python -m pdt_observer app" in mac_launcher
 
     assert ".venv\\Scripts\\python.exe" in windows_launcher
+    assert 'set "WORKSPACE_DIR=%APP_DIR:~0,-1%"' in windows_launcher
+    assert '--workspace "%WORKSPACE_DIR%"' in windows_launcher
+    assert "ensurepip --upgrade" in windows_launcher
     assert '.[app]' in windows_launcher
-    assert "where codex" in windows_launcher
+    assert "OBSERVATION_HARVESTER_CODEX_BIN" in windows_launcher
+    assert "where codex.exe" in windows_launcher
+    assert '--codex-bin "%CODEX_BIN%"' in windows_launcher
     assert "OBSERVATION_HARVESTER_PORT" in windows_launcher
     assert "8771" in windows_launcher
-    assert "python -m pdt_observer app" in windows_launcher
+    assert '".venv\\Scripts\\python.exe" -m pdt_observer app' in windows_launcher

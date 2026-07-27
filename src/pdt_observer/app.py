@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import subprocess
 import threading
 import time
@@ -26,8 +27,17 @@ from pdt_observer.addresses import (
     approved_address_inputs,
     load_address_results,
     merge_address_results,
+    render_address_correction_prompt,
     render_address_enrichment_prompt,
+    upsert_address_result,
 )
+from pdt_observer.dialogue import (
+    append_dialogue,
+    combine_dialogue,
+    load_dialogue,
+    render_dialogue,
+)
+from pdt_observer.geographer import load_geographer_plan, run_geographer
 from pdt_observer.geometry import (
     Geocoder,
     NominatimGeocoder,
@@ -35,7 +45,9 @@ from pdt_observer.geometry import (
     footprints_geojson,
     geometry_item_from_payload,
     merge_geometry_items,
+    parse_coordinate_text,
     save_geometry_review_item,
+    spatially_validate_geocode_result,
     verified_csv,
     verified_json,
 )
@@ -58,11 +70,13 @@ from pdt_observer.leads import (
     render_lead_qaqc_prompt,
 )
 from pdt_observer.models import (
+    AddressEnrichmentStatus,
     GeometryPoint,
     GeometryStatus,
     HarvestBatchRunManifest,
     HarvestCampaignRunManifest,
     HarvestRunManifest,
+    HarvestRunStatus,
 )
 from pdt_observer.profiles import BUILTIN_PROFILE_SETS
 from pdt_observer.samples import (
@@ -76,6 +90,7 @@ from pdt_observer.samples import (
     run_gap_fill,
     sample_records,
 )
+from pdt_observer.strategies import STRATEGIES, build_strategy_plan
 from pdt_observer.workflow import write_model
 
 
@@ -85,6 +100,8 @@ class HarvestRunRequest(BaseModel):
     profiles: str = "schools"
     profile: str | None = None
     target: int = Field(default=20, ge=1)
+    run_id: str | None = None
+    geographer_plan_path: str | None = None
 
 
 class HarvestBatchRunRequest(BaseModel):
@@ -92,6 +109,18 @@ class HarvestBatchRunRequest(BaseModel):
     locality: str | None = None
     profiles: str = "schools"
     target: int = Field(default=20, ge=1)
+    batch_id: str | None = None
+    geographer_plan_path: str | None = None
+
+
+class GeographerPlanRequest(BaseModel):
+    country: str = Field(min_length=2)
+    locality: str | None = None
+    profiles: str = "schools"
+    profile: str | None = None
+    localities: tuple[str, ...] = ()
+    facility_types: tuple[str, ...] = ()
+    mode: str = Field(default="single", pattern=r"^(single|batch|campaign)$")
 
 
 class HarvestCampaignRunRequest(BaseModel):
@@ -99,6 +128,8 @@ class HarvestCampaignRunRequest(BaseModel):
     localities: tuple[str, ...] = ()
     facility_types: tuple[str, ...] = Field(min_length=1)
     target: int = Field(default=20, ge=1)
+    campaign_id: str | None = None
+    geographer_plan_path: str | None = None
 
 
 class PromoteLeadRequest(BaseModel):
@@ -109,6 +140,22 @@ class PromoteLeadRequest(BaseModel):
 class GeometryGeocodeRequest(BaseModel):
     item_id: str = Field(min_length=1)
     query: str = Field(min_length=1)
+    allow_address_retry: bool = False
+    conversation_id: str | None = None
+
+
+class GeometryResearchRequest(BaseModel):
+    item_id: str = Field(min_length=1)
+    conversation_id: str | None = None
+
+
+class GeometryCoordinatePreviewRequest(BaseModel):
+    item_id: str = Field(min_length=1)
+    coordinate_text: str = Field(min_length=1)
+
+
+class GeometryGeocodeAllRequest(BaseModel):
+    items: tuple[GeometryGeocodeRequest, ...] = Field(min_length=1)
 
 
 class GeometrySaveRequest(BaseModel):
@@ -118,7 +165,9 @@ class GeometrySaveRequest(BaseModel):
     polygon_geojson: dict[str, Any] | None = None
     geometry_status: GeometryStatus = GeometryStatus.NEEDS_REVIEW
     geocode_result: dict[str, Any] | None = None
+    spatial_validation: dict[str, Any] | None = None
     review_notes: str | None = None
+    conversation_id: str | None = None
 
 
 class SampleSetCreateRequest(BaseModel):
@@ -158,6 +207,8 @@ class ActiveCodexRegistry:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             cwd=cwd,
         )
         with self._lock:
@@ -245,6 +296,8 @@ def _clear_runtime_history(root: Path) -> int:
         "address_runs": ("*.json",),
         "coverage_runs": ("*.json",),
         "sample_sets": ("*.json",),
+        "geographer_runs": ("*.json",),
+        "agent_dialogue": ("*.json",),
         "work": ("*.md",),
     }
     deleted_count = 0
@@ -351,6 +404,10 @@ def _profiles_payload() -> dict[str, Any]:
                         "label": profile.label,
                         "enabled": profile.enabled,
                         "priority": profile.priority,
+                        "strategy_plan": build_strategy_plan(
+                            profile_set,
+                            profile_id=profile.profile_id,
+                        ).model_dump(mode="json"),
                     }
                     for profile in profile_set.profiles
                 ],
@@ -363,7 +420,11 @@ def _profiles_payload() -> dict[str, Any]:
                 preferred_order.get(str(item["profile_set_id"]), 100),
                 item["profile_set_id"],
             ),
-        )
+        ),
+        "strategies": [
+            strategy.model_dump(mode="json")
+            for strategy in STRATEGIES.values()
+        ],
     }
 
 
@@ -385,6 +446,36 @@ def _manifest_child_run_ids(manifest: Any) -> tuple[str, ...]:
     if run_id is not None:
         return (str(run_id),)
     return tuple(str(run_id) for run_id in getattr(manifest, "child_run_ids", ()))
+
+
+def _pipeline_transcript_text(
+    root: Path,
+    *,
+    run_id: str | None = None,
+    sample_set_id: str | None = None,
+) -> str:
+    conversation_ids: list[str] = []
+    title_id = run_id
+    if sample_set_id is not None:
+        sample_set = load_sample_set(root, sample_set_id)
+        title_id = sample_set.sample_set_id
+        for sample_round in sample_set.rounds:
+            for source_run_id in sample_round.source_run_ids:
+                if source_run_id not in conversation_ids:
+                    conversation_ids.append(source_run_id)
+        conversation_ids.append(sample_set.sample_set_id)
+    elif run_id is not None:
+        conversation_ids.append(run_id)
+    entries = combine_dialogue(
+        *(load_dialogue(root, conversation_id) for conversation_id in conversation_ids)
+    )
+    heading = (
+        "OBSERVATION HARVESTER PIPELINE TRANSCRIPT\n"
+        f"Pipeline: {title_id or 'unknown'}\n"
+        f"Conversation sources: {', '.join(conversation_ids) or 'none'}\n"
+    )
+    rendered = render_dialogue(entries)
+    return heading + ("\n" + rendered if rendered else "\n\nNo agent dialogue recorded.\n")
 
 
 def _load_any_manifest(root: Path, run_id: str) -> Any:
@@ -411,7 +502,12 @@ def _run_qaqc_for_child(
     manifest = _load_run_manifest(root, run_id)
     append_harvest_log(root, parent_id, f"Rendering QAQC prompt for {run_id}.")
     leads = load_leads(Path(manifest.lead_path))
-    prompt = render_lead_qaqc_prompt(leads, source_label=manifest.lead_path)
+    prompt = render_lead_qaqc_prompt(
+        leads,
+        source_label=manifest.lead_path,
+        expected_country=manifest.country,
+        expected_locality=manifest.locality,
+    )
     prompt_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     prompt_path.write_text(prompt, encoding="utf-8")
@@ -536,6 +632,21 @@ def _run_qaqc_for_manifest(
         "review_count": review_count,
     }
     append_harvest_log(root, parent_id, f"QAQC run finished: {summary}.")
+    append_dialogue(
+        root,
+        parent_id,
+        speaker="QAQC Agent",
+        stage="qaqc",
+        message=(
+            f"I reviewed {review_count} lead record(s) across {completed_count} completed "
+            f"child run(s)."
+        ),
+        rationale=(
+            f"{failed_count} child review(s) failed and {cancelled_count} were cancelled. "
+            "I checked source support, facility and location agreement, count evidence, and "
+            "strategy semantics before recommending what to keep."
+        ),
+    )
     return {
         "parent_id": parent_id,
         "child_run_ids": child_run_ids,
@@ -716,6 +827,21 @@ def _run_address_for_manifest(
         "result_count": result_count,
     }
     append_harvest_log(root, parent_id, f"Address enrichment finished: {summary}.")
+    append_dialogue(
+        root,
+        parent_id,
+        speaker="Address Agent",
+        stage="address_enrichment",
+        message=(
+            f"I completed address research for {completed_count} child run(s) and returned "
+            f"{result_count} address result(s)."
+        ),
+        rationale=(
+            f"{failed_count} child enrichment run(s) failed and {cancelled_count} were cancelled. "
+            "I limited the work to QAQC-approved leads and preserved ambiguous addresses for "
+            "human review."
+        ),
+    )
     return {
         "parent_id": parent_id,
         "child_run_ids": child_run_ids,
@@ -763,6 +889,453 @@ def _geometry_items_payload(root: Path, manifest: Any) -> dict[str, Any]:
     return {"item_count": len(items), "items": items}
 
 
+def _geometry_record_context(
+    root: Path,
+    item_id: str,
+) -> tuple[HarvestRunManifest, dict[str, Any]]:
+    child_run_id, _ = item_id.rsplit("-", 1)
+    manifest = _load_run_manifest(root, child_run_id)
+    records = _geometry_items_payload(root, manifest)["items"]
+    record = next(
+        (candidate for candidate in records if candidate.get("item_id") == item_id),
+        None,
+    )
+    if not isinstance(record, dict):
+        raise ValueError(f"geometry item not found: {item_id}")
+    return manifest, record
+
+
+def _geocode_context(
+    root: Path,
+    item_id: str,
+    requested_query: str,
+) -> tuple[HarvestRunManifest, tuple[str, ...]]:
+    manifest, record = _geometry_record_context(root, item_id)
+    queries: list[str] = []
+
+    def add_query(value: object) -> None:
+        text = str(value or "").strip()
+        if text and text not in queries:
+            queries.append(text)
+
+    add_query(requested_query)
+    address = record.get("address_enrichment")
+    if isinstance(address, dict):
+        add_query(
+            ", ".join(
+                str(address.get(key) or "").strip()
+                for key in (
+                    "address_line1",
+                    "city_or_region",
+                    "state_or_province",
+                    "postal_code",
+                    "country",
+                )
+                if str(address.get(key) or "").strip()
+            )
+        )
+        add_query(address.get("formatted_address"))
+    lead = record.get("lead")
+    if isinstance(lead, dict):
+        location = lead.get("location")
+        if isinstance(location, dict):
+            add_query(
+                ", ".join(
+                    str(location.get(key) or "").strip()
+                    for key in (
+                        "facility_name",
+                        "specific_address_or_landmark",
+                        "city_or_region",
+                        "country",
+                    )
+                    if str(location.get(key) or "").strip()
+                )
+            )
+            add_query(
+                ", ".join(
+                    str(location.get(key) or "").strip()
+                    for key in ("facility_name", "city_or_region", "country")
+                    if str(location.get(key) or "").strip()
+                )
+            )
+    return manifest, tuple(queries)
+
+
+def _run_address_spatial_retry(
+    *,
+    root: Path,
+    item_id: str,
+    spatial_feedback: dict[str, object],
+    conversation_id: str,
+    codex_bin: str,
+    runner: CodexRunner,
+) -> dict[str, Any]:
+    manifest, geometry_record = _geometry_record_context(root, item_id)
+    address_input = next(
+        (
+            record
+            for record in approved_address_inputs(root=root, manifest=manifest)
+            if record.get("item_id") == item_id
+        ),
+        None,
+    )
+    if address_input is None:
+        return {"status": "skipped", "reason": "QAQC-approved address input was not found."}
+    prompt = render_address_correction_prompt(
+        address_input,
+        current_address=(
+            geometry_record.get("address_enrichment")
+            if isinstance(geometry_record.get("address_enrichment"), dict)
+            else None
+        ),
+        spatial_feedback=spatial_feedback,
+    )
+    retry_id = f"{item_id}-address-spatial-retry"
+    prompt_path = root / "work" / f"{retry_id}.md"
+    output_path = root / "address_runs" / f"{retry_id}.json"
+    prompt_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    prompt_path.write_text(prompt, encoding="utf-8")
+    append_harvest_log(
+        root,
+        conversation_id,
+        f"Address-spatial retry started for {item_id}.",
+    )
+    command = (
+        codex_bin,
+        "--search",
+        "exec",
+        "--sandbox",
+        "workspace-write",
+        "--cd",
+        str(root),
+        "-o",
+        str(output_path),
+        "-",
+    )
+    result = runner(command, prompt, root)
+    if result.returncode != 0:
+        message = result.stderr.strip() or result.stdout.strip() or "Address retry failed."
+        append_dialogue(
+            root,
+            conversation_id,
+            speaker="Address-Spatial Review Agent",
+            stage="address_spatial_retry",
+            message=f"I could not complete corrected address research for {item_id}.",
+            rationale=message,
+        )
+        return {"status": "failed", "reason": message}
+    try:
+        results = load_address_results(output_path)
+        corrected = next((item for item in results if item.item_id == item_id), None)
+        if corrected is None and len(results) == 1:
+            candidate = results[0]
+            corrected = candidate.model_copy(
+                update={
+                    "item_id": item_id,
+                    "lead_index": int(address_input["lead_index"]),
+                }
+            )
+        if corrected is None:
+            raise ValueError("Address retry did not return the requested item.")
+    except Exception as exc:
+        return {"status": "failed", "reason": str(exc)}
+    upsert_address_result(root, manifest.run_id, corrected)
+    usable = (
+        corrected.status == AddressEnrichmentStatus.FOUND
+        and bool(corrected.formatted_address)
+    )
+    append_dialogue(
+        root,
+        conversation_id,
+        speaker="Address-Spatial Review Agent",
+        stage="address_spatial_retry",
+        message=(
+            f"I found a corrected address candidate for {corrected.facility_name}: "
+            f"{corrected.formatted_address}."
+            if usable
+            else f"I could not establish a corrected address for {corrected.facility_name}."
+        ),
+        rationale=corrected.review_notes,
+    )
+    return {
+        "status": "corrected" if usable else corrected.status.value,
+        "address": corrected.model_dump(mode="json"),
+        "prompt_path": str(prompt_path),
+        "output_path": str(output_path),
+    }
+
+
+def _normalized_address_words(value: object) -> set[str]:
+    return {
+        word
+        for word in re.findall(r"[^\W_]+", str(value or "").casefold(), flags=re.UNICODE)
+        if len(word) >= 3 and not word.isdigit()
+    }
+
+
+def _address_candidate_mismatch(
+    candidate: dict[str, Any],
+    record: dict[str, Any],
+) -> str | None:
+    enriched = record.get("address_enrichment")
+    if not isinstance(enriched, dict):
+        return None
+    candidate_address = candidate.get("address")
+    if not isinstance(candidate_address, dict):
+        return None
+    expected_postal = re.sub(r"\W", "", str(enriched.get("postal_code") or "").casefold())
+    candidate_postal = re.sub(
+        r"\W",
+        "",
+        str(candidate_address.get("postcode") or "").casefold(),
+    )
+    if expected_postal and candidate_postal and expected_postal != candidate_postal:
+        return (
+            f"Geocoder postal code {candidate_postal} does not match researched "
+            f"postal code {expected_postal}."
+        )
+    expected_line = str(enriched.get("address_line1") or "")
+    expected_number_match = re.match(r"\s*(\d+[A-Za-z]?)\b", expected_line)
+    expected_number = expected_number_match.group(1).casefold() if expected_number_match else ""
+    candidate_number = str(candidate_address.get("house_number") or "").casefold()
+    if expected_number and candidate_number and expected_number != candidate_number:
+        return (
+            f"Geocoder house number {candidate_number} does not match researched "
+            f"house number {expected_number}."
+        )
+    expected_road_words = _normalized_address_words(
+        re.sub(r"^\s*\d+[A-Za-z]?\s*", "", expected_line)
+    )
+    candidate_road_words = _normalized_address_words(
+        candidate_address.get("road")
+        or candidate_address.get("pedestrian")
+        or candidate_address.get("industrial")
+    )
+    if (
+        expected_road_words
+        and candidate_road_words
+        and not expected_road_words.intersection(candidate_road_words)
+    ):
+        return "Geocoder street name does not agree with the researched address."
+    candidate_name_words = _normalized_address_words(candidate.get("name"))
+    lead = record.get("lead")
+    location = lead.get("location") if isinstance(lead, dict) else None
+    facility_words = _normalized_address_words(
+        location.get("facility_name") if isinstance(location, dict) else ""
+    )
+    if (
+        candidate_name_words
+        and facility_words
+        and not candidate_name_words.intersection(facility_words)
+    ):
+        return "Named geocoder feature does not match the researched facility identity."
+    return None
+
+
+def _ranked_candidate_options(
+    result: dict[str, Any] | None,
+    *,
+    record: dict[str, Any],
+    expected_country: str,
+    expected_locality: str | None,
+    query: str,
+) -> list[dict[str, Any]]:
+    if result is None:
+        return []
+    raw_candidates = result.get("candidates")
+    candidates = (
+        [candidate for candidate in raw_candidates if isinstance(candidate, dict)]
+        if isinstance(raw_candidates, list)
+        else [result]
+    )
+    options: list[dict[str, Any]] = []
+    lead = record.get("lead")
+    location = lead.get("location") if isinstance(lead, dict) else None
+    facility_words = _normalized_address_words(
+        location.get("facility_name") if isinstance(location, dict) else ""
+    )
+    for candidate in candidates:
+        latitude = candidate.get("latitude")
+        longitude = candidate.get("longitude")
+        if latitude is None or longitude is None:
+            continue
+        _, validation = spatially_validate_geocode_result(
+            {"candidates": [candidate]},
+            expected_country=expected_country,
+            expected_locality=expected_locality,
+        )
+        raw_assessments = validation.get("assessments")
+        assessment: dict[str, object] = (
+            raw_assessments[0]
+            if isinstance(raw_assessments, list)
+            and raw_assessments
+            and isinstance(raw_assessments[0], dict)
+            else {}
+        )
+        scope_status = str(assessment.get("status") or validation["status"])
+        scope_reason = str(assessment.get("reason") or validation["reason"])
+        mismatch = _address_candidate_mismatch(candidate, record)
+        candidate_words = _normalized_address_words(
+            candidate.get("name") or candidate.get("display_name")
+        )
+        facility_match = bool(
+            facility_words
+            and candidate_words
+            and facility_words.intersection(candidate_words)
+        )
+        score: float = {
+            "accepted": 60,
+            "requires_human": 35,
+            "out_of_scope": -100,
+        }.get(scope_status, 0)
+        match_summary = [scope_reason]
+        if mismatch is None:
+            score += 25
+            match_summary.append("No conflict with the researched address was detected.")
+        else:
+            score -= 30
+            match_summary.append(mismatch)
+        if facility_match:
+            score += 15
+            match_summary.append("The candidate name overlaps the facility name.")
+        importance = candidate.get("importance")
+        if isinstance(importance, int | float):
+            score += min(max(float(importance), 0.0), 1.0) * 10
+        confidence = (
+            "likely"
+            if score >= 75 and scope_status == "accepted" and mismatch is None
+            else "possible"
+            if score >= 25 and scope_status != "out_of_scope"
+            else "conflicting"
+        )
+        geocode_result = {
+            key: value
+            for key, value in candidate.items()
+            if key not in {"candidates", "cache_version"}
+        }
+        options.append(
+            {
+                "display_name": str(candidate.get("display_name") or ""),
+                "latitude": float(latitude),
+                "longitude": float(longitude),
+                "provider": str(candidate.get("provider") or "geocoder"),
+                "query": query,
+                "category": candidate.get("category"),
+                "type": candidate.get("type"),
+                "name": candidate.get("name"),
+                "address": candidate.get("address", {}),
+                "scope_status": scope_status,
+                "scope_reason": scope_reason,
+                "address_mismatch": mismatch,
+                "facility_name_match": facility_match,
+                "score": round(score, 1),
+                "confidence": confidence,
+                "match_summary": match_summary,
+                "geocode_result": geocode_result,
+            }
+        )
+    return options
+
+
+def _merge_ranked_candidate_options(
+    existing: list[dict[str, Any]],
+    additions: Sequence[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    by_location: dict[tuple[float, float], dict[str, Any]] = {
+        (
+            round(float(option["latitude"]), 6),
+            round(float(option["longitude"]), 6),
+        ): option
+        for option in existing
+    }
+    for option in additions:
+        key = (
+            round(float(option["latitude"]), 6),
+            round(float(option["longitude"]), 6),
+        )
+        current = by_location.get(key)
+        if current is None or float(option["score"]) > float(current["score"]):
+            by_location[key] = dict(option)
+    return sorted(
+        by_location.values(),
+        key=lambda option: (-float(option["score"]), str(option["display_name"])),
+    )[:5]
+
+
+def _spatially_geocode_item(
+    *,
+    root: Path,
+    geocoder: Geocoder,
+    item_id: str,
+    requested_query: str,
+) -> tuple[dict[str, Any] | None, dict[str, object], str]:
+    manifest, record = _geometry_record_context(root, item_id)
+    _, queries = _geocode_context(root, item_id, requested_query)
+    attempts: list[dict[str, object]] = []
+    final_validation: dict[str, object] = {
+        "status": "no_match",
+        "requires_human_intervention": True,
+        "reason": "No geocoding query produced a usable candidate.",
+        "candidate_count": 0,
+    }
+    candidate_options: list[dict[str, Any]] = []
+    for query in queries:
+        result = geocoder(query)
+        candidate_options = _merge_ranked_candidate_options(
+            candidate_options,
+            _ranked_candidate_options(
+                result,
+                record=record,
+                expected_country=manifest.country,
+                expected_locality=manifest.locality,
+                query=query,
+            ),
+        )
+        accepted, validation = spatially_validate_geocode_result(
+            result,
+            expected_country=manifest.country,
+            expected_locality=manifest.locality,
+        )
+        mismatch = _address_candidate_mismatch(accepted, record) if accepted is not None else None
+        if mismatch is not None:
+            validation = {
+                **validation,
+                "status": "address_mismatch",
+                "requires_human_intervention": True,
+                "reason": mismatch,
+            }
+            accepted = None
+        attempts.append(
+            {
+                "query": query,
+                "status": validation["status"],
+                "reason": validation["reason"],
+            }
+        )
+        final_validation = validation
+        if accepted is not None:
+            return (
+                accepted,
+                {
+                    **validation,
+                    "matched_query": query,
+                    "attempts": attempts,
+                    "candidate_options": candidate_options,
+                },
+                query,
+            )
+    return (
+        None,
+        {
+            **final_validation,
+            "attempts": attempts,
+            "candidate_options": candidate_options,
+        },
+        requested_query,
+    )
+
+
 def _sample_geometry_items_payload(root: Path, sample_set_id: str) -> dict[str, Any]:
     sample_set = refresh_sample_set(root, load_sample_set(root, sample_set_id))
     items = sample_records(root, sample_set)
@@ -782,6 +1355,416 @@ def _latest_coverage_path(root: Path, sample_set_id: str) -> Path:
     if not candidates:
         raise FileNotFoundError(f"coverage review not found for sample set: {sample_set_id}")
     return candidates[0]
+
+
+def _workflow_stage(
+    *,
+    stage_id: str,
+    label: str,
+    status: str,
+    current: int,
+    total: int,
+    detail: str,
+    metrics: dict[str, object] | None = None,
+    action_id: str | None = None,
+    action_label: str | None = None,
+    indeterminate: bool = False,
+) -> dict[str, object]:
+    return {
+        "id": stage_id,
+        "label": label,
+        "status": status,
+        "current": current,
+        "total": total,
+        "detail": detail,
+        "metrics": metrics or {},
+        "action_id": action_id,
+        "action_label": action_label,
+        "indeterminate": indeterminate,
+    }
+
+
+def _workflow_status_payload(
+    root: Path,
+    *,
+    manifest: Any | None = None,
+    sample_set_id: str | None = None,
+    active: bool = False,
+) -> dict[str, object]:
+    sample_set = load_sample_set(root, sample_set_id) if sample_set_id is not None else None
+    if sample_set is not None:
+        initial_child_ids = (
+            sample_set.rounds[0].child_run_ids if sample_set.rounds else ()
+        )
+        all_child_ids = sample_set.combined_child_run_ids
+        identity = sample_set.sample_set_id
+        country = sample_set.country
+        localities = sample_set.requested_localities
+        facility_types = sample_set.facility_types
+        target_per_job = sample_set.target
+    else:
+        if manifest is None:
+            raise ValueError("workflow status requires a run or sample set")
+        initial_child_ids = _manifest_child_run_ids(manifest)
+        all_child_ids = initial_child_ids
+        identity = _manifest_identity(manifest)
+        country = str(getattr(manifest, "country", ""))
+        locality = getattr(manifest, "locality", None)
+        localities = tuple(
+            str(item) for item in getattr(manifest, "localities", ())
+        ) or tuple([str(locality)] if locality else [])
+        profile_set = getattr(manifest, "profile_set", None)
+        facility_types = tuple(
+            str(item) for item in getattr(manifest, "facility_types", ())
+        ) or tuple([str(profile_set)] if profile_set else [])
+        target_per_job = int(getattr(manifest, "target", 1))
+
+    child_manifests: dict[str, HarvestRunManifest] = {}
+    for child_run_id in all_child_ids:
+        try:
+            child_manifests[child_run_id] = _load_run_manifest(root, child_run_id)
+        except ValueError:
+            continue
+
+    initial_manifests = tuple(
+        child_manifests[child_run_id]
+        for child_run_id in initial_child_ids
+        if child_run_id in child_manifests
+    )
+    planned_jobs = len(initial_child_ids)
+    if sample_set is None and manifest is not None and manifest.summary is not None:
+        planned_value = manifest.summary.get("planned_run_count")
+        if isinstance(planned_value, int):
+            planned_jobs = planned_value
+    planned_jobs = max(planned_jobs, 1)
+    finished_jobs = sum(
+        child.status in {
+            HarvestRunStatus.COMPLETED,
+            HarvestRunStatus.FAILED,
+            HarvestRunStatus.CANCELLED,
+        }
+        for child in initial_manifests
+    )
+    successful_jobs = sum(
+        child.status == HarvestRunStatus.COMPLETED for child in initial_manifests
+    )
+    failed_jobs = finished_jobs - successful_jobs
+    lead_count = 0
+    for child in initial_manifests:
+        if child.validation_valid and Path(child.lead_path).is_file():
+            lead_count += len(load_leads(Path(child.lead_path)))
+    lead_quota = planned_jobs * target_per_job
+    harvest_running = active and finished_jobs < planned_jobs
+    if harvest_running:
+        harvest_status = "running"
+    elif failed_jobs or (finished_jobs >= planned_jobs and lead_count < lead_quota):
+        harvest_status = "attention"
+    elif finished_jobs >= planned_jobs:
+        harvest_status = "complete"
+    else:
+        harvest_status = "ready"
+
+    all_lead_count = 0
+    review_count = 0
+    verified_count = 0
+    rejected_count = 0
+    address_count = 0
+    address_found_count = 0
+    for child_run_id in all_child_ids:
+        child_manifest = child_manifests.get(child_run_id)
+        if (
+            child_manifest is not None
+            and child_manifest.validation_valid
+            and Path(child_manifest.lead_path).is_file()
+        ):
+            all_lead_count += len(load_leads(Path(child_manifest.lead_path)))
+        qaqc_path = _qaqc_output_path(root, child_run_id)
+        if qaqc_path.is_file():
+            reviews = load_qaqc_reviews(qaqc_path)
+            review_count += len(reviews)
+            verified_count += sum(
+                review.verification_status.value == "verified"
+                and review.recommended_action.value == "keep"
+                for review in reviews
+            )
+            rejected_count += sum(
+                review.recommended_action.value in {"reject", "retry"}
+                or review.verification_status.value != "verified"
+                for review in reviews
+            )
+        child_address_path = address_output_path(root, child_run_id)
+        if child_address_path.is_file():
+            address_results = load_address_results(child_address_path)
+            address_count += len(address_results)
+            address_found_count += sum(
+                result.status.value == "found" for result in address_results
+            )
+
+    if review_count >= all_lead_count and all_lead_count > 0:
+        qaqc_status = "complete"
+    elif review_count > 0:
+        qaqc_status = "attention"
+    elif finished_jobs >= planned_jobs and all_lead_count > 0:
+        qaqc_status = "ready"
+    else:
+        qaqc_status = "blocked"
+
+    if verified_count > 0 and address_count >= verified_count:
+        address_status = "complete"
+    elif address_count > 0:
+        address_status = "attention"
+    elif qaqc_status == "complete" and verified_count > 0:
+        address_status = "ready"
+    else:
+        address_status = "blocked"
+
+    geometry_items: tuple[dict[str, Any], ...] = ()
+    if verified_count > 0:
+        try:
+            if sample_set is not None:
+                geometry_items = sample_records(root, refresh_sample_set(root, sample_set))
+            elif manifest is not None:
+                geometry_items = tuple(_geometry_items_payload(root, manifest)["items"])
+        except (FileNotFoundError, ValueError):
+            geometry_items = ()
+    approved_count = len(geometry_items)
+    geocoded_count = 0
+    footprint_count = 0
+    skipped_count = 0
+    for item in geometry_items:
+        geometry = item.get("geometry")
+        if isinstance(geometry, dict):
+            if geometry.get("point") is not None:
+                geocoded_count += 1
+            if geometry.get("polygon_geojson") is not None:
+                footprint_count += 1
+            if geometry.get("geometry_status") == "skipped":
+                skipped_count += 1
+    if approved_count > 0 and geocoded_count + skipped_count >= approved_count:
+        geometry_status = "complete"
+    elif geocoded_count or skipped_count:
+        geometry_status = "running"
+    elif verified_count > 0:
+        geometry_status = "ready"
+    else:
+        geometry_status = "blocked"
+
+    if sample_set is not None:
+        sample_status = "complete"
+    elif verified_count > 0:
+        sample_status = "ready"
+    else:
+        sample_status = "blocked"
+
+    coverage_review = None
+    coverage_status = "blocked"
+    coverage_detail = "Create a sample set and geocode observations first."
+    if sample_set is not None:
+        try:
+            coverage_review = load_coverage_review(
+                _latest_coverage_path(root, sample_set.sample_set_id)
+            )
+            coverage_status = "complete"
+            coverage_detail = (
+                f"Latest assessment: {coverage_review.dispersion_status.value}; "
+                f"{len(coverage_review.recommended_child_jobs)} gap-fill job(s) recommended."
+            )
+        except FileNotFoundError:
+            if geocoded_count > 0:
+                coverage_status = "ready"
+                coverage_detail = f"{geocoded_count} geocoded observation(s) are ready to assess."
+            else:
+                coverage_detail = "Geocode at least one approved observation first."
+
+    gap_rounds = (
+        tuple(round_item for round_item in sample_set.rounds if round_item.role.value == "gap_fill")
+        if sample_set is not None
+        else ()
+    )
+    latest_gap_round = gap_rounds[-1] if gap_rounds else None
+    recommended_jobs = (
+        len(coverage_review.recommended_child_jobs) if coverage_review is not None else 0
+    )
+    gap_completed = (
+        len(latest_gap_round.child_run_ids) if latest_gap_round is not None else 0
+    )
+    if (
+        latest_gap_round is not None
+        and coverage_review is not None
+        and latest_gap_round.recommended_coverage_id == coverage_review.coverage_id
+    ):
+        gap_status = (
+            "complete"
+            if latest_gap_round.status == HarvestRunStatus.COMPLETED
+            else "attention"
+        )
+    elif coverage_review is not None and recommended_jobs > 0:
+        gap_status = "ready"
+    elif coverage_review is not None:
+        gap_status = "complete"
+    else:
+        gap_status = "blocked"
+
+    stages = [
+        _workflow_stage(
+            stage_id="scope",
+            label="Define Scope",
+            status="complete",
+            current=planned_jobs,
+            total=planned_jobs,
+            detail=(
+                f"{country}; {len(localities) or 1} geographic scope(s); "
+                f"{len(facility_types)} facility type(s); {planned_jobs} initial job(s)."
+            ),
+        ),
+        _workflow_stage(
+            stage_id="harvest",
+            label="Harvest Observations",
+            status=harvest_status,
+            current=lead_count,
+            total=lead_quota,
+            detail=(
+                f"{successful_jobs}/{planned_jobs} jobs completed successfully; "
+                f"{failed_jobs} failed or cancelled; {lead_count}/{lead_quota} target leads."
+            ),
+            metrics={
+                "planned_jobs": planned_jobs,
+                "finished_jobs": finished_jobs,
+                "successful_jobs": successful_jobs,
+                "failed_jobs": failed_jobs,
+                "lead_count": lead_count,
+                "lead_quota": lead_quota,
+            },
+            indeterminate=harvest_running,
+        ),
+        _workflow_stage(
+            stage_id="qaqc",
+            label="Verify Evidence",
+            status=qaqc_status,
+            current=review_count,
+            total=all_lead_count,
+            detail=(
+                f"{review_count}/{all_lead_count} leads reviewed; "
+                f"{verified_count} verified; {rejected_count} rejected or unresolved."
+            ),
+            metrics={"verified_count": verified_count, "rejected_count": rejected_count},
+            action_id="run_qaqc" if qaqc_status in {"ready", "attention"} else None,
+            action_label="Run QAQC" if qaqc_status in {"ready", "attention"} else None,
+            indeterminate=qaqc_status == "running",
+        ),
+        _workflow_stage(
+            stage_id="address",
+            label="Enrich Addresses",
+            status=address_status,
+            current=address_count,
+            total=verified_count,
+            detail=(
+                f"{address_count}/{verified_count} verified facilities processed; "
+                f"{address_found_count} addresses found. Optional but recommended before mapping."
+            ),
+            metrics={"found_count": address_found_count},
+            action_id="run_address" if address_status in {"ready", "attention"} else None,
+            action_label=(
+                "Run Address Enrichment"
+                if address_status in {"ready", "attention"}
+                else None
+            ),
+            indeterminate=address_status == "running",
+        ),
+        _workflow_stage(
+            stage_id="geometry",
+            label="Geocode and Review Geometry",
+            status=geometry_status,
+            current=geocoded_count + skipped_count,
+            total=approved_count or verified_count,
+            detail=(
+                f"{geocoded_count}/{approved_count or verified_count} geocoded; "
+                f"{footprint_count} footprints saved; {skipped_count} skipped."
+            ),
+            metrics={
+                "approved_count": approved_count,
+                "geocoded_count": geocoded_count,
+                "footprint_count": footprint_count,
+                "skipped_count": skipped_count,
+            },
+            action_id="load_geometry" if geometry_status in {"ready", "running"} else None,
+            action_label=(
+                "Load Geometry Review"
+                if geometry_status in {"ready", "running"}
+                else None
+            ),
+        ),
+        _workflow_stage(
+            stage_id="sample",
+            label="Create Sample Set",
+            status=sample_status,
+            current=1 if sample_set is not None else 0,
+            total=1,
+            detail=(
+                f"Sample set {sample_set.sample_set_id} contains "
+                f"{len(sample_set.combined_child_run_ids)} child run(s)."
+                if sample_set is not None
+                else "Create a durable sample after QAQC to enable coverage steering."
+            ),
+            action_id="create_sample" if sample_status == "ready" else None,
+            action_label="Create Sample Set" if sample_status == "ready" else None,
+        ),
+        _workflow_stage(
+            stage_id="coverage",
+            label="Analyze Coverage",
+            status=coverage_status,
+            current=1 if coverage_status == "complete" else 0,
+            total=1,
+            detail=coverage_detail,
+            action_id="analyze_coverage" if coverage_status == "ready" else None,
+            action_label="Analyze Coverage" if coverage_status == "ready" else None,
+            indeterminate=coverage_status == "running",
+        ),
+        _workflow_stage(
+            stage_id="gap_fill",
+            label="Fill Coverage Gaps",
+            status=gap_status,
+            current=gap_completed,
+            total=recommended_jobs,
+            detail=(
+                f"{gap_completed}/{recommended_jobs} recommended gap-fill job(s) completed."
+                if recommended_jobs
+                else "No outstanding gap-fill jobs are currently recommended."
+            ),
+            action_id="run_gap_fill" if gap_status in {"ready", "attention"} else None,
+            action_label="Run Gap Fill" if gap_status in {"ready", "attention"} else None,
+            indeterminate=gap_status == "running",
+        ),
+        _workflow_stage(
+            stage_id="export",
+            label="Export Dataset",
+            status="ready" if verified_count > 0 else "blocked",
+            current=verified_count,
+            total=verified_count,
+            detail=f"{verified_count} QAQC-approved observation(s) are available for export.",
+            action_id="export_json" if verified_count > 0 else None,
+            action_label="Download Verified JSON" if verified_count > 0 else None,
+        ),
+    ]
+    next_action = next(
+        (
+            {
+                "stage_id": stage["id"],
+                "id": stage["action_id"],
+                "label": stage["action_label"],
+            }
+            for stage in stages
+            if stage["status"] in {"ready", "attention"} and stage["action_id"] is not None
+        ),
+        None,
+    )
+    return {
+        "workflow_id": identity,
+        "sample_set_id": sample_set.sample_set_id if sample_set is not None else None,
+        "active": active,
+        "next_action": next_action,
+        "stages": stages,
+    }
 
 
 def _sample_verified_export_response(
@@ -997,15 +1980,74 @@ def create_app(
     async def profiles(request: Request) -> JSONResponse:
         return JSONResponse(_profiles_payload())
 
+    async def geographer_plan(request: Request) -> JSONResponse:
+        try:
+            data = GeographerPlanRequest.model_validate(await _request_json(request))
+            plan_id = (
+                build_harvest_campaign_id(
+                    country=data.country,
+                    localities=data.localities,
+                    facility_types=data.facility_types,
+                )
+                if data.mode == "campaign"
+                else (
+                build_harvest_batch_id(
+                    country=data.country,
+                    locality=data.locality,
+                    profile_set_name=data.profiles,
+                )
+                if data.mode == "batch"
+                else build_harvest_run_id(
+                    country=data.country,
+                    locality=data.locality,
+                    profile_set_name=data.profiles,
+                    profile_id=data.profile,
+                )
+                )
+            )
+            if data.mode == "campaign" and not data.facility_types:
+                raise ValueError("campaign geographer review requires facility types")
+            task = partial(
+                run_geographer,
+                root=root,
+                plan_id=plan_id,
+                country=data.country,
+                locality=data.locality,
+                profile_set_name=("campaign" if data.mode == "campaign" else data.profiles),
+                profile_id=(None if data.mode == "campaign" else data.profile),
+                localities=data.localities,
+                facility_types=data.facility_types,
+                codex_bin=codex_bin,
+                runner=app_runner,
+            )
+            plan = await run_in_threadpool(task)
+            return JSONResponse(
+                {
+                    "plan": plan.model_dump(mode="json"),
+                    "plan_path": plan.artifact_path,
+                    "run_id": plan_id,
+                    "dialogue": render_dialogue(load_dialogue(root, plan_id)),
+                }
+            )
+        except (ValidationError, ValueError) as exc:
+            return _json_error(str(exc))
+
     async def harvest_run(request: Request) -> JSONResponse:
         try:
             data = HarvestRunRequest.model_validate(await _request_json(request))
-            run_id = build_harvest_run_id(
+            run_id = data.run_id or build_harvest_run_id(
                 country=data.country,
                 locality=data.locality,
                 profile_set_name=data.profiles,
                 profile_id=data.profile,
             )
+            geographer = (
+                load_geographer_plan(root, data.geographer_plan_path)
+                if data.geographer_plan_path
+                else None
+            )
+            if geographer is not None and geographer.plan_id != run_id:
+                raise ValueError("geographer plan does not belong to this harvest run")
             task = partial(
                 run_harvest,
                 root=root,
@@ -1017,6 +2059,7 @@ def create_app(
                 run_id=run_id,
                 codex_bin=codex_bin,
                 runner=app_runner,
+                geographer_plan=geographer,
             )
             if background:
                 executor.submit(task)
@@ -1037,11 +2080,18 @@ def create_app(
     async def harvest_batch_run(request: Request) -> JSONResponse:
         try:
             data = HarvestBatchRunRequest.model_validate(await _request_json(request))
-            batch_id = build_harvest_batch_id(
+            batch_id = data.batch_id or build_harvest_batch_id(
                 country=data.country,
                 locality=data.locality,
                 profile_set_name=data.profiles,
             )
+            geographer = (
+                load_geographer_plan(root, data.geographer_plan_path)
+                if data.geographer_plan_path
+                else None
+            )
+            if geographer is not None and geographer.plan_id != batch_id:
+                raise ValueError("geographer plan does not belong to this harvest batch")
             task = partial(
                 run_harvest_batch,
                 root=root,
@@ -1052,6 +2102,7 @@ def create_app(
                 batch_id=batch_id,
                 codex_bin=codex_bin,
                 runner=app_runner,
+                geographer_plan=geographer,
             )
             if background:
                 executor.submit(task)
@@ -1065,11 +2116,18 @@ def create_app(
     async def harvest_campaign_run(request: Request) -> JSONResponse:
         try:
             data = HarvestCampaignRunRequest.model_validate(await _request_json(request))
-            campaign_id = build_harvest_campaign_id(
+            campaign_id = data.campaign_id or build_harvest_campaign_id(
                 country=data.country,
                 localities=data.localities,
                 facility_types=data.facility_types,
             )
+            geographer = (
+                load_geographer_plan(root, data.geographer_plan_path)
+                if data.geographer_plan_path
+                else None
+            )
+            if geographer is not None and geographer.plan_id != campaign_id:
+                raise ValueError("geographer plan does not belong to this harvest campaign")
             task = partial(
                 run_harvest_campaign,
                 root=root,
@@ -1080,6 +2138,7 @@ def create_app(
                 campaign_id=campaign_id,
                 codex_bin=codex_bin,
                 runner=app_runner,
+                geographer_plan=geographer,
             )
             if background:
                 executor.submit(task)
@@ -1127,6 +2186,20 @@ def create_app(
         except ValueError as exc:
             return _json_error(str(exc), status_code=404)
 
+    async def run_workflow_status(request: Request) -> JSONResponse:
+        run_id = request.path_params["run_id"]
+        try:
+            manifest = _load_any_manifest(root, run_id)
+            return JSONResponse(
+                _workflow_status_payload(
+                    root,
+                    manifest=manifest,
+                    active=registry.is_active(_manifest_identity(manifest)),
+                )
+            )
+        except ValueError as exc:
+            return _json_error(str(exc), status_code=404)
+
     async def run_log(request: Request) -> PlainTextResponse:
         run_id = request.path_params["run_id"]
         try:
@@ -1134,6 +2207,23 @@ def create_app(
         except ValueError as exc:
             return PlainTextResponse(str(exc), status_code=404)
         return PlainTextResponse(_combined_log_text(root, manifest), media_type="text/plain")
+
+    async def run_dialogue(request: Request) -> PlainTextResponse:
+        run_id = request.path_params["run_id"]
+        return PlainTextResponse(
+            _pipeline_transcript_text(root, run_id=run_id),
+            media_type="text/plain",
+        )
+
+    async def run_transcript_download(request: Request) -> PlainTextResponse:
+        run_id = request.path_params["run_id"]
+        return PlainTextResponse(
+            _pipeline_transcript_text(root, run_id=run_id),
+            media_type="text/plain",
+            headers={
+                "content-disposition": f'attachment; filename="{run_id}-pipeline-transcript.txt"'
+            },
+        )
 
     async def cancel_run(request: Request) -> JSONResponse:
         run_id = request.path_params["run_id"]
@@ -1184,7 +2274,12 @@ def create_app(
                     status_code=400,
                 )
             leads = load_leads(Path(manifest.lead_path))
-            prompt = render_lead_qaqc_prompt(leads, source_label=manifest.lead_path)
+            prompt = render_lead_qaqc_prompt(
+                leads,
+                source_label=manifest.lead_path,
+                expected_country=manifest.country,
+                expected_locality=manifest.locality,
+            )
             return PlainTextResponse(prompt, media_type="text/plain")
         except ValueError as exc:
             return PlainTextResponse(str(exc), status_code=404)
@@ -1333,6 +2428,30 @@ def create_app(
         sample_set_id = request.path_params["sample_set_id"]
         return PlainTextResponse(_read_log_text(log_path_for_run(root, sample_set_id)))
 
+    async def sample_dialogue(request: Request) -> PlainTextResponse:
+        sample_set_id = request.path_params["sample_set_id"]
+        try:
+            text = _pipeline_transcript_text(root, sample_set_id=sample_set_id)
+        except ValueError as exc:
+            return PlainTextResponse(str(exc), status_code=404)
+        return PlainTextResponse(text, media_type="text/plain")
+
+    async def sample_transcript_download(request: Request) -> PlainTextResponse:
+        sample_set_id = request.path_params["sample_set_id"]
+        try:
+            text = _pipeline_transcript_text(root, sample_set_id=sample_set_id)
+        except ValueError as exc:
+            return PlainTextResponse(str(exc), status_code=404)
+        return PlainTextResponse(
+            text,
+            media_type="text/plain",
+            headers={
+                "content-disposition": (
+                    f'attachment; filename="{sample_set_id}-pipeline-transcript.txt"'
+                )
+            },
+        )
+
     async def sample_status(request: Request) -> JSONResponse:
         sample_set_id = request.path_params["sample_set_id"]
         try:
@@ -1342,6 +2461,20 @@ def create_app(
                     "sample_set": sample_set.model_dump(mode="json"),
                     "active": registry.is_active(sample_set_id),
                 }
+            )
+        except ValueError as exc:
+            return _json_error(str(exc), status_code=404)
+
+    async def sample_workflow_status(request: Request) -> JSONResponse:
+        sample_set_id = request.path_params["sample_set_id"]
+        try:
+            load_sample_set(root, sample_set_id)
+            return JSONResponse(
+                _workflow_status_payload(
+                    root,
+                    sample_set_id=sample_set_id,
+                    active=registry.is_active(sample_set_id),
+                )
             )
         except ValueError as exc:
             return _json_error(str(exc), status_code=404)
@@ -1559,7 +2692,70 @@ def create_app(
     async def geometry_geocode(request: Request) -> JSONResponse:
         try:
             data = GeometryGeocodeRequest.model_validate(await _request_json(request))
-            result = app_geocoder(data.query)
+            child_run_id, _ = data.item_id.rsplit("-", 1)
+            conversation_id = data.conversation_id or child_run_id
+            _, geometry_record = _geometry_record_context(root, data.item_id)
+            existing_geometry = geometry_record.get("geometry")
+            existing_validation = (
+                existing_geometry.get("spatial_validation")
+                if isinstance(existing_geometry, dict)
+                else None
+            )
+            existing_address_retry = (
+                existing_validation.get("address_retry")
+                if isinstance(existing_validation, dict)
+                else None
+            )
+            address_retry_already_attempted = existing_address_retry is not None
+            result, spatial_validation, matched_query = _spatially_geocode_item(
+                root=root,
+                geocoder=app_geocoder,
+                item_id=data.item_id,
+                requested_query=data.query,
+            )
+            address_retry: dict[str, Any] | None = None
+            if (
+                result is None
+                and data.allow_address_retry
+                and not address_retry_already_attempted
+            ):
+                initial_validation = spatial_validation
+                address_retry = await run_in_threadpool(
+                    partial(
+                        _run_address_spatial_retry,
+                        root=root,
+                        item_id=data.item_id,
+                        spatial_feedback=initial_validation,
+                        conversation_id=conversation_id,
+                        codex_bin=codex_bin,
+                        runner=app_runner,
+                    )
+                )
+                if address_retry.get("status") == "corrected":
+                    result, retry_validation, matched_query = _spatially_geocode_item(
+                        root=root,
+                        geocoder=app_geocoder,
+                        item_id=data.item_id,
+                        requested_query=str(
+                            address_retry["address"].get("formatted_address") or data.query
+                        ),
+                    )
+                    spatial_validation = {
+                        **retry_validation,
+                        "initial_validation": initial_validation,
+                        "address_retry": address_retry,
+                    }
+                else:
+                    spatial_validation = {
+                        **initial_validation,
+                        "address_retry": address_retry,
+                    }
+            elif result is None and address_retry_already_attempted:
+                spatial_validation = {
+                    **spatial_validation,
+                    "address_retry": existing_address_retry,
+                    "address_retry_limit_reached": True,
+                }
             point = (
                 GeometryPoint(
                     latitude=float(result["latitude"]),
@@ -1571,7 +2767,7 @@ def create_app(
             )
             item = geometry_item_from_payload(
                 item_id=data.item_id,
-                geocode_query=data.query,
+                geocode_query=matched_query,
                 point=point,
                 polygon_geojson=None,
                 geometry_status=(
@@ -1580,10 +2776,343 @@ def create_app(
                     else GeometryStatus.NEEDS_REVIEW
                 ),
                 geocode_result=result,
+                spatial_validation=spatial_validation,
+                review_notes=str(spatial_validation["reason"]),
             )
             save_geometry_review_item(root, item)
+            facility_name = str(
+                geometry_record.get("lead", {}).get("location", {}).get(
+                    "facility_name",
+                    data.item_id,
+                )
+            )
+            append_dialogue(
+                root,
+                conversation_id,
+                speaker="Spatial Resolver",
+                stage="automated_geocoding",
+                message=(
+                    f"I assigned an in-scope coordinate to {facility_name}."
+                    if point is not None
+                    else f"I routed {facility_name} to human coordinate assignment."
+                ),
+                rationale=(
+                    f"{spatial_validation['reason']} "
+                    f"Address correction retry: {'used' if address_retry else 'not needed'}."
+                ),
+            )
             return JSONResponse(
-                {"geocode_result": result, "geometry": item.model_dump(mode="json")}
+                {
+                    "geocode_result": result,
+                    "spatial_validation": spatial_validation,
+                    "address_retry": address_retry,
+                    "geometry": item.model_dump(mode="json"),
+                }
+            )
+        except (ValidationError, ValueError) as exc:
+            return _json_error(str(exc))
+
+    async def geometry_research(request: Request) -> JSONResponse:
+        try:
+            data = GeometryResearchRequest.model_validate(await _request_json(request))
+            child_run_id, _ = data.item_id.rsplit("-", 1)
+            conversation_id = data.conversation_id or child_run_id
+            _, geometry_record = _geometry_record_context(root, data.item_id)
+            existing_geometry = geometry_record.get("geometry")
+            existing_spatial_feedback = (
+                existing_geometry.get("spatial_validation")
+                if isinstance(existing_geometry, dict)
+                else None
+            )
+            spatial_feedback: dict[str, object] = (
+                dict(existing_spatial_feedback)
+                if isinstance(existing_spatial_feedback, dict)
+                else {
+                    "status": "manual_research_requested",
+                    "reason": "The human reviewer requested focused facility research.",
+                }
+            )
+            address_retry = await run_in_threadpool(
+                partial(
+                    _run_address_spatial_retry,
+                    root=root,
+                    item_id=data.item_id,
+                    spatial_feedback=spatial_feedback,
+                    conversation_id=conversation_id,
+                    codex_bin=codex_bin,
+                    runner=app_runner,
+                )
+            )
+            requested_query = str(geometry_record.get("geocode_query") or data.item_id)
+            result: dict[str, Any] | None = None
+            matched_query = requested_query
+            if address_retry.get("status") == "corrected":
+                requested_query = str(
+                    address_retry["address"].get("formatted_address") or requested_query
+                )
+                result, spatial_validation, matched_query = _spatially_geocode_item(
+                    root=root,
+                    geocoder=app_geocoder,
+                    item_id=data.item_id,
+                    requested_query=requested_query,
+                )
+                spatial_validation = {
+                    **spatial_validation,
+                    "address_retry": address_retry,
+                    "manual_research": True,
+                }
+            else:
+                spatial_validation = {
+                    **spatial_feedback,
+                    "address_retry": address_retry,
+                    "manual_research": True,
+                    "requires_human_intervention": True,
+                }
+            researched_point = (
+                GeometryPoint(
+                    latitude=float(result["latitude"]),
+                    longitude=float(result["longitude"]),
+                    source="geocode",
+                )
+                if result is not None
+                else None
+            )
+            existing_point_payload = (
+                existing_geometry.get("point")
+                if isinstance(existing_geometry, dict)
+                and isinstance(existing_geometry.get("point"), dict)
+                else None
+            )
+            existing_point = (
+                GeometryPoint.model_validate(existing_point_payload)
+                if existing_point_payload is not None
+                else None
+            )
+            point = researched_point or existing_point
+            existing_polygon = (
+                existing_geometry.get("polygon_geojson")
+                if isinstance(existing_geometry, dict)
+                and isinstance(existing_geometry.get("polygon_geojson"), dict)
+                else None
+            )
+            geometry_status = (
+                GeometryStatus.FOOTPRINT_DRAWN
+                if existing_polygon is not None
+                else GeometryStatus.POINT_CONFIRMED
+                if point is not None
+                else GeometryStatus.NEEDS_REVIEW
+            )
+            item = geometry_item_from_payload(
+                item_id=data.item_id,
+                geocode_query=matched_query,
+                point=point,
+                polygon_geojson=existing_polygon,
+                geometry_status=geometry_status,
+                geocode_result=(
+                    result
+                    if result is not None
+                    else existing_geometry.get("geocode_result")
+                    if isinstance(existing_geometry, dict)
+                    else None
+                ),
+                spatial_validation=spatial_validation,
+                review_notes=str(
+                    spatial_validation.get(
+                        "reason",
+                        "Focused facility research completed.",
+                    )
+                ),
+            )
+            save_geometry_review_item(root, item)
+            facility_name = str(
+                geometry_record.get("lead", {}).get("location", {}).get(
+                    "facility_name",
+                    data.item_id,
+                )
+            )
+            append_dialogue(
+                root,
+                conversation_id,
+                speaker="Spatial Resolver",
+                stage="automated_geocoding",
+                message=(
+                    f"I assigned a coordinate to {facility_name} after focused research."
+                    if researched_point is not None
+                    else (
+                        f"I prepared ranked location candidates for {facility_name} "
+                        "after focused research."
+                    )
+                ),
+                rationale=str(spatial_validation.get("reason") or ""),
+            )
+            return JSONResponse(
+                {
+                    "geocode_result": result,
+                    "spatial_validation": spatial_validation,
+                    "address_retry": address_retry,
+                    "research_resolved": researched_point is not None,
+                    "geometry": item.model_dump(mode="json"),
+                }
+            )
+        except (ValidationError, ValueError) as exc:
+            return _json_error(str(exc))
+
+    async def geometry_coordinate_preview(request: Request) -> JSONResponse:
+        try:
+            data = GeometryCoordinatePreviewRequest.model_validate(
+                await _request_json(request)
+            )
+            manifest, geometry_record = _geometry_record_context(root, data.item_id)
+            latitude, longitude, reversed_order = parse_coordinate_text(
+                data.coordinate_text
+            )
+            reverse_result: dict[str, Any] | None = None
+            reverse_error: str | None = None
+            reverse = getattr(app_geocoder, "reverse", None)
+            if callable(reverse):
+                try:
+                    reverse_result = await run_in_threadpool(
+                        partial(reverse, latitude, longitude)
+                    )
+                except Exception as exc:
+                    reverse_error = str(exc)
+            if reverse_result is None:
+                validation: dict[str, object] = {
+                    "status": "scope_unverified",
+                    "requires_human_intervention": True,
+                    "warning": True,
+                    "reason": (
+                        "The coordinate parsed successfully, but its country and locality "
+                        "could not be verified by reverse geocoding."
+                    ),
+                }
+                if reverse_error:
+                    validation["reverse_geocode_error"] = reverse_error
+            else:
+                accepted, reverse_validation = spatially_validate_geocode_result(
+                    reverse_result,
+                    expected_country=manifest.country,
+                    expected_locality=manifest.locality,
+                )
+                mismatch = (
+                    _address_candidate_mismatch(accepted, geometry_record)
+                    if accepted is not None
+                    else None
+                )
+                if accepted is not None and mismatch is None:
+                    validation = {
+                        **reverse_validation,
+                        "status": "in_scope",
+                        "requires_human_intervention": False,
+                        "warning": False,
+                        "reason": (
+                            "Reverse geocoding places this coordinate inside the requested "
+                            "country/locality without an address conflict."
+                        ),
+                    }
+                elif mismatch is not None:
+                    validation = {
+                        **reverse_validation,
+                        "status": "address_mismatch",
+                        "requires_human_intervention": True,
+                        "warning": True,
+                        "reason": mismatch,
+                    }
+                else:
+                    validation = {
+                        **reverse_validation,
+                        "warning": True,
+                    }
+            return JSONResponse(
+                {
+                    "point": {
+                        "latitude": latitude,
+                        "longitude": longitude,
+                        "source": "google-maps-human",
+                    },
+                    "normalized": f"{latitude:.7f}, {longitude:.7f}",
+                    "reversed_order": reversed_order,
+                    "reverse_geocode_result": reverse_result,
+                    "spatial_validation": validation,
+                }
+            )
+        except (ValidationError, ValueError) as exc:
+            return _json_error(str(exc))
+
+    async def geometry_geocode_all(request: Request) -> JSONResponse:
+        try:
+            data = GeometryGeocodeAllRequest.model_validate(await _request_json(request))
+            items: list[dict[str, object]] = []
+            geocoded_count = 0
+            not_found_count = 0
+            human_review_count = 0
+            error_count = 0
+            for requested in data.items:
+                try:
+                    result, spatial_validation, matched_query = _spatially_geocode_item(
+                        root=root,
+                        geocoder=app_geocoder,
+                        item_id=requested.item_id,
+                        requested_query=requested.query,
+                    )
+                    point = (
+                        GeometryPoint(
+                            latitude=float(result["latitude"]),
+                            longitude=float(result["longitude"]),
+                            source="geocode",
+                        )
+                        if result is not None
+                        else None
+                    )
+                    item = geometry_item_from_payload(
+                        item_id=requested.item_id,
+                        geocode_query=matched_query,
+                        point=point,
+                        polygon_geojson=None,
+                        geometry_status=(
+                            GeometryStatus.POINT_CONFIRMED
+                            if point is not None
+                            else GeometryStatus.NEEDS_REVIEW
+                        ),
+                        geocode_result=result,
+                        spatial_validation=spatial_validation,
+                        review_notes=str(spatial_validation["reason"]),
+                    )
+                    save_geometry_review_item(root, item)
+                    if point is not None:
+                        geocoded_count += 1
+                    else:
+                        not_found_count += 1
+                        if spatial_validation["requires_human_intervention"]:
+                            human_review_count += 1
+                    items.append(
+                        {
+                            "item_id": requested.item_id,
+                            "geocode_result": result,
+                            "spatial_validation": spatial_validation,
+                            "geometry": item.model_dump(mode="json"),
+                            "error": None,
+                        }
+                    )
+                except Exception as exc:
+                    error_count += 1
+                    items.append(
+                        {
+                            "item_id": requested.item_id,
+                            "geocode_result": None,
+                            "geometry": None,
+                            "error": str(exc),
+                        }
+                    )
+            return JSONResponse(
+                {
+                    "requested_count": len(data.items),
+                    "geocoded_count": geocoded_count,
+                    "not_found_count": not_found_count,
+                    "human_review_count": human_review_count,
+                    "error_count": error_count,
+                    "items": items,
+                }
             )
         except (ValidationError, ValueError) as exc:
             return _json_error(str(exc))
@@ -1594,6 +3123,13 @@ def create_app(
             data = GeometrySaveRequest.model_validate(await _request_json(request))
             if data.item_id != item_id:
                 return _json_error("item_id in path and body must match")
+            if data.geometry_status == GeometryStatus.POINT_CONFIRMED and data.point is None:
+                return _json_error("point_confirmed geometry requires a point")
+            if (
+                data.geometry_status == GeometryStatus.FOOTPRINT_DRAWN
+                and data.polygon_geojson is None
+            ):
+                return _json_error("footprint_drawn geometry requires a polygon")
             item = geometry_item_from_payload(
                 item_id=item_id,
                 geocode_query=data.geocode_query,
@@ -1601,9 +3137,35 @@ def create_app(
                 polygon_geojson=data.polygon_geojson,
                 geometry_status=data.geometry_status,
                 geocode_result=data.geocode_result,
+                spatial_validation=(
+                    {
+                        "status": "accepted_manual",
+                        "requires_human_intervention": False,
+                        "reason": "A user manually confirmed or assigned this coordinate.",
+                        "candidate_count": 0,
+                    }
+                    if data.point is not None and data.point.source == "user"
+                    else data.spatial_validation
+                ),
                 review_notes=data.review_notes,
             )
             save_geometry_review_item(root, item)
+            if data.point is not None and data.conversation_id:
+                _, geometry_record = _geometry_record_context(root, item_id)
+                facility_name = str(
+                    geometry_record.get("lead", {}).get("location", {}).get(
+                        "facility_name",
+                        item_id,
+                    )
+                )
+                append_dialogue(
+                    root,
+                    data.conversation_id,
+                    speaker="Human Reviewer",
+                    stage="coordinate_assignment",
+                    message=f"I manually confirmed a coordinate for {facility_name}.",
+                    rationale=data.review_notes or "Coordinate assigned in Geometry Studio.",
+                )
             return JSONResponse({"geometry": item.model_dump(mode="json")})
         except (ValidationError, ValueError) as exc:
             return _json_error(str(exc))
@@ -1653,6 +3215,7 @@ def create_app(
     routes = [
         Route("/", index),
         Route("/api/profiles", profiles),
+        Route("/api/geographer/plan", geographer_plan, methods=["POST"]),
         Route("/api/harvest/run", harvest_run, methods=["POST"]),
         Route("/api/harvest/batch-run", harvest_batch_run, methods=["POST"]),
         Route("/api/harvest/campaign-run", harvest_campaign_run, methods=["POST"]),
@@ -1660,7 +3223,10 @@ def create_app(
         Route("/api/runs/clear", clear_runs, methods=["POST"]),
         Route("/api/runs/{run_id}", run_detail),
         Route("/api/runs/{run_id}/status", run_status),
+        Route("/api/runs/{run_id}/workflow-status", run_workflow_status),
         Route("/api/runs/{run_id}/log", run_log),
+        Route("/api/runs/{run_id}/dialogue", run_dialogue),
+        Route("/api/runs/{run_id}/transcript.txt", run_transcript_download),
         Route("/api/runs/{run_id}/leads", run_leads),
         Route("/api/runs/{run_id}/qaqc-prompt", run_qaqc_prompt),
         Route("/api/runs/{run_id}/qaqc-run", run_qaqc, methods=["POST"]),
@@ -1670,6 +3236,13 @@ def create_app(
         Route("/api/runs/{run_id}/verified-leads", verified_leads),
         Route("/api/runs/{run_id}/geometry-items", geometry_items),
         Route("/api/geometry/geocode", geometry_geocode, methods=["POST"]),
+        Route("/api/geometry/research", geometry_research, methods=["POST"]),
+        Route(
+            "/api/geometry/coordinate-preview",
+            geometry_coordinate_preview,
+            methods=["POST"],
+        ),
+        Route("/api/geometry/geocode-all", geometry_geocode_all, methods=["POST"]),
         Route("/api/geometry/items/{item_id}", geometry_save, methods=["POST"]),
         Route("/api/runs/{run_id}/export.csv", export_csv),
         Route("/api/runs/{run_id}/export.jsonl", export_jsonl),
@@ -1682,7 +3255,13 @@ def create_app(
         Route("/api/samples/from-run", sample_create_from_run, methods=["POST"]),
         Route("/api/samples/{sample_set_id}", sample_detail),
         Route("/api/samples/{sample_set_id}/status", sample_status),
+        Route("/api/samples/{sample_set_id}/workflow-status", sample_workflow_status),
         Route("/api/samples/{sample_set_id}/log", sample_log),
+        Route("/api/samples/{sample_set_id}/dialogue", sample_dialogue),
+        Route(
+            "/api/samples/{sample_set_id}/transcript.txt",
+            sample_transcript_download,
+        ),
         Route("/api/samples/{sample_set_id}/coverage-summary", sample_coverage_summary),
         Route("/api/samples/{sample_set_id}/coverage-run", sample_coverage_run, methods=["POST"]),
         Route("/api/samples/{sample_set_id}/coverage-results", sample_coverage_results),
@@ -1828,6 +3407,42 @@ INDEX_HTML = r"""<!doctype html>
       gap: 18px;
       padding: 18px 24px 24px;
     }
+    .workspace-tabs {
+      display: flex;
+      gap: 6px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+      padding: 10px 24px 0;
+    }
+    .workspace-tabs button {
+      border-color: transparent;
+      border-bottom-left-radius: 0;
+      border-bottom-right-radius: 0;
+      background: transparent;
+      color: var(--muted);
+      padding: 10px 14px;
+    }
+    .workspace-tabs button.active {
+      border-color: var(--line);
+      border-bottom-color: var(--panel);
+      background: var(--panel);
+      color: var(--accent);
+    }
+    .tab-badge {
+      display: inline-block;
+      min-width: 20px;
+      margin-left: 5px;
+      border-radius: 999px;
+      background: var(--panel-soft);
+      color: var(--muted);
+      font-size: 11px;
+      padding: 2px 6px;
+      text-align: center;
+    }
+    .workspace-tabs button.active .tab-badge {
+      background: var(--selected);
+      color: var(--accent);
+    }
     section {
       background: var(--panel);
       border: 1px solid var(--line);
@@ -1875,6 +3490,13 @@ INDEX_HTML = r"""<!doctype html>
       min-height: 220px;
       background: var(--activity-bg);
       color: var(--activity-text);
+    }
+    textarea.dialogue {
+      min-height: 250px;
+      background: var(--panel-soft);
+      font-family: inherit;
+      font-size: 13px;
+      line-height: 1.6;
     }
     select[multiple] {
       min-height: 116px;
@@ -1929,6 +3551,36 @@ INDEX_HTML = r"""<!doctype html>
       gap: 8px;
       margin: 12px 0;
     }
+    details.action-group {
+      border-top: 1px solid var(--line);
+      margin-top: 12px;
+      padding-top: 10px;
+    }
+    details.action-group summary {
+      color: var(--muted);
+      cursor: pointer;
+      font-weight: 650;
+    }
+    .pipeline-callout {
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--accent);
+      border-radius: 6px;
+      background: var(--panel-soft);
+      margin: 12px 0;
+      padding: 10px;
+    }
+    .pipeline-callout strong {
+      display: block;
+      margin-bottom: 3px;
+    }
+    .section-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 16px;
+    }
+    .section-heading h2 { margin: 0; }
     .summary {
       display: grid;
       grid-template-columns: repeat(4, minmax(90px, 1fr));
@@ -1958,6 +3610,70 @@ INDEX_HTML = r"""<!doctype html>
     }
     .status.error { color: var(--danger); }
     .status.ok { color: var(--ok); }
+    .workflow-panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-soft);
+      margin-bottom: 14px;
+      padding: 12px;
+    }
+    .workflow-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+    .workflow-header h3 { margin: 0 0 4px; }
+    .workflow-summary { color: var(--muted); font-size: 13px; }
+    .workflow-list { display: grid; gap: 7px; }
+    .workflow-step {
+      display: grid;
+      grid-template-columns: 24px minmax(0, 1fr) auto;
+      gap: 9px;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--input-bg);
+      padding: 8px;
+    }
+    .workflow-marker {
+      display: grid;
+      place-items: center;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: var(--panel-soft);
+      color: var(--muted);
+      font-weight: 750;
+    }
+    .workflow-step.complete .workflow-marker { background: var(--ok); color: white; }
+    .workflow-step.running .workflow-marker { background: var(--accent); color: white; }
+    .workflow-step.attention .workflow-marker { background: var(--danger); color: white; }
+    .workflow-title { font-weight: 700; }
+    .workflow-detail { color: var(--muted); font-size: 12px; margin-top: 2px; }
+    .workflow-progress {
+      height: 5px;
+      background: var(--panel-soft);
+      border-radius: 5px;
+      margin-top: 6px;
+      overflow: hidden;
+    }
+    .workflow-progress-fill {
+      height: 100%;
+      background: var(--accent);
+      transition: width 180ms ease;
+    }
+    .workflow-progress-fill.indeterminate {
+      width: 35% !important;
+      animation: workflow-pulse 1.2s ease-in-out infinite alternate;
+    }
+    .workflow-step.complete .workflow-progress-fill { background: var(--ok); }
+    .workflow-step button { white-space: nowrap; padding: 7px 9px; }
+    @keyframes workflow-pulse {
+      from { transform: translateX(-70%); }
+      to { transform: translateX(190%); }
+    }
     .history {
       max-height: 220px;
       overflow: auto;
@@ -2009,6 +3725,81 @@ INDEX_HTML = r"""<!doctype html>
       padding: 9px 10px;
       margin: 8px 0 12px;
     }
+    .intervention-panel {
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--danger);
+      border-radius: 6px;
+      background: var(--panel-soft);
+      padding: 10px;
+      margin: 8px 0 12px;
+    }
+    .intervention-panel h3 { margin: 0 0 5px; }
+    .intervention-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .intervention-list button { padding: 6px 8px; }
+    .coordinate-resolver {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel-soft);
+      margin-top: 12px;
+      padding: 10px;
+    }
+    .coordinate-resolver h3 { margin: 0 0 6px; }
+    .resolution-reason {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+    }
+    .resolution-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 8px;
+    }
+    .resolution-links a { color: var(--accent); }
+    .candidate-options {
+      display: grid;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .candidate-card {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--input-bg);
+      padding: 9px;
+    }
+    .candidate-card.conflicting { border-left: 4px solid var(--danger); }
+    .candidate-card.possible { border-left: 4px solid #d97706; }
+    .candidate-card.likely { border-left: 4px solid var(--ok); }
+    .candidate-heading {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: flex-start;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .candidate-badge {
+      border-radius: 999px;
+      background: var(--panel-soft);
+      color: var(--muted);
+      font-size: 10px;
+      padding: 3px 6px;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .candidate-reason {
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.4;
+      margin: 6px 0;
+    }
+    .candidate-card button { padding: 6px 8px; }
+    .map.placement-active {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--selected);
+      cursor: crosshair;
+    }
     .theme-control {
       display: flex;
       align-items: center;
@@ -2026,8 +3817,12 @@ INDEX_HTML = r"""<!doctype html>
     }
     @media (max-width: 860px) {
       main { grid-template-columns: 1fr; padding: 12px; }
+      .workspace-tabs { padding-left: 12px; padding-right: 12px; }
       .summary { grid-template-columns: repeat(2, 1fr); }
       .geometry-layout { grid-template-columns: 1fr; }
+      .workflow-header { flex-direction: column; }
+      .workflow-step { grid-template-columns: 24px minmax(0, 1fr); }
+      .workflow-step button { grid-column: 2; justify-self: start; }
     }
   </style>
 </head>
@@ -2043,8 +3838,29 @@ INDEX_HTML = r"""<!doctype html>
       </select>
     </div>
   </header>
+  <nav class="workspace-tabs" role="tablist" aria-label="Application workspaces">
+    <button
+      id="workbenchTab"
+      class="active"
+      type="button"
+      role="tab"
+      aria-selected="true"
+      aria-controls="harvestSetup resultsPanel samplePanel"
+    >
+      Agentic Workbench
+    </button>
+    <button
+      id="geometryTab"
+      type="button"
+      role="tab"
+      aria-selected="false"
+      aria-controls="geometryPanel"
+    >
+      Geometry Studio <span id="geometryTabBadge" class="tab-badge">0</span>
+    </button>
+  </nav>
   <main>
-    <section>
+    <section id="harvestSetup" data-workspace="workbench">
       <h2>New Harvest</h2>
       <label for="country">Country</label>
       <input id="country" value="US" autocomplete="off">
@@ -2095,16 +3911,37 @@ INDEX_HTML = r"""<!doctype html>
       </div>
 
       <div class="actions">
+        <button id="runFullPipelineButton" type="button">Run Full Pipeline</button>
         <button id="runButton" type="button">Run Harvest</button>
         <button id="refreshButton" class="secondary" type="button">Refresh Runs</button>
         <button id="clearRunsButton" class="secondary" type="button">Clear All</button>
+      </div>
+      <div class="pipeline-callout">
+        <strong id="fullPipelineHeading">Guided end-to-end workflow</strong>
+        <span id="fullPipelineStatus">
+          Runs through coverage analysis, then pauses before gap fill for your review.
+        </span>
       </div>
       <div id="status" class="status">Ready.</div>
       <div class="history" id="history"></div>
     </section>
 
-    <section>
+    <section id="resultsPanel" data-workspace="workbench">
       <h2>Results</h2>
+      <div class="workflow-panel">
+        <div class="workflow-header">
+          <div>
+            <h3>Project Workflow</h3>
+            <div id="workflowSummary" class="workflow-summary">
+              Start or select a harvest to see the full workflow.
+            </div>
+          </div>
+          <button id="workflowNextButton" class="secondary" type="button" disabled>
+            Next action
+          </button>
+        </div>
+        <div id="workflowSteps" class="workflow-list"></div>
+      </div>
       <div class="summary">
         <div class="metric"><span>Status</span><strong id="metricStatus">-</strong></div>
         <div class="metric"><span>Leads</span><strong id="metricLeads">0</strong></div>
@@ -2116,23 +3953,45 @@ INDEX_HTML = r"""<!doctype html>
         </div>
       </div>
       <div class="actions">
-        <button id="copyButton" class="secondary" type="button">Copy JSON</button>
-        <button id="copyQaqcButton" class="secondary" type="button">Copy QAQC Prompt</button>
         <button id="runQaqcButton" class="secondary" type="button">Run QAQC</button>
         <button id="runAddressButton" class="secondary" type="button">
           Run Address Enrichment
         </button>
-        <button id="downloadJsonButton" class="secondary" type="button">
-          Download Verified JSON
-        </button>
-        <button id="downloadCsvButton" class="secondary" type="button">
-          Download Verified CSV
+        <button id="geocodeButton" class="secondary" type="button">
+          Geocode All Accepted
         </button>
       </div>
+      <details class="action-group">
+        <summary>Prompts, JSON, and exports</summary>
+        <div class="actions">
+          <button id="copyButton" class="secondary" type="button">Copy JSON</button>
+          <button id="copyQaqcButton" class="secondary" type="button">Copy QAQC Prompt</button>
+          <button id="downloadJsonButton" class="secondary" type="button">
+            Download Verified JSON
+          </button>
+          <button id="downloadCsvButton" class="secondary" type="button">
+            Download Verified CSV
+          </button>
+        </div>
+      </details>
       <textarea
         id="jsonOutput"
         spellcheck="false"
         placeholder="Harvest JSON will appear here."
+      ></textarea>
+
+      <div class="section-heading">
+        <h2>Full Pipeline Transcript</h2>
+        <button id="downloadTranscriptButton" class="secondary" type="button">
+          Download Transcript (.txt)
+        </button>
+      </div>
+      <textarea
+        id="dialogueOutput"
+        class="dialogue"
+        spellcheck="false"
+        readonly
+        placeholder="The geographer, harvester, and review agents will report their findings here."
       ></textarea>
 
       <h2>Agent Activity</h2>
@@ -2149,51 +4008,128 @@ INDEX_HTML = r"""<!doctype html>
       ></textarea>
     </section>
 
-    <section class="wide">
-      <h2>Geometry Review</h2>
+    <section id="geometryPanel" class="wide hidden" data-workspace="geometry">
+      <h2>Geometry Studio</h2>
+      <div class="workflow-summary">
+        Resolve coordinates, inspect spatial placement, digitize building footprints, and
+        calculate planar area.
+      </div>
       <div class="actions">
         <button id="loadApprovedButton" class="secondary" type="button">Load Approved</button>
         <button id="loadAugmentedSampleButton" class="secondary" type="button">
           Load Augmented Sample
         </button>
-        <button id="geocodeButton" class="secondary" type="button">Geocode</button>
-        <button id="searchAddressButton" class="secondary" type="button">Search Address</button>
-        <button id="useMapCenterButton" class="secondary" type="button">Use Map Center</button>
         <button id="saveFootprintButton" class="secondary" type="button">Save Footprint</button>
         <button id="skipGeometryButton" class="secondary" type="button">Skip</button>
-        <button id="downloadVerifiedJsonButton" class="secondary" type="button">
-          Download Verified JSON
-        </button>
-        <button id="downloadVerifiedCsvButton" class="secondary" type="button">
-          Download Verified CSV
-        </button>
-        <button id="downloadFootprintsButton" class="secondary" type="button">
-          Download Footprints GeoJSON
-        </button>
-        <button id="downloadSampleFootprintsButton" class="secondary" type="button">
-          Download Sample Footprints
-        </button>
       </div>
-      <div class="actions">
-        <button id="showSampleExtentButton" class="secondary" type="button">
-          Show Sample Extent
-        </button>
-        <button id="zoomSampleExtentButton" class="secondary" type="button">
-          Zoom To Extent
-        </button>
-        <button id="clearSampleExtentButton" class="secondary" type="button">
-          Clear Extent
-        </button>
-      </div>
+      <details class="action-group">
+        <summary>Map view and geometry exports</summary>
+        <div class="actions">
+          <button id="showSampleExtentButton" class="secondary" type="button">
+            Show Sample Extent
+          </button>
+          <button id="zoomSampleExtentButton" class="secondary" type="button">
+            Zoom To Extent
+          </button>
+          <button id="clearSampleExtentButton" class="secondary" type="button">
+            Clear Extent
+          </button>
+          <button id="downloadVerifiedJsonButton" class="secondary" type="button">
+            Download Verified JSON
+          </button>
+          <button id="downloadVerifiedCsvButton" class="secondary" type="button">
+            Download Verified CSV
+          </button>
+          <button id="downloadFootprintsButton" class="secondary" type="button">
+            Download Footprints GeoJSON
+          </button>
+          <button id="downloadSampleFootprintsButton" class="secondary" type="button">
+            Download Sample Footprints
+          </button>
+        </div>
+      </details>
       <div class="extent-summary" id="geometryExtentSummary">
         Extent: load approved observations, then geocode or save points to map the sample.
       </div>
       <div class="status" id="geometryStatus">Load QAQC-approved observations to begin.</div>
+      <div class="intervention-panel">
+        <h3>Coordinate Assignment Required - <span id="interventionCount">0</span></h3>
+        <div class="workflow-summary">
+          These observations could not be assigned a trustworthy in-scope facility coordinate.
+          Select one, search a better address, or place its point from the map center.
+        </div>
+        <div id="interventionList" class="intervention-list">
+          <span class="workflow-summary">No observations currently require intervention.</span>
+        </div>
+      </div>
       <div class="geometry-layout">
         <div>
           <div class="geometry-list" id="geometryList"></div>
-          <label for="manualAddress">Manual Address Search</label>
-          <input id="manualAddress" placeholder="Optional address or place search">
+          <div class="coordinate-resolver">
+            <h3>Resolve Selected Coordinate</h3>
+            <div id="resolutionReason" class="resolution-reason">
+              Select an observation to see why automatic coordinate assignment failed.
+            </div>
+            <div class="resolution-links">
+              <a id="resolutionSourceLink" class="hidden" target="_blank" rel="noopener">
+                Open occupancy source
+              </a>
+              <a id="resolutionAddressLink" class="hidden" target="_blank" rel="noopener">
+                Open address evidence
+              </a>
+              <a id="googleSearchLink" class="hidden" target="_blank" rel="noopener">
+                Search Google
+              </a>
+              <a id="googleMapsLink" class="hidden" target="_blank" rel="noopener">
+                Search Google Maps
+              </a>
+            </div>
+            <div class="actions">
+              <button id="researchFacilityButton" class="secondary" type="button">
+                Research This Facility
+              </button>
+            </div>
+            <div id="candidateOptions" class="candidate-options">
+              <span class="workflow-summary">
+                Ranked geocoder candidates will appear here after an automatic search.
+              </span>
+            </div>
+            <label for="pastedCoordinates">Paste Google Maps Coordinates</label>
+            <input
+              id="pastedCoordinates"
+              placeholder="33.7490, -84.3880 or paste a Google Maps URL"
+            >
+            <div class="actions">
+              <button id="previewCoordinatesButton" class="secondary" type="button">
+                Preview Coordinate
+              </button>
+            </div>
+            <div id="coordinatePasteStatus" class="status">
+              Preview pasted coordinates before saving them.
+            </div>
+            <label for="manualAddress">Corrected Address or Place</label>
+            <input id="manualAddress" placeholder="Enter a corrected facility address">
+            <div class="actions">
+              <button id="searchAddressButton" class="secondary" type="button">
+                Search Corrected Address
+              </button>
+              <button id="placePointButton" class="secondary" type="button">
+                Place Point on Map
+              </button>
+              <button id="useMapCenterButton" class="secondary" type="button">
+                Place at Map Center
+              </button>
+              <button id="saveCoordinateButton" type="button">Save Coordinate</button>
+            </div>
+            <label for="coordinateReviewNotes">Coordinate Review Notes</label>
+            <input
+              id="coordinateReviewNotes"
+              placeholder="Optional evidence or reasoning for the manual assignment"
+            >
+            <div id="coordinateDraftStatus" class="status">
+              No coordinate change is waiting to be saved.
+            </div>
+          </div>
           <label for="geometryDetail">Selected Observation</label>
           <textarea
             id="geometryDetail"
@@ -2206,7 +4142,7 @@ INDEX_HTML = r"""<!doctype html>
       </div>
     </section>
 
-    <section class="wide">
+    <section id="samplePanel" class="wide" data-workspace="workbench">
       <h2>Sample Set / Coverage</h2>
       <div class="actions">
         <button id="createSampleButton" class="secondary" type="button">
@@ -2216,17 +4152,24 @@ INDEX_HTML = r"""<!doctype html>
           Analyze Coverage
         </button>
         <button id="runGapFillButton" class="secondary" type="button">Run Gap Fill</button>
-        <button id="runSampleQaqcButton" class="secondary" type="button">Run QAQC Missing</button>
-        <button id="runSampleAddressButton" class="secondary" type="button">
-          Run Address Missing
-        </button>
-        <button id="downloadSampleJsonButton" class="secondary" type="button">
-          Download Sample JSON
-        </button>
-        <button id="downloadSampleCsvButton" class="secondary" type="button">
-          Download Sample CSV
-        </button>
       </div>
+      <details class="action-group">
+        <summary>Repair passes and sample exports</summary>
+        <div class="actions">
+          <button id="runSampleQaqcButton" class="secondary" type="button">
+            Run QAQC Missing
+          </button>
+          <button id="runSampleAddressButton" class="secondary" type="button">
+            Run Address Missing
+          </button>
+          <button id="downloadSampleJsonButton" class="secondary" type="button">
+            Download Sample JSON
+          </button>
+          <button id="downloadSampleCsvButton" class="secondary" type="button">
+            Download Sample CSV
+          </button>
+        </div>
+      </details>
       <div class="status" id="sampleStatus">
         Create a sample set after geometry review; coverage works best once approved
         observations have geocoded points.
@@ -2261,7 +4204,13 @@ INDEX_HTML = r"""<!doctype html>
       overviewExtentLayer: null,
       overviewBounds: null,
       sampleExtentVisible: false,
-      themePreference: 'system'
+      coordinatePlacementMode: false,
+      selectedCandidateOptions: [],
+      pendingCoordinatePreview: null,
+      themePreference: 'system',
+      workflow: null,
+      activeWorkspace: 'workbench',
+      fullPipelineActive: false
     };
     const $ = (id) => document.getElementById(id);
     const terminalStatuses = ['completed', 'failed', 'cancelled'];
@@ -2283,6 +4232,31 @@ INDEX_HTML = r"""<!doctype html>
       window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
         if (state.themePreference === 'system') applyTheme('system');
       });
+    }
+
+    function setWorkspaceTab(workspace) {
+      state.activeWorkspace = workspace;
+      for (const panel of document.querySelectorAll('[data-workspace]')) {
+        panel.classList.toggle('hidden', panel.dataset.workspace !== workspace);
+      }
+      const workbenchActive = workspace === 'workbench';
+      $('workbenchTab').classList.toggle('active', workbenchActive);
+      $('workbenchTab').setAttribute('aria-selected', String(workbenchActive));
+      $('geometryTab').classList.toggle('active', !workbenchActive);
+      $('geometryTab').setAttribute('aria-selected', String(!workbenchActive));
+      if (!workbenchActive) {
+        initMap();
+        window.setTimeout(() => {
+          if (state.map) state.map.invalidateSize();
+          if (state.selectedGeometryItemId) selectGeometryItem(state.selectedGeometryItemId);
+        }, 0);
+      }
+    }
+
+    function setPipelineStatus(heading, message, kind = '') {
+      $('fullPipelineHeading').textContent = heading;
+      $('fullPipelineStatus').textContent = message;
+      $('fullPipelineStatus').className = kind ? `status ${kind}` : '';
     }
 
     function setStatus(message, kind = '') {
@@ -2365,6 +4339,135 @@ INDEX_HTML = r"""<!doctype html>
       return payload;
     }
 
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+    }
+
+    function workflowAction(actionId) {
+      const targets = {
+        run_qaqc: 'runQaqcButton',
+        run_address: 'runAddressButton',
+        load_geometry: 'loadApprovedButton',
+        create_sample: 'createSampleButton',
+        analyze_coverage: 'analyzeCoverageButton',
+        run_gap_fill: 'runGapFillButton',
+        export_json: state.currentSampleSetId
+          ? 'downloadSampleJsonButton'
+          : 'downloadVerifiedJsonButton'
+      };
+      const target = targets[actionId];
+      if (target) {
+        if (actionId === 'load_geometry') setWorkspaceTab('geometry');
+        $(target).click();
+      }
+    }
+
+    function renderWorkflow(payload) {
+      state.workflow = payload;
+      const stages = payload?.stages || [];
+      const nextAction = payload?.next_action || null;
+      $('workflowSummary').textContent = nextAction
+        ? `Recommended next: ${nextAction.label}`
+        : (stages.length ? 'All available workflow stages are up to date.' :
+          'Start or select a harvest to see the full workflow.');
+      $('workflowNextButton').disabled = !nextAction;
+      $('workflowNextButton').textContent = nextAction ? nextAction.label : 'Next action';
+      $('workflowNextButton').dataset.action = nextAction?.id || '';
+      const symbols = {
+        complete: '✓',
+        running: '●',
+        attention: '!',
+        ready: '→',
+        blocked: '○'
+      };
+      $('workflowSteps').innerHTML = stages.map((stage) => {
+        const total = Number(stage.total || 0);
+        const current = Number(stage.current || 0);
+        const percent = stage.status === 'complete'
+          ? 100
+          : (total > 0 ? Math.min(100, Math.round((current / total) * 100)) : 0);
+        const progress = total > 0 || stage.indeterminate
+          ? `<div class="workflow-progress"><div class="workflow-progress-fill` +
+            `${stage.indeterminate ? ' indeterminate' : ''}" style="width:${percent}%"></div></div>`
+          : '';
+        const action = stage.action_id && ['ready', 'attention'].includes(stage.status)
+          ? `<button class="secondary" type="button" data-workflow-action="` +
+            `${escapeHtml(stage.action_id)}">${escapeHtml(stage.action_label)}</button>`
+          : '';
+        return `<div class="workflow-step ${escapeHtml(stage.status)}">
+          <div class="workflow-marker">${symbols[stage.status] || '○'}</div>
+          <div>
+            <div class="workflow-title">${escapeHtml(stage.label)}</div>
+            <div class="workflow-detail">${escapeHtml(stage.detail)}</div>
+            ${progress}
+          </div>
+          ${action}
+        </div>`;
+      }).join('');
+    }
+
+    function renderGeocodingProgress({
+      attempted,
+      total,
+      geocoded,
+      humanReview,
+      errors,
+      working = false
+    }) {
+      if (!state.workflow) return;
+      const workflow = JSON.parse(JSON.stringify(state.workflow));
+      const stage = (workflow.stages || []).find((item) => item.id === 'geometry');
+      if (!stage) return;
+      stage.status = 'running';
+      stage.current = attempted;
+      stage.total = total;
+      stage.indeterminate = working;
+      stage.detail =
+        `${attempted}/${total} attempted; ${geocoded} positioned; ` +
+        `${humanReview} need coordinate assignment; ${errors} errors.`;
+      workflow.next_action = null;
+      renderWorkflow(workflow);
+      if (state.fullPipelineActive) {
+        setPipelineStatus(
+          'Step 4 of 6 - Automated geocoding',
+          `${attempted}/${total} observations processed; ${geocoded} positioned; ` +
+            `${humanReview} need human review.`
+        );
+      }
+    }
+
+    async function loadWorkflowStatus() {
+      const path = state.currentSampleSetId
+        ? `/api/samples/${state.currentSampleSetId}/workflow-status`
+        : (state.currentRunId ? `/api/runs/${state.currentRunId}/workflow-status` : null);
+      if (!path) return renderWorkflow(null);
+      const payload = await api(path);
+      if (payload.active) {
+        const purpose = state.currentSampleSetId ? state.samplePollPurpose : state.pollPurpose;
+        const activeStages = {
+          harvest: 'harvest',
+          qaqc: 'qaqc',
+          address: 'address',
+          coverage: 'coverage',
+          'gap fill': 'gap_fill',
+          'missing QAQC': 'qaqc',
+          'missing address': 'address'
+        };
+        const activeStage = payload.stages.find((stage) => stage.id === activeStages[purpose]);
+        if (activeStage && activeStage.status !== 'complete') {
+          activeStage.status = 'running';
+          activeStage.indeterminate = true;
+          activeStage.detail = `${activeStage.label} agent work is currently running.`;
+        }
+      }
+      renderWorkflow(payload);
+    }
+
     function requestBody() {
       if (state.mode === 'campaign') {
         return {
@@ -2408,6 +4511,8 @@ INDEX_HTML = r"""<!doctype html>
       state.currentRunId = null;
       state.currentSampleSetId = null;
       state.currentLeads = [];
+      state.geometryItems = [];
+      state.selectedGeometryItemId = null;
       $('metricStatus').textContent = '-';
       $('metricLeads').textContent = '0';
       $('metricFacilityLabel').textContent = 'Facility';
@@ -2417,6 +4522,10 @@ INDEX_HTML = r"""<!doctype html>
       $('jsonOutput').value = '';
       $('sampleOutput').value = '';
       $('activityOutput').value = '';
+      $('dialogueOutput').value = '';
+      $('geometryDetail').value = '';
+      renderGeometryList();
+      renderWorkflow(null);
     }
 
     async function loadLog(runId) {
@@ -2424,6 +4533,39 @@ INDEX_HTML = r"""<!doctype html>
       const response = await fetch(`/api/runs/${runId}/log`);
       $('activityOutput').value = response.ok ? await response.text() : await response.text();
       $('activityOutput').scrollTop = $('activityOutput').scrollHeight;
+    }
+
+    function transcriptPath(download = false) {
+      if (state.currentSampleSetId) {
+        return `/api/samples/${state.currentSampleSetId}/` +
+          (download ? 'transcript.txt' : 'dialogue');
+      }
+      if (state.currentRunId) {
+        return `/api/runs/${state.currentRunId}/` +
+          (download ? 'transcript.txt' : 'dialogue');
+      }
+      return null;
+    }
+
+    async function loadDialogue() {
+      const path = transcriptPath(false);
+      if (!path) return;
+      const response = await fetch(path);
+      $('dialogueOutput').value = response.ok ? await response.text() : '';
+      $('dialogueOutput').scrollTop = $('dialogueOutput').scrollHeight;
+    }
+
+    async function downloadTranscript() {
+      const path = transcriptPath(true);
+      if (!path) return setStatus('No pipeline selected.', 'error');
+      const response = await fetch(path);
+      if (!response.ok) return setStatus(await response.text(), 'error');
+      const identity = state.currentSampleSetId || state.currentRunId;
+      downloadText(
+        `${identity}-pipeline-transcript.txt`,
+        await response.text(),
+        'text/plain'
+      );
     }
 
     function stopPolling() {
@@ -2448,6 +4590,8 @@ INDEX_HTML = r"""<!doctype html>
       renderResult(manifest, leads);
       $('cancelButton').disabled = !payload.active;
       await loadLog(state.currentRunId);
+      await loadDialogue(state.currentRunId);
+      await loadWorkflowStatus();
       if (state.pollPurpose === 'qaqc') {
         if (payload.active) {
           const stamp = new Date().toLocaleTimeString();
@@ -2470,7 +4614,7 @@ INDEX_HTML = r"""<!doctype html>
           $('metricAggregate').textContent = reviews.review_count || 0;
           setStatus('QAQC complete.', 'ok');
         }
-        return;
+        return payload;
       }
       if (state.pollPurpose === 'address') {
         if (payload.active) {
@@ -2494,7 +4638,7 @@ INDEX_HTML = r"""<!doctype html>
           $('metricAggregate').textContent = results.result_count || 0;
           setStatus('Address enrichment complete.', 'ok');
         }
-        return;
+        return payload;
       }
       if (isTerminal(manifest.status)) {
         stopPolling();
@@ -2504,6 +4648,7 @@ INDEX_HTML = r"""<!doctype html>
         );
         await loadRuns();
       }
+      return payload;
     }
 
     function startPolling(runId, purpose = 'harvest') {
@@ -2516,21 +4661,63 @@ INDEX_HTML = r"""<!doctype html>
       pollCurrentRun().catch((error) => setStatus(error.message, 'error'));
     }
 
-    async function runHarvest() {
+    async function runHarvest(options = {}) {
+      const managed = Boolean(options.managed);
       const button = $('runButton');
       button.disabled = true;
-      setStatus('Running harvest. Codex may take a while...');
+      state.currentSampleSetId = null;
+      state.geometryItems = [];
+      state.selectedGeometryItemId = null;
+      renderGeometryList();
+      setStatus('Preparing geographic vernacular review...');
       try {
+        const body = requestBody();
+        const geographerRequest = state.mode === 'campaign'
+          ? {
+              country: body.country,
+              localities: body.localities,
+              facility_types: body.facility_types,
+              mode: 'campaign'
+            }
+          : {
+              country: body.country,
+              locality: body.locality,
+              profiles: body.profiles,
+              profile: state.mode === 'single' ? (body.profile || null) : null,
+              mode: state.mode
+            };
+        const geographerPayload = await api('/api/geographer/plan', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(geographerRequest)
+        });
+        body.geographer_plan_path = geographerPayload.plan_path;
+        if (state.mode === 'single') {
+          body.run_id = geographerPayload.run_id;
+        } else if (state.mode === 'batch') {
+          body.batch_id = geographerPayload.run_id;
+        } else {
+          body.campaign_id = geographerPayload.run_id;
+        }
+        $('dialogueOutput').value = geographerPayload.dialogue || '';
+        $('dialogueOutput').scrollTop = $('dialogueOutput').scrollHeight;
+        setStatus(
+          geographerPayload.plan.status === 'fallback'
+            ? 'Geographer used the safe fallback. Starting harvest...'
+            : 'Geographer prepared local terminology. Starting harvest...',
+          'ok'
+        );
         const endpoint = state.mode === 'campaign'
           ? '/api/harvest/campaign-run'
           : (state.mode === 'batch' ? '/api/harvest/batch-run' : '/api/harvest/run');
         const payload = await api(endpoint, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(requestBody())
+          body: JSON.stringify(body)
         });
         renderResult(payload.manifest, payload.leads || []);
         await loadLog(state.currentRunId);
+        await loadDialogue(state.currentRunId);
         const failed = payload.manifest.status === 'failed';
         setStatus(
           isTerminal(payload.manifest.status)
@@ -2538,12 +4725,17 @@ INDEX_HTML = r"""<!doctype html>
             : 'Harvest started. Watching agent activity...',
           failed ? 'error' : 'ok'
         );
-        if (!isTerminal(payload.manifest.status)) startPolling(state.currentRunId);
+        if (!isTerminal(payload.manifest.status) && !managed) {
+          startPolling(state.currentRunId);
+        }
         await loadRuns();
+        return payload;
       } catch (error) {
         setStatus(error.message, 'error');
+        if (managed) throw error;
+        return null;
       } finally {
-        button.disabled = false;
+        button.disabled = state.fullPipelineActive;
       }
     }
 
@@ -2578,6 +4770,7 @@ INDEX_HTML = r"""<!doctype html>
 
     async function loadRun(runId) {
       const detail = await api(`/api/runs/${runId}`);
+      state.currentSampleSetId = null;
       let leads = [];
       if (detail.manifest.run_id) {
         try {
@@ -2588,6 +4781,8 @@ INDEX_HTML = r"""<!doctype html>
       }
       renderResult(detail.manifest, leads);
       await loadLog(runId);
+      await loadDialogue(runId);
+      await loadWorkflowStatus();
       if (!isTerminal(detail.manifest.status)) {
         startPolling(runId);
       } else {
@@ -2615,7 +4810,8 @@ INDEX_HTML = r"""<!doctype html>
       setStatus('QAQC prompt copied.', 'ok');
     }
 
-    async function runQaqc() {
+    async function runQaqc(options = {}) {
+      const managed = Boolean(options.managed);
       if (!state.currentRunId) return setStatus('No run selected.', 'error');
       const button = $('runQaqcButton');
       button.disabled = true;
@@ -2623,17 +4819,24 @@ INDEX_HTML = r"""<!doctype html>
       try {
         const payload = await api(`/api/runs/${state.currentRunId}/qaqc-run`, { method: 'POST' });
         $('activityOutput').value +=
-          `\\nQAQC started for ${payload.child_run_ids.length} child run(s).\\n`;
-        setStatus('QAQC started. Watching agent activity...', 'ok');
-        startPolling(state.currentRunId, 'qaqc');
+          `\\nQAQC started for ${(payload.child_run_ids || []).length || 1} child run(s).\\n`;
+        setStatus(
+          payload.started ? 'QAQC started. Watching agent activity...' : 'QAQC complete.',
+          'ok'
+        );
+        if (!managed && payload.started) startPolling(state.currentRunId, 'qaqc');
+        return payload;
       } catch (error) {
         setStatus(error.message, 'error');
+        if (managed) throw error;
+        return null;
       } finally {
-        button.disabled = false;
+        button.disabled = state.fullPipelineActive;
       }
     }
 
-    async function runAddressEnrichment() {
+    async function runAddressEnrichment(options = {}) {
+      const managed = Boolean(options.managed);
       if (!state.currentRunId) return setStatus('No run selected.', 'error');
       const button = $('runAddressButton');
       button.disabled = true;
@@ -2643,13 +4846,22 @@ INDEX_HTML = r"""<!doctype html>
           method: 'POST'
         });
         $('activityOutput').value +=
-          `\\nAddress enrichment started for ${payload.child_run_ids.length} child run(s).\\n`;
-        setStatus('Address enrichment started. Watching agent activity...', 'ok');
-        startPolling(state.currentRunId, 'address');
+          `\\nAddress enrichment started for ${(payload.child_run_ids || []).length || 1} ` +
+          'child run(s).\\n';
+        setStatus(
+          payload.started
+            ? 'Address enrichment started. Watching agent activity...'
+            : 'Address enrichment complete.',
+          'ok'
+        );
+        if (!managed && payload.started) startPolling(state.currentRunId, 'address');
+        return payload;
       } catch (error) {
         setStatus(error.message, 'error');
+        if (managed) throw error;
+        return null;
       } finally {
-        button.disabled = false;
+        button.disabled = state.fullPipelineActive;
       }
     }
 
@@ -2669,6 +4881,7 @@ INDEX_HTML = r"""<!doctype html>
         $('activityOutput').value = await response.text();
         $('activityOutput').scrollTop = $('activityOutput').scrollHeight;
       }
+      await loadDialogue(sampleSetId);
     }
 
     async function pollSampleSet() {
@@ -2676,9 +4889,10 @@ INDEX_HTML = r"""<!doctype html>
       const payload = await api(`/api/samples/${state.currentSampleSetId}/status`);
       $('sampleOutput').value = JSON.stringify(payload.sample_set, null, 2);
       await loadSampleLog(state.currentSampleSetId);
+      await loadWorkflowStatus();
       if (payload.active) {
         setSampleStatus(`${state.samplePollPurpose} still running...`, 'ok');
-        return;
+        return payload;
       }
       stopSamplePolling();
       if (state.samplePollPurpose === 'coverage') {
@@ -2692,6 +4906,7 @@ INDEX_HTML = r"""<!doctype html>
       } else {
         setSampleStatus(`${state.samplePollPurpose} complete.`, 'ok');
       }
+      return payload;
     }
 
     function startSamplePolling(sampleSetId, purpose) {
@@ -2714,9 +4929,13 @@ INDEX_HTML = r"""<!doctype html>
       state.currentSampleSetId = payload.sample_set.sample_set_id;
       $('sampleOutput').value = JSON.stringify(payload, null, 2);
       setSampleStatus(`Sample set created: ${state.currentSampleSetId}.`, 'ok');
+      await loadWorkflowStatus();
+      await loadDialogue();
+      return payload;
     }
 
-    async function analyzeCoverage() {
+    async function analyzeCoverage(options = {}) {
+      const managed = Boolean(options.managed);
       if (!state.currentSampleSetId) return setSampleStatus('Create a sample set first.', 'error');
       let geometryNote = '';
       try {
@@ -2739,7 +4958,133 @@ INDEX_HTML = r"""<!doctype html>
       });
       $('sampleOutput').value = JSON.stringify(payload, null, 2);
       setSampleStatus(`Coverage analysis started.${geometryNote}`, 'ok');
-      if (payload.started) startSamplePolling(state.currentSampleSetId, 'coverage');
+      if (payload.started && !managed) {
+        startSamplePolling(state.currentSampleSetId, 'coverage');
+      }
+      return payload;
+    }
+
+    function pipelineDelay(milliseconds) {
+      return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+    }
+
+    async function waitForRunStage(purpose) {
+      stopPolling();
+      state.pollPurpose = purpose;
+      while (state.fullPipelineActive) {
+        const payload = await pollCurrentRun();
+        if (!payload.active) return payload;
+        await pipelineDelay(1500);
+      }
+      throw new Error('Full pipeline stopped.');
+    }
+
+    async function waitForSampleStage(purpose) {
+      stopSamplePolling();
+      state.samplePollPurpose = purpose;
+      while (state.fullPipelineActive) {
+        const payload = await pollSampleSet();
+        if (!payload.active) return payload;
+        await pipelineDelay(1500);
+      }
+      throw new Error('Full pipeline stopped.');
+    }
+
+    function setPipelineControlsDisabled(disabled) {
+      for (const id of [
+        'runFullPipelineButton',
+        'runButton',
+        'runQaqcButton',
+        'runAddressButton',
+        'geocodeButton',
+        'createSampleButton',
+        'analyzeCoverageButton'
+      ]) {
+        $(id).disabled = disabled;
+      }
+    }
+
+    async function runFullPipeline() {
+      if (state.fullPipelineActive) return;
+      state.fullPipelineActive = true;
+      state.currentSampleSetId = null;
+      setPipelineControlsDisabled(true);
+      setWorkspaceTab('workbench');
+      try {
+        setPipelineStatus(
+          'Step 1 of 6 - Geographic review and harvest',
+          'The Geographer Agent will adapt terminology before the harvest jobs begin.'
+        );
+        const harvestStart = await runHarvest({ managed: true });
+        if (!harvestStart) throw new Error('The harvest could not be started.');
+        const harvestStatus = await waitForRunStage('harvest');
+        if (harvestStatus.manifest.status !== 'completed') {
+          throw new Error(`Harvest ended with status: ${harvestStatus.manifest.status}.`);
+        }
+
+        setPipelineStatus(
+          'Step 2 of 6 - QAQC',
+          'Reviewing every harvested observation for evidence quality and geographic scope.'
+        );
+        await runQaqc({ managed: true });
+        await waitForRunStage('qaqc');
+
+        setPipelineStatus(
+          'Step 3 of 6 - Address enrichment',
+          'Improving facility addresses before coordinate assignment.'
+        );
+        await runAddressEnrichment({ managed: true });
+        await waitForRunStage('address');
+
+        setPipelineStatus(
+          'Step 4 of 6 - Automated geocoding',
+          'Assigning spatially validated coordinates to accepted observations.'
+        );
+        const geocodeSummary = await geocodeAcceptedObservations();
+        if (!geocodeSummary) {
+          throw new Error('No accepted observations were available for geocoding.');
+        }
+
+        setPipelineStatus(
+          'Step 5 of 6 - Sample creation',
+          'Combining the reviewed observations into a sample set.'
+        );
+        await createSampleSet();
+
+        setPipelineStatus(
+          'Step 6 of 6 - Coverage analysis',
+          'Assessing geographic and facility coverage before any gap-fill work.'
+        );
+        await analyzeCoverage({ managed: true });
+        await waitForSampleStage('coverage');
+        const coverage = await api(
+          `/api/samples/${state.currentSampleSetId}/coverage-results`
+        );
+        $('sampleOutput').value = JSON.stringify(coverage, null, 2);
+        const interventionCount = Number($('interventionCount').textContent || 0);
+        const reviewNote = interventionCount
+          ? ` ${interventionCount} coordinate assignment(s) also need review in Geometry Studio.`
+          : '';
+        setPipelineStatus(
+          'Coverage ready - human review required',
+          'The automated pipeline is paused before gap fill. Review the coverage findings, ' +
+            `then choose Run Gap Fill if the proposed work is appropriate.${reviewNote}`,
+          'ok'
+        );
+        setSampleStatus(
+          'Coverage analysis complete. Review the findings before running gap fill.',
+          'ok'
+        );
+        await loadWorkflowStatus();
+      } catch (error) {
+        setPipelineStatus('Full pipeline stopped', error.message, 'error');
+        setStatus(error.message, 'error');
+      } finally {
+        stopPolling();
+        stopSamplePolling();
+        state.fullPipelineActive = false;
+        setPipelineControlsDisabled(false);
+      }
     }
 
     async function runGapFill() {
@@ -2785,6 +5130,11 @@ INDEX_HTML = r"""<!doctype html>
       $('geometryStatus').className = `status ${kind}`;
     }
 
+    function setAutomatedGeocodeStatus(message, kind = '') {
+      setGeometryStatus(message, kind);
+      setStatus(message, kind);
+    }
+
     function initMap() {
       if (state.map || typeof L === 'undefined') return;
       state.map = L.map('map').setView([20, 0], 2);
@@ -2824,6 +5174,23 @@ INDEX_HTML = r"""<!doctype html>
       state.map.on(L.Draw.Event.CREATED, (event) => {
         state.drawnItems.clearLayers();
         state.drawnItems.addLayer(event.layer);
+        setGeometryStatus(
+          'Footprint drawn. Select Save Footprint to calculate area and store its geometry.',
+          'ok'
+        );
+      });
+      state.map.on('click', (event) => {
+        if (!state.coordinatePlacementMode) return;
+        setMarker({
+          latitude: event.latlng.lat,
+          longitude: event.latlng.lng,
+          source: 'user'
+        });
+        state.coordinatePlacementMode = false;
+        $('map').classList.remove('placement-active');
+        $('coordinateDraftStatus').textContent =
+          'Draft coordinate placed. Drag the marker if needed, then select Save Coordinate.';
+        setGeometryStatus('Draft coordinate placed on the map. Save it to confirm.', 'ok');
       });
     }
 
@@ -2852,15 +5219,21 @@ INDEX_HTML = r"""<!doctype html>
       const rounds = new Set();
       let geocoded = 0;
       let footprints = 0;
+      let intervention = 0;
       for (const item of state.geometryItems) {
         if (pointFromGeometry(item)) geocoded += 1;
         if (polygonFromGeometry(item)) footprints += 1;
+        if (
+          item.geometry_status !== 'skipped' &&
+          item.geometry?.spatial_validation?.requires_human_intervention
+        ) intervention += 1;
         rounds.add(geometryRoundLabel(item));
       }
       return {
         approved: state.geometryItems.length,
         geocoded,
         footprints,
+        intervention,
         missing: Math.max(state.geometryItems.length - geocoded, 0),
         rounds: Array.from(rounds).join(', ') || 'none'
       };
@@ -2871,7 +5244,28 @@ INDEX_HTML = r"""<!doctype html>
       $('geometryExtentSummary').textContent =
         `Extent: ${summary.approved} approved, ${summary.geocoded} geocoded, ` +
         `${summary.footprints} footprint(s), ${summary.missing} missing point(s). ` +
-        `Rounds: ${summary.rounds}.`;
+        `${summary.intervention} need coordinate assignment. Rounds: ${summary.rounds}.`;
+    }
+
+    function renderInterventionQueue() {
+      const items = state.geometryItems.filter(
+        (item) =>
+          item.geometry_status !== 'skipped' &&
+          item.geometry?.spatial_validation?.requires_human_intervention
+      );
+      $('interventionCount').textContent = items.length;
+      $('geometryTabBadge').textContent = items.length;
+      $('geometryTabBadge').title = `${items.length} coordinate assignment(s) need review`;
+      $('interventionList').innerHTML = items.map((item) => {
+        const facility = item.lead?.location?.facility_name || item.item_id;
+        const reason = item.geometry.spatial_validation.reason || 'Coordinate needs review.';
+        return `<button class="secondary" type="button" data-intervention="` +
+          `${escapeHtml(item.item_id)}">${escapeHtml(facility)} - ${escapeHtml(reason)}</button>`;
+      }).join('') ||
+        '<span class="workflow-summary">No observations currently require intervention.</span>';
+      for (const button of $('interventionList').querySelectorAll('[data-intervention]')) {
+        button.addEventListener('click', () => selectGeometryItem(button.dataset.intervention));
+      }
     }
 
     function renderGeometryList() {
@@ -2889,6 +5283,7 @@ INDEX_HTML = r"""<!doctype html>
       for (const button of $('geometryList').querySelectorAll('button[data-geometry]')) {
         button.addEventListener('click', () => selectGeometryItem(button.dataset.geometry));
       }
+      renderInterventionQueue();
       updateGeometrySummary();
     }
 
@@ -3015,7 +5410,26 @@ INDEX_HTML = r"""<!doctype html>
       renderGeometryList();
       const item = selectedGeometryItem();
       if (!item) return;
-      $('manualAddress').value = '';
+      state.coordinatePlacementMode = false;
+      state.pendingCoordinatePreview = null;
+      $('map').classList.remove('placement-active');
+      $('pastedCoordinates').value = '';
+      $('coordinatePasteStatus').className = 'status';
+      $('coordinatePasteStatus').textContent =
+        'Preview pasted coordinates before saving them.';
+      $('manualAddress').value = item.geocode_query || '';
+      $('coordinateReviewNotes').value = '';
+      $('coordinateDraftStatus').textContent = pointFromGeometry(item)
+        ? 'This observation already has a saved coordinate.'
+        : 'No coordinate change is waiting to be saved.';
+      $('resolutionReason').textContent = resolutionExplanation(item);
+      setResolutionLink('resolutionSourceLink', item.lead?.source_url);
+      setResolutionLink(
+        'resolutionAddressLink',
+        item.address_enrichment?.address_source_url
+      );
+      updateExternalSearchLinks(item);
+      renderCandidateOptions(item);
       $('geometryDetail').value = JSON.stringify({
         item_id: item.item_id,
         facility: item.lead.location.facility_name,
@@ -3026,6 +5440,7 @@ INDEX_HTML = r"""<!doctype html>
         qaqc: item.qaqc_review.review_notes,
         address_status: item.address_status,
         geometry_status: item.geometry_status,
+        spatial_validation: item.geometry?.spatial_validation || null,
         area_m2: item.area_m2
       }, null, 2);
       if (state.drawnItems) state.drawnItems.clearLayers();
@@ -3040,11 +5455,151 @@ INDEX_HTML = r"""<!doctype html>
       }
     }
 
+    function setResolutionLink(elementId, url) {
+      const link = $(elementId);
+      const usable = typeof url === 'string' && new RegExp('^https?://', 'i').test(url);
+      link.classList.toggle('hidden', !usable);
+      if (usable) link.href = url;
+      else link.removeAttribute('href');
+    }
+
+    function facilitySearchQuery(item) {
+      const location = item?.lead?.location || {};
+      return [
+        location.facility_name,
+        item?.address_enrichment?.formatted_address,
+        location.city_or_region,
+        location.country
+      ].filter(Boolean).join(', ');
+    }
+
+    function updateExternalSearchLinks(item) {
+      const query = facilitySearchQuery(item);
+      setResolutionLink(
+        'googleSearchLink',
+        query ? `https://www.google.com/search?q=${encodeURIComponent(query)}` : null
+      );
+      setResolutionLink(
+        'googleMapsLink',
+        query
+          ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`
+          : null
+      );
+    }
+
+    function candidateOptionsForItem(item) {
+      const validation = item?.geometry?.spatial_validation;
+      const current = Array.isArray(validation?.candidate_options)
+        ? validation.candidate_options
+        : [];
+      const initial = Array.isArray(validation?.initial_validation?.candidate_options)
+        ? validation.initial_validation.candidate_options
+        : [];
+      const seen = new Set();
+      return [...current, ...initial].filter((candidate) => {
+        const key = `${candidate.latitude},${candidate.longitude}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return candidate.latitude != null && candidate.longitude != null;
+      }).slice(0, 5);
+    }
+
+    function renderCandidateOptions(item) {
+      state.selectedCandidateOptions = candidateOptionsForItem(item);
+      $('candidateOptions').innerHTML = state.selectedCandidateOptions.map(
+        (candidate, index) => {
+          const confidence = ['likely', 'possible', 'conflicting'].includes(
+            candidate.confidence
+          ) ? candidate.confidence : 'possible';
+          const reason = Array.isArray(candidate.match_summary)
+            ? candidate.match_summary.join(' ')
+            : (candidate.scope_reason || 'Candidate requires human review.');
+          const acceptDisabled = candidate.scope_status === 'out_of_scope'
+            ? ' disabled title="Outside the requested geographic scope"'
+            : '';
+          return `<div class="candidate-card ${confidence}">
+            <div class="candidate-heading">
+              <span>${escapeHtml(candidate.display_name || 'Unnamed candidate')}</span>
+              <span class="candidate-badge">${escapeHtml(confidence)}</span>
+            </div>
+            <div class="candidate-reason">${escapeHtml(reason)}</div>
+            <div class="candidate-reason">
+              ${escapeHtml(candidate.provider || 'geocoder')} · score
+              ${escapeHtml(candidate.score ?? '—')}
+            </div>
+            <div class="actions">
+              <button class="secondary" type="button" data-view-candidate="${index}">
+                View on map
+              </button>
+              <button type="button" data-accept-candidate="${index}"${acceptDisabled}>
+                Accept this location
+              </button>
+            </div>
+          </div>`;
+        }
+      ).join('') || `<span class="workflow-summary">
+        No ranked candidates are available yet. Search a corrected address or select
+        Research This Facility.
+      </span>`;
+      for (const button of $('candidateOptions').querySelectorAll('[data-view-candidate]')) {
+        button.addEventListener('click', () => viewCandidate(Number(button.dataset.viewCandidate)));
+      }
+      for (
+        const button of $('candidateOptions').querySelectorAll('[data-accept-candidate]')
+      ) {
+        button.addEventListener('click', () => {
+          acceptCandidate(Number(button.dataset.acceptCandidate)).catch(
+            (error) => setGeometryStatus(error.message, 'error')
+          );
+        });
+      }
+    }
+
+    function viewCandidate(index) {
+      const candidate = state.selectedCandidateOptions[index];
+      if (!candidate || !state.map) return;
+      state.map.setView([candidate.latitude, candidate.longitude], 17);
+      $('coordinateDraftStatus').textContent =
+        'Candidate centered for inspection; no coordinate has been assigned.';
+      setGeometryStatus('Candidate centered on the map for review.', 'ok');
+    }
+
+    function resolutionExplanation(item) {
+      const validation = item.geometry?.spatial_validation;
+      if (!validation) {
+        return 'Automatic coordinate assignment has not reported a validation result.';
+      }
+      const lines = [
+        `Status: ${validation.status || 'unknown'}`,
+        `Reason: ${validation.reason || 'No reason was recorded.'}`
+      ];
+      const initial = validation.initial_validation;
+      if (initial?.reason) lines.push(`Initial result: ${initial.reason}`);
+      const retry = validation.address_retry;
+      if (retry?.address?.formatted_address) {
+        lines.push(`Address retry: ${retry.address.formatted_address}`);
+      } else if (retry?.reason) {
+        lines.push(`Address retry: ${retry.reason}`);
+      }
+      const attempts = [
+        ...(Array.isArray(initial?.attempts) ? initial.attempts : []),
+        ...(Array.isArray(validation.attempts) ? validation.attempts : [])
+      ];
+      if (attempts.length) {
+        lines.push('Automatic attempts:');
+        for (const attempt of attempts) {
+          lines.push(`- ${attempt.query}: ${attempt.reason || attempt.status}`);
+        }
+      }
+      return lines.join('\\n');
+    }
+
     async function loadApprovedGeometry() {
       if (!state.currentRunId) return setGeometryStatus('No run selected.', 'error');
       initMap();
       const payload = await api(`/api/runs/${state.currentRunId}/geometry-items`);
       state.geometryItems = payload.items || [];
+      $('jsonOutput').value = JSON.stringify(state.geometryItems, null, 2);
       state.selectedGeometryItemId = state.geometryItems[0]?.item_id || null;
       renderGeometryList();
       if (state.selectedGeometryItemId) selectGeometryItem(state.selectedGeometryItemId);
@@ -3052,9 +5607,41 @@ INDEX_HTML = r"""<!doctype html>
         clearMarker();
         if (state.drawnItems) state.drawnItems.clearLayers();
         $('geometryDetail').value = '';
+        setResolutionLink('resolutionSourceLink', null);
+        setResolutionLink('resolutionAddressLink', null);
+        setResolutionLink('googleSearchLink', null);
+        setResolutionLink('googleMapsLink', null);
+        renderCandidateOptions(null);
       }
       setGeometryStatus(`Loaded ${state.geometryItems.length} QAQC-approved observation(s).`, 'ok');
       if (state.sampleExtentVisible) renderSampleExtent(false);
+    }
+
+    async function loadGeometryItemsForAutomatedGeocoding() {
+      const usingSample = Boolean(state.currentSampleSetId);
+      if (!usingSample && !state.currentRunId) {
+        setAutomatedGeocodeStatus('Select a run before geocoding.', 'error');
+        return false;
+      }
+      const path = usingSample
+        ? `/api/samples/${state.currentSampleSetId}/geometry-items`
+        : `/api/runs/${state.currentRunId}/geometry-items`;
+      const payload = await api(path);
+      state.geometryItems = payload.items || [];
+      state.selectedGeometryItemId = state.geometryItems[0]?.item_id || null;
+      renderGeometryList();
+      $('jsonOutput').value = JSON.stringify(state.geometryItems, null, 2);
+      setAutomatedGeocodeStatus(
+        `Prepared ${state.geometryItems.length} accepted observation(s) for geocoding.`,
+        'ok'
+      );
+      return true;
+    }
+
+    async function geocodeAcceptedObservations() {
+      if (!(await loadGeometryItemsForAutomatedGeocoding())) return null;
+      await loadWorkflowStatus();
+      return geocodeAll();
     }
 
     async function loadAugmentedSampleGeometry() {
@@ -3069,6 +5656,11 @@ INDEX_HTML = r"""<!doctype html>
         clearMarker();
         if (state.drawnItems) state.drawnItems.clearLayers();
         $('geometryDetail').value = '';
+        setResolutionLink('resolutionSourceLink', null);
+        setResolutionLink('resolutionAddressLink', null);
+        setResolutionLink('googleSearchLink', null);
+        setResolutionLink('googleMapsLink', null);
+        renderCandidateOptions(null);
       }
       setGeometryStatus(
         `Loaded ${state.geometryItems.length} augmented sample observation(s).`,
@@ -3098,25 +5690,320 @@ INDEX_HTML = r"""<!doctype html>
       const payload = await api('/api/geometry/geocode', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ item_id: item.item_id, query })
+        body: JSON.stringify({
+          item_id: item.item_id,
+          query,
+          allow_address_retry: false,
+          conversation_id: state.currentRunId
+        })
       });
       item.geometry = payload.geometry;
       item.geometry_status = payload.geometry.geometry_status;
+      item.geometries = payload.geometry.geometries || [];
       item.area_m2 = payload.geometry.area_m2;
       item.geocode_query = query;
       if (payload.geometry.point) setMarker(payload.geometry.point);
+      else {
+        const assessment = (payload.spatial_validation.assessments || []).find(
+          (candidate) => candidate.latitude != null && candidate.longitude != null
+        );
+        if (assessment && state.map) {
+          state.map.setView([assessment.latitude, assessment.longitude], 14);
+          $('coordinateDraftStatus').textContent =
+            'A rejected candidate was used only to center the map; no coordinate was assigned.';
+        }
+      }
       renderGeometryList();
+      $('resolutionReason').textContent = resolutionExplanation(item);
+      renderCandidateOptions(item);
       if (state.sampleExtentVisible) renderSampleExtent(false);
       setGeometryStatus(
-        payload.geocode_result ? 'Geocode placed a point.' : 'No geocode result.',
+        payload.geocode_result
+          ? 'Geocode placed an in-scope facility point.'
+          : `Coordinate assignment requires human review: ${payload.spatial_validation.reason}`,
+        payload.geocode_result ? 'ok' : ''
+      );
+    }
+
+    async function researchSelectedFacility() {
+      const item = selectedGeometryItem();
+      if (!item) return setGeometryStatus('No approved observation selected.', 'error');
+      state.pendingCoordinatePreview = null;
+      const button = $('researchFacilityButton');
+      button.disabled = true;
+      setGeometryStatus(
+        `Researching ${item.lead?.location?.facility_name || item.item_id}…`,
         'ok'
       );
+      $('coordinateDraftStatus').textContent =
+        'The address-spatial agent is researching official facility evidence.';
+      try {
+        const payload = await api('/api/geometry/research', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            item_id: item.item_id,
+            conversation_id: state.currentRunId
+          })
+        });
+        item.geometry = payload.geometry;
+        item.geometry_status = payload.geometry.geometry_status;
+        item.geometries = payload.geometry.geometries || [];
+        item.area_m2 = payload.geometry.area_m2;
+        item.geocode_query = payload.geometry.geocode_query;
+        if (payload.address_retry?.address) {
+          item.address_enrichment = payload.address_retry.address;
+          item.address_status = payload.address_retry.address.status;
+          $('manualAddress').value =
+            payload.address_retry.address.formatted_address || item.geocode_query;
+        }
+        if (payload.research_resolved && payload.geometry.point) {
+          setMarker(payload.geometry.point);
+          $('coordinateDraftStatus').textContent =
+            'Focused research produced and saved an in-scope coordinate.';
+        } else {
+          $('coordinateDraftStatus').textContent =
+            'Focused research completed. Review the ranked candidates below.';
+        }
+        renderGeometryList();
+        $('resolutionReason').textContent = resolutionExplanation(item);
+        updateExternalSearchLinks(item);
+        renderCandidateOptions(item);
+        await loadDialogue();
+        setGeometryStatus(
+          payload.research_resolved
+            ? 'Focused research resolved this coordinate.'
+            : 'Focused research completed; candidate selection is ready.',
+          'ok'
+        );
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    async function acceptCandidate(index) {
+      const item = selectedGeometryItem();
+      const candidate = state.selectedCandidateOptions[index];
+      if (!item || !candidate) {
+        return setGeometryStatus('The selected candidate is no longer available.', 'error');
+      }
+      if (candidate.scope_status === 'out_of_scope') {
+        return setGeometryStatus(
+          'This candidate is outside the requested geographic scope and cannot be accepted.',
+          'error'
+        );
+      }
+      state.pendingCoordinatePreview = null;
+      const point = {
+        latitude: candidate.latitude,
+        longitude: candidate.longitude,
+        source: `${candidate.provider || 'geocoder'}-human`
+      };
+      setMarker(point);
+      const spatialValidation = {
+        ...(item.geometry?.spatial_validation || {}),
+        status: 'human_accepted_candidate',
+        requires_human_intervention: false,
+        reason: 'A human reviewer accepted a ranked geocoder candidate.',
+        accepted_candidate: candidate
+      };
+      await saveGeometry('point_confirmed', {
+        point,
+        geocodeResult: candidate.geocode_result || candidate,
+        spatialValidation,
+        reviewNotes:
+          `Human accepted ${candidate.display_name || 'a ranked geocoder candidate'}.`
+      });
+    }
+
+    async function geocodeAll() {
+      if (!state.geometryItems.length) {
+        setAutomatedGeocodeStatus('No accepted observations are available to geocode.', 'error');
+        return null;
+      }
+      const alreadyPositioned = state.geometryItems.filter(
+        (item) => pointFromGeometry(item)
+      ).length;
+      const pending = state.geometryItems.filter(
+        (item) => !pointFromGeometry(item) && (item.geocode_query || '').trim()
+      );
+      const missingQuery = state.geometryItems.filter(
+        (item) => !pointFromGeometry(item) && !(item.geocode_query || '').trim()
+      ).length;
+      if (!pending.length) {
+        setAutomatedGeocodeStatus(
+          `No observations need geocoding. ${alreadyPositioned} already have points` +
+          `${missingQuery ? `; ${missingQuery} have no address query` : ''}.`,
+          'ok'
+        );
+        return {
+          geocoded: 0,
+          attempted: 0,
+          already_positioned: alreadyPositioned,
+          missing_query: missingQuery,
+          needs_human_review: 0,
+          errors: 0
+        };
+      }
+      const button = $('geocodeButton');
+      button.disabled = true;
+      let geocodedCount = 0;
+      let notFoundCount = 0;
+      let humanReviewCount = 0;
+      let errorCount = 0;
+      try {
+        renderGeocodingProgress({
+          attempted: 0,
+          total: pending.length,
+          geocoded: 0,
+          humanReview: 0,
+          errors: 0,
+          working: true
+        });
+        for (let index = 0; index < pending.length; index += 1) {
+          const item = pending[index];
+          renderGeocodingProgress({
+            attempted: index,
+            total: pending.length,
+            geocoded: geocodedCount,
+            humanReview: humanReviewCount,
+            errors: errorCount,
+            working: true
+          });
+          setAutomatedGeocodeStatus(
+            `Geocoding ${index + 1}/${pending.length}: ${item.geocode_query.trim()}`
+          );
+          try {
+            const payload = await api('/api/geometry/geocode', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                item_id: item.item_id,
+                query: item.geocode_query.trim(),
+                allow_address_retry: true,
+                conversation_id: state.currentRunId
+              })
+            });
+            item.geometry = payload.geometry;
+            item.geometry_status = payload.geometry.geometry_status;
+            item.geometries = payload.geometry.geometries || [];
+            item.area_m2 = payload.geometry.area_m2;
+            item.geocode_query = payload.geometry.geocode_query;
+            if (payload.address_retry?.address) {
+              item.address_enrichment = payload.address_retry.address;
+              item.address_status = payload.address_retry.address.status;
+            }
+            if (payload.geocode_result) geocodedCount += 1;
+            else {
+              notFoundCount += 1;
+              if (payload.spatial_validation.requires_human_intervention) {
+                humanReviewCount += 1;
+              }
+            }
+          } catch (_) {
+            errorCount += 1;
+          }
+          renderGeometryList();
+          updateGeometrySummary();
+          renderGeocodingProgress({
+            attempted: index + 1,
+            total: pending.length,
+            geocoded: geocodedCount,
+            humanReview: humanReviewCount,
+            errors: errorCount,
+            working: false
+          });
+        }
+        const selected = selectedGeometryItem();
+        if (
+          state.activeWorkspace === 'geometry' &&
+          selected &&
+          pointFromGeometry(selected)
+        ) {
+          setMarker(pointFromGeometry(selected));
+        }
+        renderGeometryList();
+        updateGeometrySummary();
+        if (state.activeWorkspace === 'geometry' && state.sampleExtentVisible) {
+          renderSampleExtent(false);
+        }
+        const suffix = [
+          `${notFoundCount} not found`,
+          `${humanReviewCount} need human coordinate assignment`,
+          `${errorCount} error(s)`,
+          `${alreadyPositioned} already positioned`,
+          `${missingQuery} without an address query`
+        ].join(', ');
+        setAutomatedGeocodeStatus(
+          `Geocoded ${geocodedCount} of ${pending.length} observation(s). ` +
+          suffix + '.',
+          errorCount ? 'error' : 'ok'
+        );
+        await loadWorkflowStatus();
+        await loadDialogue();
+        return {
+          geocoded: geocodedCount,
+          attempted: pending.length,
+          already_positioned: alreadyPositioned,
+          missing_query: missingQuery,
+          needs_human_review: humanReviewCount,
+          errors: errorCount
+        };
+      } finally {
+        button.disabled = state.fullPipelineActive;
+      }
     }
 
     async function searchManualAddress() {
       const query = $('manualAddress').value.trim();
       if (!query) return setGeometryStatus('Enter an address or place to search.', 'error');
+      state.pendingCoordinatePreview = null;
       await geocodeSelected(query);
+    }
+
+    async function previewPastedCoordinates() {
+      const item = selectedGeometryItem();
+      if (!item) return setGeometryStatus('No approved observation selected.', 'error');
+      const coordinateText = $('pastedCoordinates').value.trim();
+      if (!coordinateText) {
+        return setGeometryStatus('Paste coordinates or a Google Maps URL first.', 'error');
+      }
+      const button = $('previewCoordinatesButton');
+      button.disabled = true;
+      try {
+        const payload = await api('/api/geometry/coordinate-preview', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            item_id: item.item_id,
+            coordinate_text: coordinateText
+          })
+        });
+        state.pendingCoordinatePreview = payload;
+        setMarker(payload.point);
+        const validation = payload.spatial_validation || {};
+        const messages = [
+          `Parsed coordinate: ${payload.normalized}.`,
+          validation.reason || 'Geographic scope was not verified.'
+        ];
+        if (payload.reversed_order) {
+          messages.push('Longitude and latitude appeared reversed and were corrected.');
+        }
+        $('coordinatePasteStatus').className =
+          `status ${validation.warning ? 'error' : 'ok'}`;
+        $('coordinatePasteStatus').textContent = messages.join(' ');
+        $('coordinateDraftStatus').textContent = validation.warning
+          ? 'Coordinate previewed with a warning. Verify the marker before saving.'
+          : 'Coordinate previewed and passed the available geographic checks.';
+        setGeometryStatus(
+          validation.warning
+            ? 'Coordinate previewed with a geographic warning.'
+            : 'Coordinate previewed successfully. Select Save Coordinate to confirm.',
+          validation.warning ? 'error' : 'ok'
+        );
+      } finally {
+        button.disabled = false;
+      }
     }
 
     function useMapCenter() {
@@ -3125,15 +6012,94 @@ INDEX_HTML = r"""<!doctype html>
         return setGeometryStatus('No approved observation selected.', 'error');
       }
       const center = state.map.getCenter();
+      state.pendingCoordinatePreview = null;
       setMarker({ latitude: center.lat, longitude: center.lng, source: 'user' });
+      state.coordinatePlacementMode = false;
+      $('map').classList.remove('placement-active');
+      $('coordinateDraftStatus').textContent =
+        'Draft coordinate placed at the map center. Select Save Coordinate to confirm it.';
       setGeometryStatus('Point set from map center.', 'ok');
     }
 
-    async function saveGeometry(status = null) {
+    function startPointPlacement() {
+      const item = selectedGeometryItem();
+      if (!item || !state.map) {
+        return setGeometryStatus('Select an observation before placing a point.', 'error');
+      }
+      state.pendingCoordinatePreview = null;
+      state.coordinatePlacementMode = true;
+      $('map').classList.add('placement-active');
+      $('coordinateDraftStatus').textContent =
+        'Placement mode active: click the facility location on the map.';
+      setGeometryStatus('Click the facility location on the map.', 'ok');
+    }
+
+    async function saveCoordinate() {
+      if (!currentPointPayload()) {
+        return setGeometryStatus(
+          'Place a point on the map or search a corrected address before saving.',
+          'error'
+        );
+      }
+      if (state.pendingCoordinatePreview) {
+        const preview = state.pendingCoordinatePreview;
+        const item = selectedGeometryItem();
+        const previewValidation = preview.spatial_validation || {};
+        const savedPoint = currentPointPayload(preview.point.source);
+        const markerMoved = Math.abs(savedPoint.latitude - preview.point.latitude) > 1e-7 ||
+          Math.abs(savedPoint.longitude - preview.point.longitude) > 1e-7;
+        const savedNormalized =
+          `${savedPoint.latitude.toFixed(7)}, ${savedPoint.longitude.toFixed(7)}`;
+        await saveGeometry('point_confirmed', {
+          point: savedPoint,
+          geocodeResult:
+            preview.reverse_geocode_result || item?.geometry?.geocode_result || null,
+          spatialValidation: {
+            ...(item?.geometry?.spatial_validation || {}),
+            status: 'human_pasted_coordinate',
+            requires_human_intervention: false,
+            reason: previewValidation.warning
+              ? (
+                'A human reviewer saved a pasted Google Maps coordinate after reviewing ' +
+                `this warning: ${previewValidation.reason}`
+              )
+              : (
+                'A human reviewer saved a pasted Google Maps coordinate after preview.' +
+                (markerMoved ? ' The reviewer adjusted the marker after preview.' : '')
+              ),
+            pasted_coordinate_validation: previewValidation,
+            pasted_coordinate_text: $('pastedCoordinates').value.trim(),
+            normalized_coordinate: savedNormalized,
+            marker_adjusted_after_preview: markerMoved
+          },
+          reviewNotes: $('coordinateReviewNotes').value.trim() || (
+            `Human-reviewed Google Maps coordinate: ${savedNormalized}.`
+          )
+        });
+        state.pendingCoordinatePreview = null;
+        $('coordinatePasteStatus').className = 'status ok';
+        $('coordinatePasteStatus').textContent =
+          `Saved Google Maps coordinate ${savedNormalized}.`;
+        return;
+      }
+      await saveGeometry('point_confirmed');
+    }
+
+    async function saveFootprint() {
+      if (!currentPolygonGeojson()) {
+        return setGeometryStatus(
+          'Draw a building polygon on the map before saving a footprint.',
+          'error'
+        );
+      }
+      await saveGeometry('footprint_drawn');
+    }
+
+    async function saveGeometry(status = null, overrides = {}) {
       const item = selectedGeometryItem();
       if (!item) return setGeometryStatus('No approved observation selected.', 'error');
       const polygon = currentPolygonGeojson();
-      const point = currentPointPayload();
+      const point = overrides.point || currentPointPayload();
       const geometryStatus = status || (polygon ? 'footprint_drawn' : 'point_confirmed');
       const payload = await api(`/api/geometry/items/${item.item_id}`, {
         method: 'POST',
@@ -3144,17 +6110,37 @@ INDEX_HTML = r"""<!doctype html>
           point,
           polygon_geojson: polygon,
           geometry_status: geometryStatus,
-          geocode_result: item.geometry?.geocode_result || null,
-          review_notes: geometryStatus === 'skipped' ? 'Skipped in geometry review.' : null
+          geocode_result: overrides.geocodeResult ?? item.geometry?.geocode_result ?? null,
+          spatial_validation:
+            overrides.spatialValidation ?? item.geometry?.spatial_validation ?? null,
+          review_notes: overrides.reviewNotes || (
+            geometryStatus === 'skipped'
+              ? 'Skipped in geometry review.'
+              : ($('coordinateReviewNotes').value.trim() || null)
+          ),
+          conversation_id: state.currentRunId
         })
       });
       item.geometry = payload.geometry;
       item.geometry_status = payload.geometry.geometry_status;
+      item.geometries = payload.geometry.geometries || [];
       item.area_m2 = payload.geometry.area_m2;
       renderGeometryList();
+      $('resolutionReason').textContent = resolutionExplanation(item);
+      renderCandidateOptions(item);
+      $('coordinateDraftStatus').textContent =
+        geometryStatus === 'point_confirmed'
+          ? 'Coordinate saved and removed from the intervention queue.'
+          : 'Geometry saved.';
+      $('jsonOutput').value = JSON.stringify(state.geometryItems, null, 2);
       if (state.sampleExtentVisible) renderSampleExtent(false);
       selectGeometryItem(item.item_id);
-      setGeometryStatus(`Geometry saved: ${item.geometry_status}.`, 'ok');
+      const areaMessage = item.area_m2 == null
+        ? ''
+        : ` Area: ${Math.round(item.area_m2).toLocaleString()} square meters.`;
+      setGeometryStatus(`Geometry saved: ${item.geometry_status}.${areaMessage}`, 'ok');
+      await loadWorkflowStatus();
+      await loadDialogue();
     }
 
     async function exitApplication() {
@@ -3229,6 +6215,8 @@ INDEX_HTML = r"""<!doctype html>
 
     async function boot() {
       initTheme();
+      setWorkspaceTab('workbench');
+      renderWorkflow(null);
       const payload = await api('/api/profiles');
       state.profiles = payload.profile_sets;
       renderProfileSets();
@@ -3237,10 +6225,13 @@ INDEX_HTML = r"""<!doctype html>
         localStorage.setItem('observationHarvesterTheme', $('themeSelect').value);
         applyTheme($('themeSelect').value);
       });
+      $('workbenchTab').addEventListener('click', () => setWorkspaceTab('workbench'));
+      $('geometryTab').addEventListener('click', () => setWorkspaceTab('geometry'));
       $('profileSet').addEventListener('change', renderProfiles);
       $('singleMode').addEventListener('click', () => setMode('single'));
       $('batchMode').addEventListener('click', () => setMode('batch'));
       $('campaignMode').addEventListener('click', () => setMode('campaign'));
+      $('runFullPipelineButton').addEventListener('click', runFullPipeline);
       $('runButton').addEventListener('click', runHarvest);
       $('refreshButton').addEventListener('click', loadRuns);
       $('clearRunsButton').addEventListener('click', () => {
@@ -3253,8 +6244,18 @@ INDEX_HTML = r"""<!doctype html>
         setStatus('JSON copied.', 'ok');
       });
       $('copyQaqcButton').addEventListener('click', copyQaqcPrompt);
+      $('downloadTranscriptButton').addEventListener('click', () => {
+        downloadTranscript().catch((error) => setStatus(error.message, 'error'));
+      });
       $('runQaqcButton').addEventListener('click', runQaqc);
       $('runAddressButton').addEventListener('click', runAddressEnrichment);
+      $('workflowNextButton').addEventListener('click', () => {
+        workflowAction($('workflowNextButton').dataset.action);
+      });
+      $('workflowSteps').addEventListener('click', (event) => {
+        const button = event.target.closest('[data-workflow-action]');
+        if (button) workflowAction(button.dataset.workflowAction);
+      });
       $('createSampleButton').addEventListener('click', () => {
         createSampleSet().catch((error) => setSampleStatus(error.message, 'error'));
       });
@@ -3281,14 +6282,30 @@ INDEX_HTML = r"""<!doctype html>
         loadAugmentedSampleGeometry().catch((error) => setGeometryStatus(error.message, 'error'));
       });
       $('geocodeButton').addEventListener('click', () => {
-        geocodeSelected().catch((error) => setGeometryStatus(error.message, 'error'));
+        geocodeAcceptedObservations().catch(
+          (error) => setAutomatedGeocodeStatus(error.message, 'error')
+        );
       });
       $('searchAddressButton').addEventListener('click', () => {
         searchManualAddress().catch((error) => setGeometryStatus(error.message, 'error'));
       });
+      $('researchFacilityButton').addEventListener('click', () => {
+        researchSelectedFacility().catch(
+          (error) => setGeometryStatus(error.message, 'error')
+        );
+      });
+      $('previewCoordinatesButton').addEventListener('click', () => {
+        previewPastedCoordinates().catch(
+          (error) => setGeometryStatus(error.message, 'error')
+        );
+      });
+      $('placePointButton').addEventListener('click', startPointPlacement);
       $('useMapCenterButton').addEventListener('click', useMapCenter);
+      $('saveCoordinateButton').addEventListener('click', () => {
+        saveCoordinate().catch((error) => setGeometryStatus(error.message, 'error'));
+      });
       $('saveFootprintButton').addEventListener('click', () => {
-        saveGeometry().catch((error) => setGeometryStatus(error.message, 'error'));
+        saveFootprint().catch((error) => setGeometryStatus(error.message, 'error'));
       });
       $('skipGeometryButton').addEventListener('click', () => {
         saveGeometry('skipped').catch((error) => setGeometryStatus(error.message, 'error'));

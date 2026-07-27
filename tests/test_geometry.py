@@ -3,11 +3,15 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from pdt_observer.geometry import (
     approved_records_for_child,
     geometry_item_from_payload,
     merge_geometry_items,
+    parse_coordinate_text,
     save_geometry_review_item,
+    spatially_validate_geocode_result,
     verified_csv,
 )
 from pdt_observer.models import (
@@ -93,6 +97,30 @@ def test_approved_records_filter_to_verified_keep(tmp_path: Path) -> None:
     assert records[0]["lead"]["location"]["facility_name"] == "Example Warehouse"
 
 
+def test_parse_coordinate_text_supports_google_maps_copy_formats() -> None:
+    assert parse_coordinate_text("33.7490, -84.3880") == (33.749, -84.388, False)
+    assert parse_coordinate_text("33.7490° N, 84.3880° W") == (
+        33.749,
+        -84.388,
+        False,
+    )
+    assert parse_coordinate_text(
+        "https://www.google.com/maps/place/test/@33.7490,-84.3880,18z"
+    ) == (33.749, -84.388, False)
+    assert parse_coordinate_text("-118.2437, 34.0522") == (
+        34.0522,
+        -118.2437,
+        True,
+    )
+
+
+def test_parse_coordinate_text_rejects_unrecognized_or_invalid_values() -> None:
+    with pytest.raises(ValueError, match="not recognized"):
+        parse_coordinate_text("Example Warehouse")
+    with pytest.raises(ValueError, match="Latitude"):
+        parse_coordinate_text("95, 150")
+
+
 def test_polygon_area_and_geometry_review_item(tmp_path: Path) -> None:
     polygon = {
         "type": "Polygon",
@@ -117,8 +145,78 @@ def test_polygon_area_and_geometry_review_item(tmp_path: Path) -> None:
 
     assert item.area_m2 is not None
     assert item.area_m2 > 0
+    assert [geometry["type"] for geometry in item.geometries] == ["Point", "Polygon"]
     saved = save_geometry_review_item(tmp_path, item)
     assert saved.geometry_status == GeometryStatus.FOOTPRINT_DRAWN
+
+
+def test_spatial_validation_accepts_specific_in_scope_candidate() -> None:
+    candidate = {
+        "display_name": "Example School, Atlanta, Georgia, United States",
+        "latitude": 33.75,
+        "longitude": -84.39,
+        "provider": "nominatim",
+        "query": "Example School, Atlanta, Georgia, US",
+        "type": "school",
+        "address": {
+            "city": "Atlanta",
+            "state": "Georgia",
+            "country": "United States",
+            "country_code": "us",
+        },
+    }
+
+    accepted, validation = spatially_validate_geocode_result(
+        {**candidate, "candidates": [candidate]},
+        expected_country="US",
+        expected_locality="Georgia",
+    )
+
+    assert accepted == candidate
+    assert validation["status"] == "accepted"
+    assert validation["requires_human_intervention"] is False
+
+
+def test_spatial_validation_routes_out_of_scope_and_centroid_results_to_humans() -> None:
+    florida = {
+        "display_name": "Example School, Parkland, Florida, United States",
+        "latitude": 26.31,
+        "longitude": -80.24,
+        "type": "school",
+        "address": {
+            "city": "Parkland",
+            "state": "Florida",
+            "country": "United States",
+            "country_code": "us",
+        },
+    }
+    georgia_centroid = {
+        "display_name": "Georgia, United States",
+        "latitude": 32.68,
+        "longitude": -83.22,
+        "type": "state",
+        "address": {
+            "state": "Georgia",
+            "country": "United States",
+            "country_code": "us",
+        },
+    }
+
+    accepted_outside, outside = spatially_validate_geocode_result(
+        {**florida, "candidates": [florida]},
+        expected_country="US",
+        expected_locality="Georgia",
+    )
+    accepted_centroid, centroid = spatially_validate_geocode_result(
+        {**georgia_centroid, "candidates": [georgia_centroid]},
+        expected_country="US",
+        expected_locality="Georgia",
+    )
+
+    assert accepted_outside is None
+    assert outside["status"] == "out_of_scope"
+    assert accepted_centroid is None
+    assert centroid["status"] == "requires_human"
 
 
 def test_verified_csv_includes_geometry_status(tmp_path: Path) -> None:

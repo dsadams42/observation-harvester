@@ -13,9 +13,11 @@ build/
 batches/
 exports/
 address_runs/
+agent_dialogue/
 coverage_runs/
 geocode_cache/
 geometry_reviews/
+geographer_runs/
 harvest_runs/
 harvest_logs/
 lead_runs/

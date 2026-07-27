@@ -39,6 +39,17 @@ class SourceOutcome(StrEnum):
     FAILED = "failed"
 
 
+class EvidenceStrategyType(StrEnum):
+    INCIDENT_EVACUATION = "incident_evacuation"
+    ENFORCEMENT_INSPECTION = "enforcement_inspection"
+    OFFICIAL_EVENT_ATTENDANCE = "official_event_attendance"
+    ROUTINE_DATED_ATTENDANCE = "routine_dated_attendance"
+    SHIFT_OPERATIONAL_PRESENCE = "shift_operational_presence"
+    LEGAL_INVESTIGATIVE_RECORDS = "legal_investigative_records"
+    TEMPORARY_USE_OCCUPANCY = "temporary_use_occupancy"
+    RESEARCH_MEASURED_OCCUPANCY = "research_measured_occupancy"
+
+
 class SourceType(StrEnum):
     NEWS = "news"
     OFFICIAL = "official"
@@ -99,6 +110,11 @@ class HarvestRunStatus(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+
+
+class GeographerPlanStatus(StrEnum):
+    COMPLETED = "completed"
+    FALLBACK = "fallback"
 
 
 class SampleSetRoundRole(StrEnum):
@@ -249,6 +265,9 @@ class CandidateObservation(StrictModel):
     result: InvestigationResult
     produced_by: str = Field(default="codex", min_length=1)
     notes: str | None = None
+    strategy_id: EvidenceStrategyType | None = None
+    count_semantics: str | None = None
+    representativeness: str | None = None
 
 
 class SourceBundle(StrictModel):
@@ -289,6 +308,9 @@ class OccupancyLead(StrictModel):
     is_regional_aggregate: bool | None = None
     review_flags: tuple[str, ...] = ()
     review_notes: str | None = None
+    strategy_id: EvidenceStrategyType | None = None
+    count_semantics: str | None = None
+    representativeness: str | None = None
 
 
 class LeadQaqcCountCheck(StrictModel):
@@ -307,6 +329,7 @@ class LeadQaqcReview(StrictModel):
     source_reachable: bool
     facility_match: bool | None = None
     location_match: bool | None = None
+    strategy_match: bool | None = None
     count_checks: tuple[LeadQaqcCountCheck, ...] = ()
     supporting_quote: str | None = None
     recommended_action: LeadQaqcRecommendedAction
@@ -345,7 +368,9 @@ class GeometryReviewItem(StrictModel):
     geocode_result: dict[str, object] | None = None
     point: GeometryPoint | None = None
     polygon_geojson: dict[str, object] | None = None
+    geometries: tuple[dict[str, object], ...] = ()
     area_m2: float | None = Field(default=None, ge=0)
+    spatial_validation: dict[str, object] | None = None
     geometry_status: GeometryStatus = GeometryStatus.NEEDS_REVIEW
     review_notes: str | None = None
 
@@ -367,6 +392,70 @@ class BuildingProfileSet(StrictModel):
     profile_set_id: str = Field(min_length=1)
     label: str = Field(min_length=1)
     profiles: tuple[BuildingTypeProfile, ...]
+
+
+class VernacularTerm(StrictModel):
+    standard_term: str = Field(min_length=1)
+    local_term: str = Field(min_length=1)
+    language: str = Field(min_length=1)
+    usage_note: str = Field(min_length=1)
+
+
+class GeographerProposal(StrictModel):
+    search_languages: tuple[str, ...] = ()
+    administrative_terms: tuple[VernacularTerm, ...] = ()
+    public_safety_terms: tuple[VernacularTerm, ...] = ()
+    facility_terms: tuple[VernacularTerm, ...] = ()
+    query_adjustments: tuple[str, ...] = ()
+    source_urls: tuple[str, ...] = ()
+    commentary: str = Field(min_length=1)
+    rationale: str = Field(min_length=1)
+
+
+class GeographerPlan(StrictModel):
+    plan_id: str = Field(min_length=1)
+    status: GeographerPlanStatus
+    country: str = Field(min_length=2)
+    locality: str | None = None
+    localities: tuple[str, ...] = ()
+    profile_set: str = Field(min_length=1)
+    profile_id: str | None = None
+    facility_types: tuple[str, ...] = ()
+    proposal: GeographerProposal
+    prompt_path: str = Field(min_length=1)
+    artifact_path: str = Field(min_length=1)
+    created_at: str = Field(min_length=1)
+    error_message: str | None = None
+
+
+class AgentDialogueEntry(StrictModel):
+    speaker: str = Field(min_length=1)
+    stage: str = Field(min_length=1)
+    message: str = Field(min_length=1)
+    rationale: str | None = None
+    created_at: str = Field(min_length=1)
+
+
+class EvidenceStrategy(StrictModel):
+    strategy_id: EvidenceStrategyType
+    label: str = Field(min_length=1)
+    objective: str = Field(min_length=1)
+    query_templates: tuple[str, ...] = Field(min_length=1)
+    preferred_source_types: tuple[str, ...] = ()
+    accepted_count_semantics: tuple[str, ...] = Field(min_length=1)
+    negative_traps: tuple[str, ...] = ()
+    default_representativeness: str = Field(min_length=1)
+
+
+class StrategyRecommendation(StrictModel):
+    strategy_id: EvidenceStrategyType
+    priority: int = Field(ge=0)
+    reason: str = Field(min_length=1)
+
+
+class StrategyPlan(StrictModel):
+    planner: str = Field(default="deterministic_strategy_planner_v1", min_length=1)
+    recommendations: tuple[StrategyRecommendation, ...] = Field(min_length=1)
 
 
 class WorkQuota(StrictModel):
@@ -401,6 +490,7 @@ class WorkItem(StrictModel):
     status: WorkStatus = WorkStatus.OPEN
     claimed_by: str | None = None
     source_hints: tuple[str, ...] = ()
+    strategy_plan: StrategyPlan | None = None
     run_artifact_path: str | None = None
     quota: WorkQuota = Field(default_factory=WorkQuota)
     progress: WorkProgress = Field(default_factory=WorkProgress)
@@ -435,6 +525,8 @@ class HarvestRunManifest(StrictModel):
     locality: str | None = None
     profile_set: str = Field(min_length=1)
     profile_id: str | None = None
+    strategy_plan: StrategyPlan | None = None
+    geographer_plan_path: str | None = None
     target: int = Field(ge=1)
     prompt_path: str = Field(min_length=1)
     lead_path: str = Field(min_length=1)
@@ -454,6 +546,7 @@ class HarvestBatchRunManifest(StrictModel):
     country: str = Field(min_length=2)
     locality: str | None = None
     profile_set: str = Field(min_length=1)
+    geographer_plan_path: str | None = None
     target: int = Field(ge=1)
     child_run_ids: tuple[str, ...]
     child_manifest_paths: tuple[str, ...]
@@ -470,6 +563,7 @@ class HarvestCampaignRunManifest(StrictModel):
     country: str = Field(min_length=2)
     localities: tuple[str, ...] = ()
     facility_types: tuple[str, ...] = Field(min_length=1)
+    geographer_plan_path: str | None = None
     target: int = Field(ge=1)
     child_run_ids: tuple[str, ...]
     child_manifest_paths: tuple[str, ...]

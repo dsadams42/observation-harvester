@@ -44,6 +44,18 @@ def test_codex_run_model_loads_example() -> None:
     assert run.task.locality == "Milltown"
     assert run.candidate.produced_by == "codex"
     assert run.candidate.result.count == 17
+
+
+def test_candidate_observation_can_record_strategy_attribution() -> None:
+    payload = json.loads(Path("examples/milltown_codex_run.json").read_text(encoding="utf-8"))
+    payload["candidate"]["strategy_id"] = "incident_evacuation"
+    payload["candidate"]["count_semantics"] = "confirmed_inside"
+    payload["candidate"]["representativeness"] = "incident_specific"
+
+    run = InvestigationRun.model_validate(payload)
+
+    assert run.candidate.strategy_id is not None
+    assert run.candidate.strategy_id.value == "incident_evacuation"
     assert run.candidate.result.observed_time_text == "approximately 9:10 p.m."
     assert run.candidate.result.time_context is not None
     assert run.candidate.result.time_context.observed_time_local == "21:10"
@@ -86,6 +98,9 @@ def test_occupancy_lead_model_accepts_quality_fields() -> None:
             "is_regional_aggregate": False,
             "review_flags": ["needs_geocode"],
             "review_notes": "Review geocode.",
+            "strategy_id": "incident_evacuation",
+            "count_semantics": "evacuated",
+            "representativeness": "incident_specific",
         }
     )
 
@@ -93,6 +108,9 @@ def test_occupancy_lead_model_accepts_quality_fields() -> None:
     assert lead.confidence == LeadConfidence.HIGH
     assert lead.evidence_quote is not None
     assert lead.review_flags == ("needs_geocode",)
+    assert lead.strategy_id is not None
+    assert lead.strategy_id.value == "incident_evacuation"
+    assert lead.count_semantics == "evacuated"
 
 
 def test_lead_qaqc_review_model_accepts_verification_fields() -> None:
@@ -104,6 +122,7 @@ def test_lead_qaqc_review_model_accepts_verification_fields() -> None:
             "source_reachable": True,
             "facility_match": True,
             "location_match": True,
+            "strategy_match": True,
             "count_checks": [
                 {
                     "count": 12,
@@ -122,6 +141,7 @@ def test_lead_qaqc_review_model_accepts_verification_fields() -> None:
 
     assert review.verification_status == LeadQaqcVerificationStatus.VERIFIED
     assert review.recommended_action == LeadQaqcRecommendedAction.KEEP
+    assert review.strategy_match
     assert review.count_checks[0].reported_count_found is True
 
 

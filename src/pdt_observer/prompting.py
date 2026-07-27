@@ -2,7 +2,18 @@ from __future__ import annotations
 
 from typing import TypedDict
 
-from pdt_observer.models import BuildingTypeProfile, WorkItem, WorkStatusReport
+from pdt_observer.models import (
+    BuildingProfileSet,
+    BuildingTypeProfile,
+    StrategyPlan,
+    WorkItem,
+    WorkStatusReport,
+)
+from pdt_observer.strategies import (
+    build_strategy_plan,
+    get_strategy,
+    render_strategy_queries,
+)
 
 
 class CountrySearchContext(TypedDict):
@@ -84,28 +95,21 @@ def country_search_context(country: str) -> CountrySearchContext:
     )
 
 
-def _sample_queries(item: WorkItem, profile: BuildingTypeProfile) -> tuple[str, ...]:
-    locality = _quote(item.locality)
-    country = item.country
-    country_context = country_search_context(country)
-    source_terms = country_context["source_terms"]
-    search_country = country_context["name"]
-    aliases = profile.venue_aliases[:4] or ("facility",)
-    phrases = profile.positive_evidence_patterns[:8] or ("people were inside",)
-    queries: list[str] = []
-
-    for alias in aliases:
-        for phrase in phrases:
-            if len(queries) >= 12:
-                return tuple(queries)
-            queries.append(f"{locality} {search_country} {_quote(phrase)} {alias}")
-
-    for source_term in source_terms:
-        if len(queries) >= 12:
-            return tuple(queries)
-        queries.append(f"{locality} {search_country} {source_term} {_quote('evacuated')}")
-
-    return tuple(queries)
+def _strategy_plan_text(plan: StrategyPlan) -> str:
+    sections: list[str] = []
+    for recommendation in plan.recommendations:
+        strategy = get_strategy(recommendation.strategy_id)
+        semantics = ", ".join(strategy.accepted_count_semantics)
+        traps = "; ".join(strategy.negative_traps)
+        sections.append(
+            f"### {recommendation.priority}. {strategy.label} "
+            f"(`{strategy.strategy_id.value}`)\n\n"
+            f"{recommendation.reason}\n\n"
+            f"Objective: {strategy.objective}\n\n"
+            f"Accepted count semantics: {semantics}.\n\n"
+            f"Important traps: {traps}."
+        )
+    return "\n\n".join(sections)
 
 
 def render_work_prompt(
@@ -117,7 +121,26 @@ def render_work_prompt(
     """Render a concrete Codex work prompt from the claimed work item and profile data."""
 
     source_hints = _bullet_list(item.source_hints)
-    sample_queries = _bullet_list(_sample_queries(item, profile))
+    strategy_plan = item.strategy_plan
+    if strategy_plan is None:
+        strategy_plan = build_strategy_plan(
+            BuildingProfileSet(
+                profile_set_id="custom",
+                label=profile.label,
+                profiles=(profile,),
+            ),
+            profile_id=profile.profile_id,
+        )
+    sample_queries = _bullet_list(
+        render_strategy_queries(
+            strategy_plan,
+            locality=item.locality,
+            country=country_search_context(item.country)["name"],
+            aliases=profile.venue_aliases,
+            positive_phrases=profile.positive_evidence_patterns,
+        )
+    )
+    strategy_plan_text = _strategy_plan_text(strategy_plan)
     preferred_sources = _bullet_list(profile.preferred_source_types)
     context_only_sources = _bullet_list(profile.context_only_source_types)
     positive_patterns = _bullet_list(profile.positive_evidence_patterns)
@@ -156,6 +179,15 @@ acceptable real-time occupancy proxies when the source ties the count to a named
 
 Profile guidance:
 {profile.source_search_prompt}
+
+## Orchestrator Strategy Plan
+
+The job-building orchestrator recommends the following ordered evidence strategies. Start with
+the highest-priority strategy. Move to the next strategy when exact searches are exhausted or
+yield repeated context-only sources. Do not invent an unlisted strategy when it would weaken the
+evidence contract.
+
+{strategy_plan_text}
 
 ## Country Search Context
 
@@ -202,9 +234,9 @@ country, one facility alias, and one evidence phrase. Start with queries like:
 {sample_queries}
 ```
 
-If exact phrase searches are thin, try incident-context variants using this profile's facility
-aliases, such as fire, earthquake, chemical leak, code violation, overcrowding, police operation,
-raid, evacuation, trapped, or rescued.
+The queries above cover multiple evidence pathways. Preserve the selected `strategy_id`,
+`count_semantics`, and representativeness in the candidate so later QAQC can evaluate strategy
+performance and prevent unlike observations from being treated as equivalent.
 
 ## Extraction Rules
 

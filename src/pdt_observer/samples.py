@@ -4,12 +4,15 @@ import json
 import subprocess
 from collections import Counter
 from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 
 from pdt_observer.addresses import merge_address_results
+from pdt_observer.dialogue import append_dialogue
+from pdt_observer.geographer import run_geographer
 from pdt_observer.geometry import approved_records_for_child, merge_geometry_items
 from pdt_observer.harvest import CodexRunner, append_harvest_log, run_harvest
 from pdt_observer.models import (
@@ -19,6 +22,7 @@ from pdt_observer.models import (
     HarvestCampaignRunManifest,
     HarvestRunManifest,
     HarvestRunStatus,
+    RecommendedGapFillJob,
     SampleSetManifest,
     SampleSetRound,
     SampleSetRoundRole,
@@ -56,6 +60,30 @@ def save_sample_set(root: Path, sample_set: SampleSetManifest) -> SampleSetManif
 
 def load_coverage_review(path: Path) -> CoverageSteeringReview:
     return COVERAGE_REVIEW_ADAPTER.validate_json(path.read_text(encoding="utf-8"))
+
+
+def coverage_excluded_item_ids(root: Path, sample_set_id: str) -> frozenset[str]:
+    coverage_root = root / "coverage_runs"
+    if not coverage_root.is_dir():
+        return frozenset()
+    candidates = sorted(
+        coverage_root.glob(f"{sample_set_id}-coverage*.json"),
+        key=lambda path: (path.stat().st_mtime_ns, path.name),
+        reverse=True,
+    )
+    for path in candidates:
+        try:
+            review = load_coverage_review(path)
+        except (ValueError, ValidationError):
+            continue
+        if review.sample_set_id != sample_set_id:
+            continue
+        return frozenset(
+            flag.item_id
+            for flag in review.out_of_scope_flags
+            if flag.item_id is not None
+        )
+    return frozenset()
 
 
 def coverage_review_to_json(review: CoverageSteeringReview) -> str:
@@ -210,6 +238,7 @@ def create_sample_set_from_run(
 
 
 def sample_records(root: Path, sample_set: SampleSetManifest) -> tuple[dict[str, Any], ...]:
+    excluded_item_ids = coverage_excluded_item_ids(root, sample_set.sample_set_id)
     child_to_round: dict[str, int] = {}
     for round_item in sample_set.rounds:
         for child_run_id in round_item.child_run_ids:
@@ -225,6 +254,8 @@ def sample_records(root: Path, sample_set: SampleSetManifest) -> tuple[dict[str,
         except (FileNotFoundError, ValueError):
             continue
         for record in child_records:
+            if str(record["item_id"]) in excluded_item_ids:
+                continue
             payload = dict(record)
             payload["sample_set_id"] = sample_set.sample_set_id
             payload["sample_round"] = child_to_round.get(child_run_id)
@@ -425,6 +456,18 @@ def run_coverage_steering(
     result = active_runner(command, prompt, root)
     if result.returncode != 0:
         append_harvest_log(root, sample_set_id, f"Coverage agent failed: {result.stderr.strip()}.")
+        append_dialogue(
+            root,
+            sample_set_id,
+            speaker="Coverage Agent",
+            stage="coverage_review",
+            message="I could not complete the sample coverage review.",
+            rationale=(
+                result.stderr.strip()
+                or result.stdout.strip()
+                or "No error detail was returned."
+            ),
+        )
         return {
             "coverage_id": resolved_coverage_id,
             "status": "failed",
@@ -435,6 +478,17 @@ def run_coverage_steering(
         }
     review = load_coverage_review(output_path)
     append_harvest_log(root, sample_set_id, f"Coverage agent completed {resolved_coverage_id}.")
+    append_dialogue(
+        root,
+        sample_set_id,
+        speaker="Coverage Agent",
+        stage="coverage_review",
+        message=(
+            f"I assessed the sample as {review.dispersion_status.value} and recommended "
+            f"{len(review.recommended_child_jobs)} gap-fill job(s)."
+        ),
+        rationale=review.narrative_notes,
+    )
     return {
         "coverage_id": resolved_coverage_id,
         "status": "completed",
@@ -455,6 +509,8 @@ def _default_codex_runner(
         list(command),
         input=prompt,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         capture_output=True,
         cwd=cwd,
         check=False,
@@ -468,16 +524,59 @@ def run_gap_fill(
     coverage_path: Path,
     codex_bin: str = "codex",
     runner: CodexRunner | None = None,
+    max_concurrent_jobs: int = 3,
 ) -> SampleSetManifest:
+    if max_concurrent_jobs < 1:
+        raise ValueError("max_concurrent_jobs must be at least 1")
     sample_set = load_sample_set(root, sample_set_id)
     review = load_coverage_review(coverage_path)
     round_number = len(sample_set.rounds) + 1
-    child_run_ids: list[str] = []
-    child_summaries: list[dict[str, object]] = []
-    for index, job in enumerate(review.recommended_child_jobs, start=1):
-        run_id = (
-            f"{sample_set.sample_set_id}-r{round_number}-gap-{index}-"
-            f"{slugify(job.locality or 'countrywide')}-{slugify(job.facility_type)}"
+    jobs = tuple(
+        (
+            job,
+            (
+                f"{sample_set.sample_set_id}-r{round_number}-gap-{index}-"
+                f"{slugify(job.locality or 'countrywide')}-{slugify(job.facility_type)}"
+            ),
+        )
+        for index, job in enumerate(review.recommended_child_jobs, start=1)
+    )
+    child_results: list[tuple[HarvestRunManifest, str] | None] = [None] * len(jobs)
+    active_runner = runner or _default_codex_runner
+    worker_count = min(max_concurrent_jobs, len(jobs)) if jobs else 1
+    append_harvest_log(
+        root,
+        sample_set_id,
+        f"Dispatching {len(jobs)} gap-fill job(s) with up to {worker_count} active agents.",
+    )
+    append_dialogue(
+        root,
+        sample_set_id,
+        speaker="Gap-Fill Coordinator",
+        stage="job_dispatch",
+        message=(
+            f"I queued {len(jobs)} targeted coverage job(s), with up to "
+            f"{worker_count} job teams working at once."
+        ),
+        rationale=(
+            "Each team runs a locality-specific Geographer review before its Harvester Agent."
+        ),
+    )
+
+    def run_job(
+        job: RecommendedGapFillJob,
+        run_id: str,
+    ) -> tuple[HarvestRunManifest, str]:
+        geographer_plan = run_geographer(
+            root=root,
+            plan_id=run_id,
+            country=job.country,
+            locality=job.locality,
+            profile_set_name=job.facility_type,
+            profile_id=None,
+            codex_bin=codex_bin,
+            runner=active_runner,
+            conversation_id=sample_set_id,
         )
         manifest = run_harvest(
             root=root,
@@ -488,17 +587,49 @@ def run_gap_fill(
             target=job.target,
             run_id=run_id,
             codex_bin=codex_bin,
-            runner=runner,
+            runner=active_runner,
+            geographer_plan=geographer_plan,
+            conversation_id=sample_set_id,
         )
-        child_run_ids.append(manifest.run_id)
-        child_summaries.append(
-            {
-                "run_id": manifest.run_id,
-                "status": manifest.status.value,
-                "summary": manifest.summary or {},
-            }
-        )
+        return manifest, geographer_plan.artifact_path
+
+    with ThreadPoolExecutor(
+        max_workers=worker_count,
+        thread_name_prefix="gap-fill-harvester",
+    ) as executor:
+        future_indexes = {
+            executor.submit(run_job, job, run_id): index
+            for index, (job, run_id) in enumerate(jobs)
+        }
+        for future in as_completed(future_indexes):
+            child_results[future_indexes[future]] = future.result()
+
+    completed_results = [result for result in child_results if result is not None]
+    child_run_ids = [manifest.run_id for manifest, _ in completed_results]
+    child_summaries: list[dict[str, object]] = [
+        {
+            "run_id": manifest.run_id,
+            "status": manifest.status.value,
+            "summary": manifest.summary or {},
+            "geographer_plan_path": geographer_path,
+        }
+        for manifest, geographer_path in completed_results
+    ]
     failed = [item for item in child_summaries if item["status"] != HarvestRunStatus.COMPLETED]
+    append_dialogue(
+        root,
+        sample_set_id,
+        speaker="Gap-Fill Coordinator",
+        stage="job_consolidation",
+        message=(
+            f"I consolidated {len(child_summaries)} targeted job(s), including "
+            f"{len(failed)} that did not complete successfully."
+        ),
+        rationale=(
+            "The completed jobs were restored to the Coverage Agent's recommended order "
+            "before being added as a new sample round."
+        ),
+    )
     round_item = SampleSetRound(
         round_number=round_number,
         role=SampleSetRoundRole.GAP_FILL,

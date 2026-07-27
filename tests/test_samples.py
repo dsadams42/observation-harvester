@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import json
 import subprocess
+import threading
 from collections.abc import Sequence
 from pathlib import Path
 
+from pdt_observer.dialogue import load_dialogue, render_dialogue
 from pdt_observer.geometry import GeometryPoint, GeometryStatus, geometry_item_from_payload
 from pdt_observer.harvest import run_harvest_campaign
 from pdt_observer.models import (
+    CoverageFlag,
     CoverageSteeringReview,
     HarvestRunStatus,
     RecommendedGapFillJob,
@@ -127,6 +130,27 @@ def test_sample_set_aggregates_campaign_child_runs_and_coverage_summary(
     assert "Sample Set Coverage Steering" in prompt
     assert "recommended_child_jobs" in prompt
 
+    review = CoverageSteeringReview(
+        coverage_id="us-tn-sample-coverage-filter",
+        sample_set_id=sample_set.sample_set_id,
+        narrative_notes="One approved item was found outside the requested scope.",
+        out_of_scope_flags=(
+            CoverageFlag(
+                item_id=str(records[0]["item_id"]),
+                flag_type="out_of_scope",
+                reason="Facility is outside Tennessee.",
+            ),
+        ),
+    )
+    coverage_path = tmp_path / "coverage_runs/us-tn-sample-coverage-filter.json"
+    coverage_path.parent.mkdir(exist_ok=True)
+    coverage_path.write_text(review.model_dump_json(), encoding="utf-8")
+
+    filtered_records = sample_records(tmp_path, sample_set)
+
+    assert len(filtered_records) == 1
+    assert filtered_records[0]["item_id"] != records[0]["item_id"]
+
 
 def test_gap_fill_appends_second_round_without_overwriting_initial_round(
     tmp_path: Path,
@@ -181,3 +205,105 @@ def test_gap_fill_appends_second_round_without_overwriting_initial_round(
     assert updated.rounds[1].role == SampleSetRoundRole.GAP_FILL
     assert updated.combined_child_run_ids[0] == "initial-run"
     assert updated.combined_child_run_ids[1].startswith("us-tn-sample-r2-gap")
+
+
+def test_gap_fill_runs_job_teams_concurrently_with_geographer_reviews(
+    tmp_path: Path,
+) -> None:
+    sample_set = SampleSetManifest(
+        sample_set_id="us-gap-parallel",
+        country="US",
+        requested_localities=("Western Tennessee", "Eastern Tennessee"),
+        facility_types=("schools",),
+        target=2,
+        rounds=(
+            SampleSetRound(
+                round_number=1,
+                role=SampleSetRoundRole.INITIAL,
+                source_run_ids=("initial-run",),
+                child_run_ids=("initial-run",),
+                status=HarvestRunStatus.COMPLETED,
+            ),
+        ),
+        combined_child_run_ids=("initial-run",),
+        created_at="2026-07-24T00:00:00Z",
+        updated_at="2026-07-24T00:00:00Z",
+    )
+    save_sample_set(tmp_path, sample_set)
+    review = CoverageSteeringReview(
+        coverage_id="us-gap-parallel-coverage",
+        sample_set_id="us-gap-parallel",
+        dispersion_status="imbalanced",
+        narrative_notes="Both ends of the state need targeted collection.",
+        recommended_child_jobs=(
+            RecommendedGapFillJob(
+                country="US",
+                locality="Western Tennessee",
+                facility_type="schools",
+                target=2,
+                reason="Western Tennessee is underrepresented.",
+            ),
+            RecommendedGapFillJob(
+                country="US",
+                locality="Eastern Tennessee",
+                facility_type="schools",
+                target=2,
+                reason="Eastern Tennessee is underrepresented.",
+            ),
+        ),
+    )
+    coverage_file = tmp_path / "coverage_runs/us-gap-parallel-coverage.json"
+    coverage_file.parent.mkdir()
+    coverage_file.write_text(review.model_dump_json(), encoding="utf-8")
+    geographer_rendezvous = threading.Barrier(2)
+
+    def parallel_job_runner(
+        command: Sequence[str],
+        prompt: str,
+        cwd: Path,
+    ) -> subprocess.CompletedProcess[str]:
+        output_path = Path(command[command.index("-o") + 1])
+        if "Minimal Geographic Vernacular Review" in prompt:
+            geographer_rendezvous.wait(timeout=2)
+            payload: object = {
+                "search_languages": ["English"],
+                "administrative_terms": [],
+                "public_safety_terms": [
+                    {
+                        "standard_term": "state police",
+                        "local_term": "Tennessee Highway Patrol",
+                        "language": "English",
+                        "usage_note": "Use for state-level incident searches.",
+                    }
+                ],
+                "facility_terms": [],
+                "query_adjustments": ["Tennessee Highway Patrol school evacuation"],
+                "source_urls": ["https://example.test/agency"],
+                "commentary": "I added the locally relevant state agency name.",
+                "rationale": "The agency name can reveal locality-specific reports.",
+            }
+        else:
+            assert "Geographer Vernacular Adjustments" in prompt
+            assert "Tennessee Highway Patrol" in prompt
+            payload = LEAD_PAYLOAD
+        output_path.write_text(json.dumps(payload), encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    updated = run_gap_fill(
+        root=tmp_path,
+        sample_set_id=sample_set.sample_set_id,
+        coverage_path=coverage_file,
+        runner=parallel_job_runner,
+        max_concurrent_jobs=2,
+    )
+
+    gap_round = updated.rounds[-1]
+    assert gap_round.status == HarvestRunStatus.COMPLETED
+    assert len(gap_round.child_run_ids) == 2
+    assert gap_round.summary is not None
+    for child_summary in gap_round.summary["child_summaries"]:
+        geographer_path = Path(str(child_summary["geographer_plan_path"]))
+        assert geographer_path.is_file()
+    dialogue = render_dialogue(load_dialogue(tmp_path, sample_set.sample_set_id))
+    assert dialogue.count("Geographer Agent:") == 2
+    assert "Gap-Fill Coordinator:" in dialogue

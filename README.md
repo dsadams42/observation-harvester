@@ -66,7 +66,8 @@ On Windows, double-click:
 Observation Harvester.bat
 ```
 
-The launchers create `.venv` if needed, install `.[app]`, check that `codex` is on `PATH`,
+The launchers create `.venv` if needed, bootstrap `pip` inside it when necessary, install `.[app]`,
+check that `codex` is on `PATH`,
 start the local server, and open:
 
 ```text
@@ -95,6 +96,25 @@ cancellation. Cancel Run stops active Codex harvest subprocesses launched by the
 session. Exit Application cancels active harvest children and shuts down this local app server; it
 does not kill unrelated Python or Codex processes elsewhere on the machine.
 
+Before single, batch, and campaign harvests, a minimal Geographer Agent reviews the requested
+country, locality or localities, and facility scope for vernacular changes that may improve
+discovery. Campaigns run this preflight once and share its guidance across every child harvest. It
+can add useful
+search languages, administrative terms, local police/fire/regulator names, facility terms, and
+short query adjustments. It does not harvest observations, create a nationwide plan, or weaken
+the evidence rules. If its output fails, the harvest continues with the existing deterministic
+country and facility vocabulary.
+
+The app keeps the raw Agent Activity log and also shows an Agent Dialogue panel. The dialogue is
+an append-only, colleague-style summary from the geographer, harvester, QAQC, and address agents:
+what each stage found, what it did, and a concise decision rationale. It intentionally reports
+operational findings rather than hidden model chain-of-thought.
+
+Campaign child jobs run as independent Harvester Agents with bounded concurrency: up to three jobs
+are active at once by default, while additional locality and facility jobs remain queued. Child
+artifacts stay isolated, and the Campaign Coordinator restores the original deterministic job order
+when consolidating the manifest.
+
 The Recent Runs panel can reopen completed runs. **Clear All** removes generated harvest history
 from `harvest_runs/`, `harvest_logs/`, `lead_runs/`, `qaqc_runs/`, and generated `work/` prompts.
 It also removes generated address-enrichment outputs from `address_runs/`, sample manifests from
@@ -117,13 +137,18 @@ recommends locality-adjusted gap-fill jobs. **Run Gap Fill** launches those targ
 harvests into the same sample set. **Run QAQC Missing** and **Run Address Missing** process only
 new child runs that do not already have those review outputs.
 
+Gap-fill recommendations also run as bounded parallel job teams. Each targeted locality and
+facility job receives its own minimal Geographer review before its Harvester Agent starts, and the
+Gap-Fill Coordinator adds completed jobs to the sample round in recommendation order.
+
 Use **Geometry Review** after QAQC, ideally after address enrichment. **Load Approved** shows only
 observations where QAQC returned `verification_status: verified` and `recommended_action: keep`.
-Select an observation, geocode its enriched address or harvested facility/address into a point,
-manually search an address when needed, adjust the point, draw or edit one building footprint
-polygon on the Leaflet map, and save the footprint. Geometry review files are durable user work and
-are not removed by Clear All. Verified downloads in the app are QAQC-gated, and footprint GeoJSON
-includes only approved observations with saved polygons.
+Use **Geocode All** to attempt every loaded observation that is missing a point and has an address
+query; the app reports successful, not-found, error, already-positioned, and missing-query counts.
+Select an observation to manually search an address when needed, adjust its point, draw or edit one
+building footprint polygon on the Leaflet map, and save the footprint. Geometry review files are
+durable user work and are not removed by Clear All. Verified downloads in the app are QAQC-gated,
+and footprint GeoJSON includes only approved observations with saved polygons.
 
 ## Codex Subscription Workflow
 
@@ -184,6 +209,39 @@ and `restaurants`, with subtypes such as `primary_secondary_education`, `univers
 `light_manufacturing`, `heavy_manufacturing`, `full_service_restaurants`,
 `quick_service_restaurants`, and `bars_nightlife`. Legacy profile sets such as
 `commercial_business`, `public_venues`, and `residential` remain available for compatibility.
+
+## Evidence Strategies
+
+Facility type and evidence strategy are separate concepts. When the application creates a work
+item or direct harvest run, its strategy planner attaches an ordered, reasoned `strategy_plan`.
+The downstream lead agent receives that plan and records which strategy produced each lead.
+
+The built-in strategies are:
+
+- `incident_evacuation`
+- `enforcement_inspection`
+- `official_event_attendance`
+- `routine_dated_attendance`
+- `shift_operational_presence`
+- `legal_investigative_records`
+- `temporary_use_occupancy`
+- `research_measured_occupancy`
+
+Strategy selection is facility-aware. Manufacturing jobs prioritize incidents, shift presence,
+and investigative records. Restaurant jobs prioritize enforcement and incident evidence. School
+jobs add routine and official-event attendance. `temporary_use_occupancy` is recommended only
+when the selected subtype includes intermittently occupied arenas, halls, theaters, event venues,
+or shelters; it is not a generic fallback for every facility.
+
+Each strategy defines an objective, query templates, preferred source types, accepted count
+semantics, negative traps, and a default representativeness label. Lead output can store
+`strategy_id`, `count_semantics`, and `representativeness`. QAQC checks whether the source supports
+the claimed strategy and count meaning, so ticket sales cannot silently become attendance and
+scheduled staffing cannot silently become physical presence.
+
+The strategy planner is deterministic and versioned today. This keeps job construction
+reproducible while providing a typed contract that a future orchestration agent can propose or
+revise without bypassing application validation.
 
 The CLI still accepts `--profiles` and `--profile`, but new usage can read more naturally as
 `--facility-type` and `--subtype`. For example, `--facility-type manufacturing --country PH`
@@ -318,7 +376,7 @@ In the local browser app, geometry review can turn verified and optionally addre
 into footprint exports:
 
 ```text
-Run QAQC -> Run Address Enrichment -> Load Approved -> Geocode/Search Address -> adjust point -> draw footprint -> Save Footprint
+Run QAQC -> Run Address Enrichment -> Load Approved -> Geocode All -> review misses -> adjust point -> draw footprint -> Save Footprint
 ```
 
 The app uses user-triggered Nominatim geocoding with a local cache under `geocode_cache/`, and a

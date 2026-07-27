@@ -36,6 +36,27 @@ def address_results_to_json(results: tuple[AddressEnrichmentResult, ...]) -> str
     return json.dumps([result.model_dump(mode="json") for result in results], indent=2)
 
 
+def upsert_address_result(
+    root: Path,
+    child_run_id: str,
+    result: AddressEnrichmentResult,
+) -> tuple[AddressEnrichmentResult, ...]:
+    path = address_output_path(root, child_run_id)
+    existing = list(load_address_results(path)) if path.is_file() else []
+    by_item_id = {item.item_id: index for index, item in enumerate(existing)}
+    index = by_item_id.get(result.item_id)
+    if index is None:
+        existing.append(result)
+    else:
+        existing[index] = result
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        address_results_to_json(tuple(existing)),
+        encoding="utf-8",
+    )
+    return tuple(existing)
+
+
 def approved_address_inputs(
     *,
     root: Path,
@@ -103,10 +124,16 @@ For each input record:
 - Start with the original `source_url` when it is usable.
 - If the source does not provide a precise address, search official facility pages, government
   directories, school/company pages, reputable business directories, or trusted news context.
+- Prefer first-party facility or employer pages and government property, permit, regulator, or
+  licensing records over chambers of commerce and general business directories.
+- Corroborate directory addresses against an independent source whenever possible. Pay special
+  attention to street-name ordering, aliases, entrances, campus names, and postal codes.
 - Confirm the address belongs to the same facility, city/region, and country as the lead.
 - Prefer a specific street/campus/site address over a broad city, district, or province.
 - Capture a short exact supporting quote or address snippet when found.
 - Do not invent an address. If multiple plausible addresses exist, mark the result `ambiguous`.
+- Use `high` confidence only when an official source supports the address or two independent
+  reliable sources agree.
 
 ## Status Rules
 
@@ -140,6 +167,68 @@ exact schema:
     "confidence": "high",
     "status": "found",
     "review_notes": "String"
+  }}
+]
+
+## Input Records
+
+{payload}
+"""
+
+
+def render_address_correction_prompt(
+    record: dict[str, Any],
+    *,
+    current_address: dict[str, Any] | None,
+    spatial_feedback: dict[str, object],
+) -> str:
+    retry_record = {
+        **record,
+        "current_address_enrichment": current_address,
+        "geocoder_feedback": spatial_feedback,
+    }
+    payload = json.dumps([retry_record], indent=2)
+    return f"""# Facility Address Enrichment - Spatial Correction
+
+You are correcting one facility address after an independent geocoder could not confirm the
+previous result. Return address review JSON only.
+
+## Correction Tasks
+
+- Treat the failed address as a hypothesis, not as established fact.
+- Read the geocoder attempts and failure reasons supplied with the record.
+- Search for alternate street-name ordering, facility aliases, entrances, campuses, and site
+  addresses.
+- Prefer the facility owner's official site, official employment pages, government property or
+  permitting records, and regulator records over general business directories.
+- When possible, corroborate the corrected address with a second independent source.
+- Confirm that the address belongs to the exact facility rather than a corporate office,
+  distributor, similarly named organization, or city centroid.
+- If reliable sources disagree, return `ambiguous`; never force a corrected address.
+- Preserve the supplied `lead_index` and `item_id`.
+
+## Output Format
+
+Return strictly one JSON array containing one object with the standard Facility Address
+Enrichment schema:
+
+[
+  {{
+    "lead_index": 0,
+    "item_id": "child-run-id-0",
+    "facility_name": "String",
+    "formatted_address": "String or null",
+    "address_line1": "String or null",
+    "address_line2": "String or null",
+    "city_or_region": "String or null",
+    "state_or_province": "String or null",
+    "postal_code": "String or null",
+    "country": "String or null",
+    "address_source_url": "String or null",
+    "address_evidence_quote": "Exact quote or null",
+    "confidence": "high",
+    "status": "found",
+    "review_notes": "Explain what changed and how the geocoder feedback was resolved."
   }}
 ]
 

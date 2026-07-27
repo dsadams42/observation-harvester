@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import threading
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -103,6 +104,15 @@ def test_run_harvest_writes_prompt_leads_and_completed_manifest(tmp_path: Path) 
     assert manifest.validation_valid is True
     assert manifest.summary is not None
     assert manifest.summary["lead_count"] == 1
+    assert manifest.strategy_plan is not None
+    assert [
+        recommendation.strategy_id.value
+        for recommendation in manifest.strategy_plan.recommendations
+    ][:3] == [
+        "incident_evacuation",
+        "enforcement_inspection",
+        "shift_operational_presence",
+    ]
     assert Path(manifest.prompt_path).is_file()
     assert Path(manifest.lead_path).is_file()
     assert manifest.log_path is not None
@@ -111,6 +121,7 @@ def test_run_harvest_writes_prompt_leads_and_completed_manifest(tmp_path: Path) 
     saved = json.loads((tmp_path / "harvest_runs/us-tn-factories.json").read_text())
     assert saved["codex_command"][0] == "codex-test"
     assert saved["profile_id"] == "factories_warehouses"
+    assert saved["strategy_plan"]["planner"] == "deterministic_strategy_planner_v1"
 
 
 def test_run_harvest_failed_codex_run_writes_failed_manifest(tmp_path: Path) -> None:
@@ -231,6 +242,37 @@ def test_run_harvest_campaign_runs_each_locality_facility_pair(tmp_path: Path) -
         "us-south-campaign-kentucky-schools",
         "us-south-campaign-kentucky-manufacturing",
         "us-south-campaign-kentucky-restaurants",
+    )
+
+
+def test_run_harvest_campaign_executes_child_agents_concurrently(tmp_path: Path) -> None:
+    rendezvous = threading.Barrier(2)
+
+    def concurrent_runner(
+        command: Sequence[str],
+        prompt: str,
+        cwd: Path,
+    ) -> subprocess.CompletedProcess[str]:
+        rendezvous.wait(timeout=2)
+        output_path = Path(command[command.index("-o") + 1])
+        output_path.write_text(json.dumps(LEAD_PAYLOAD), encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    manifest = run_harvest_campaign(
+        root=tmp_path,
+        country="US",
+        localities=("Tennessee",),
+        facility_types=("schools", "manufacturing"),
+        target=2,
+        campaign_id="us-tn-parallel-campaign",
+        runner=concurrent_runner,
+        max_concurrent_jobs=2,
+    )
+
+    assert manifest.status == HarvestRunStatus.COMPLETED
+    assert manifest.child_run_ids == (
+        "us-tn-parallel-campaign-tennessee-schools",
+        "us-tn-parallel-campaign-tennessee-manufacturing",
     )
 
 

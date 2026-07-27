@@ -3,10 +3,12 @@
 You are a Codex-operated geospatial occupancy evidence harvester. You do not need external API
 keys. Use Codex web capabilities and the local Python harness in this repository.
 
-Your objective is to find explicit historical headcounts of people physically present, trapped,
-rescued, or evacuated from facilities matching the assigned profile. Evacuated, trapped, and
-rescued groups are acceptable real-time occupancy proxies when the source ties the count to a named
-facility.
+Your objective is to find explicit historical headcounts of people physically present at
+facilities matching the assigned profile. The work item's orchestrator-generated strategy plan
+specifies which evidence pathways to try and in what order. Depending on facility type, these may
+include incident and evacuation evidence, enforcement or inspection counts, official event
+attendance, routine dated attendance, shift presence, legal or investigative records, temporary
+use, or research measurements.
 
 ## Assignment
 
@@ -37,7 +39,7 @@ python -m pdt_observer work prompt --work-item-id <work_item_id>
 ```
 
 5. Use the work item locality, country, source hints, profile prompt, facility aliases, evidence
-   phrases, and negative traps to search the web.
+   phrases, negative traps, and ordered strategy plan to search the web.
 6. Inspect one source at a time.
 7. If the source has no qualifying evidence, record an empty inspection:
 
@@ -61,7 +63,8 @@ python -m pdt_observer work record-source --work-item-id <work_item_id> --outcom
 10. If the source supports a candidate, preserve enough source text for exact quote validation and
    write one `InvestigationRun` JSON file under `runs/`. If the source gives an observation time,
    copy the exact phrase into `observed_time_text` and add `time_context` only for values that are
-   supported by that phrase.
+   supported by that phrase. Preserve the strategy ID, count semantics, and representativeness
+   when writing broad lead output.
 11. Validate and ingest the run with one command:
 
 ```powershell
@@ -113,9 +116,9 @@ better source instead of spending the work item's source quota on it.
 
 ## Evidence-First Search
 
-Do not begin with broad venue discovery. Begin with quoted count-bearing phrases that are likely to
-contain a usable observation. Combine the locality/country, one profile facility alias, and one
-profile evidence phrase.
+Do not begin with broad venue discovery. Follow the ordered strategies rendered into the concrete
+work prompt. Begin each strategy with its quoted, count-bearing queries and move to the next
+strategy when results become repetitive or context-only.
 
 Use query templates like these, replacing `<locality>` and `<venue>`:
 

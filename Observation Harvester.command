@@ -35,6 +35,11 @@ fi
 
 source .venv/bin/activate
 
+if ! python -m pip --version >/dev/null 2>&1; then
+  echo "Bootstrapping pip in the local virtual environment..."
+  python -m ensurepip --upgrade
+fi
+
 echo "Installing/updating local app dependencies..."
 python -m pip install -e ".[app]"
 

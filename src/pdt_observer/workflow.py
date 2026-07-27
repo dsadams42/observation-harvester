@@ -25,6 +25,7 @@ from pdt_observer.models import (
     WorkStatusReport,
 )
 from pdt_observer.profiles import get_profile_set
+from pdt_observer.strategies import build_strategy_plan
 from pdt_observer.validation import ValidationReport, validate_run
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
@@ -131,6 +132,10 @@ def create_batch(
                 country=country,
                 profile_id=profile.profile_id,
                 source_hints=source_hints,
+                strategy_plan=build_strategy_plan(
+                    profile_set,
+                    profile_id=profile.profile_id,
+                ),
                 quota=resolved_quota.model_copy(),
                 created_at=now,
                 updated_at=now,

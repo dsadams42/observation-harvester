@@ -7,10 +7,12 @@ from pathlib import Path
 
 from pydantic import TypeAdapter
 
+from pdt_observer.geographer import geographer_prompt_guidance
 from pdt_observer.models import (
     BuildingProfileSet,
     CandidateObservation,
     Evidence,
+    GeographerPlan,
     InvestigationResult,
     InvestigationRun,
     InvestigationTask,
@@ -23,6 +25,11 @@ from pdt_observer.models import (
 )
 from pdt_observer.profiles import get_profile_set, narrow_profile_set
 from pdt_observer.prompting import country_search_context
+from pdt_observer.strategies import (
+    build_strategy_plan,
+    get_strategy,
+    render_strategy_queries,
+)
 from pdt_observer.workflow import slugify
 
 LEAD_LIST_ADAPTER: TypeAdapter[tuple[OccupancyLead, ...]] = TypeAdapter(
@@ -58,6 +65,10 @@ def summarize_leads(leads: tuple[OccupancyLead, ...]) -> dict[str, object]:
     cities = sorted({lead.location.city_or_region for lead in valid})
     facility_level_count = sum(1 for lead in valid if lead.is_facility_level is True)
     aggregate_count = sum(1 for lead in valid if lead.is_regional_aggregate is True)
+    counts_by_strategy: dict[str, int] = {}
+    for lead in valid:
+        strategy_id = lead.strategy_id.value if lead.strategy_id is not None else "unattributed"
+        counts_by_strategy[strategy_id] = counts_by_strategy.get(strategy_id, 0) + 1
     return {
         "lead_count": len(leads),
         "valid_occupancy_reports": len(valid),
@@ -66,6 +77,7 @@ def summarize_leads(leads: tuple[OccupancyLead, ...]) -> dict[str, object]:
         "cities_or_regions": cities,
         "facility_level_count": facility_level_count,
         "regional_aggregate_count": aggregate_count,
+        "counts_by_strategy": counts_by_strategy,
     }
 
 
@@ -94,6 +106,9 @@ def leads_to_csv(leads: tuple[OccupancyLead, ...]) -> str:
         "is_regional_aggregate",
         "review_flags",
         "review_notes",
+        "strategy_id",
+        "count_semantics",
+        "representativeness",
     )
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=fieldnames)
@@ -124,6 +139,9 @@ def leads_to_csv(leads: tuple[OccupancyLead, ...]) -> str:
                     ),
                     "review_flags": ";".join(lead.review_flags),
                     "review_notes": lead.review_notes or "",
+                    "strategy_id": lead.strategy_id.value if lead.strategy_id is not None else "",
+                    "count_semantics": lead.count_semantics or "",
+                    "representativeness": lead.representativeness or "",
                 }
             )
     return output.getvalue()
@@ -193,7 +211,13 @@ def promote_lead_to_run(
             observation_type=ObservationType.PEOPLE_PRESENT,
         ),
         source_bundle=SourceBundle(documents=documents, places=()),
-        candidate=CandidateObservation(result=result, produced_by="lead-promotion"),
+        candidate=CandidateObservation(
+            result=result,
+            produced_by="lead-promotion",
+            strategy_id=lead.strategy_id,
+            count_semantics=lead.count_semantics,
+            representativeness=lead.representativeness,
+        ),
     )
 
 
@@ -201,8 +225,14 @@ def render_lead_qaqc_prompt(
     leads: tuple[OccupancyLead, ...],
     *,
     source_label: str = "lead JSON",
+    expected_country: str | None = None,
+    expected_locality: str | None = None,
 ) -> str:
     lead_payload = json.dumps([lead.model_dump(mode="json") for lead in leads], indent=2)
+    scope_text = (
+        f"\nRequested geographic scope: country `{expected_country or 'unspecified'}`; "
+        f"locality `{expected_locality or 'unspecified'}`.\n"
+    )
     return f"""# Occupancy Lead QAQC Verification
 
 You are a careful QAQC verification agent for harvested occupancy leads. Your job is to inspect
@@ -210,6 +240,7 @@ the source URL for each lead, verify whether the source supports the reported oc
 and return review JSON only.
 
 Input source: {source_label}
+{scope_text}
 
 ## Verification Tasks
 
@@ -219,7 +250,17 @@ For each lead in the input array:
 - Search within the page/source text for each reported `occupancy_data[].count`.
 - Confirm whether the count is tied to the reported facility and incident, not merely a capacity,
   enrollment, workforce size, regional disaster total, or unrelated statistic.
+- Check whether the source supports the lead's `strategy_id` and `count_semantics`. For example,
+  tickets sold do not prove event attendance, scheduled workers do not prove on-shift presence,
+  and entries accumulated over a day do not prove simultaneous occupancy.
+- Set `strategy_match` to true only when the source supports that evidence pathway and count
+  meaning. Use null when an older lead has no strategy attribution.
 - Confirm whether the facility name and city/region/country match the harvested lead.
+- Enforce the requested geographic scope as a hard acceptance boundary. If the facility is
+  outside the requested country or locality, set `location_match` to false, do not use `keep`,
+  and reject the lead even when its source and occupancy count are otherwise valid. Regional
+  locality descriptions may name a subregion, but they never authorize crossing the enclosing
+  state, province, or country boundary.
 - Capture an exact supporting quote when the source text supports the count. Keep quotes short
   and limited to the sentence or phrase needed to support the count.
 - Do not invent support. If the source does not clearly support the lead, mark it for review or
@@ -254,6 +295,7 @@ exact schema:
     "source_reachable": true,
     "facility_match": true,
     "location_match": true,
+    "strategy_match": true,
     "count_checks": [
       {{
         "count": 0,
@@ -335,10 +377,12 @@ def render_lead_harvest_prompt(
     target: int,
     locality: str | None = None,
     profile_id: str | None = None,
+    geographer_plan: GeographerPlan | None = None,
 ) -> str:
     profile_set = get_profile_set(profile_set_name)
     if profile_id is not None:
         profile_set = narrow_profile_set(profile_set, profile_id)
+    strategy_plan = build_strategy_plan(profile_set, profile_id=profile_id)
     country_context = country_search_context(country)
     country_name = country_context["name"]
     locality_scope = (
@@ -354,6 +398,28 @@ def render_lead_harvest_prompt(
     preferred_sources = _unique_profile_values(profile_set, "preferred_source_types")
     context_only_sources = _unique_profile_values(profile_set, "context_only_source_types")
     scope_guidance = _profile_scope_guidance(profile_set)
+    strategy_sections: list[str] = []
+    for recommendation in strategy_plan.recommendations:
+        strategy = get_strategy(recommendation.strategy_id)
+        strategy_sections.append(
+            f"### {recommendation.priority}. {strategy.label} "
+            f"(`{strategy.strategy_id.value}`)\n\n"
+            f"{recommendation.reason}\n\n"
+            f"Objective: {strategy.objective}\n\n"
+            f"Accepted count semantics: {', '.join(strategy.accepted_count_semantics)}.\n\n"
+            f"Important traps:\n{_bullet_list(strategy.negative_traps)}"
+        )
+    strategy_guidance = "\n\n".join(strategy_sections)
+    strategy_queries = _bullet_list(
+        render_strategy_queries(
+            strategy_plan,
+            locality=locality or country_name,
+            country=country_name if locality is not None else None,
+            aliases=aliases,
+            positive_phrases=positive_patterns,
+        )
+    )
+    vernacular_guidance = geographer_prompt_guidance(geographer_plan)
 
     return f"""# Broad Occupancy Lead Harvest
 
@@ -395,6 +461,21 @@ workers, guests, shoppers, or people based on context. Evacuated residents, trap
 displaced families, rescued guests, and similar incident-tied groups are acceptable occupancy
 proxies.
 
+## Orchestrator Strategy Plan
+
+The job-building orchestrator recommends these ordered evidence strategies. Start with the
+highest-priority strategy and move down when searches become repetitive or unproductive. These
+recommendations are facility-aware: temporary-use occupancy is included only when the selected
+scope contains intermittently occupied arenas, halls, theaters, event venues, or shelters.
+
+{strategy_guidance}
+
+Suggested strategy-aware searches:
+
+{strategy_queries}
+
+{vernacular_guidance}
+
 Do not discard a lead because minor metadata is missing. Use "Unknown" or "Not provided" for
 missing metadata, and add a short `review_notes` value when the lead needs human review.
 
@@ -425,6 +506,10 @@ exact schema. Use raw URLs, not Markdown links, in `source_url`.
 
 Set `source_type` to one of: news, official, wire, encyclopedia, social, directory, unknown.
 Set `confidence` to one of: high, medium, low, unknown.
+Set `strategy_id` to the strategy that produced the lead. Set `count_semantics` to a concise value
+such as `confirmed_inside`, `evacuated`, `counted_inside`, `attended`, `on_shift`, or
+`sensor_measured`. Set `representativeness` to a concise value such as `incident_specific`,
+`event_specific`, `routine_period`, `operational_period`, `temporary_use`, or `unknown`.
 Set `is_facility_level` to true only when the count is tied to a specific facility or named
 residential place. Set `is_regional_aggregate` to true for broad city/province/region/country
 disaster totals. Add short machine-readable `review_flags` such as "missing_quote",
@@ -455,7 +540,10 @@ disaster totals. Add short machine-readable `review_flags` such as "missing_quot
     "is_facility_level": true,
     "is_regional_aggregate": false,
     "review_flags": ["String"],
-    "review_notes": "String or null"
+    "review_notes": "String or null",
+    "strategy_id": "One orchestrator-recommended strategy ID",
+    "count_semantics": "String or null",
+    "representativeness": "String or null"
   }}
 ]
 """

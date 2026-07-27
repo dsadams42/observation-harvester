@@ -41,6 +41,13 @@ def test_create_batch_writes_public_venue_work_items(tmp_path: Path) -> None:
     assert len(items) == 5
     assert all(item.status == WorkStatus.OPEN for item in items)
     assert all(item.quota.target_accepted_count == 5 for item in items)
+    assert all(item.strategy_plan is not None for item in items)
+    retail_events = next(item for item in items if item.profile_id == "retail_events")
+    assert retail_events.strategy_plan is not None
+    assert any(
+        recommendation.strategy_id.value == "temporary_use_occupancy"
+        for recommendation in retail_events.strategy_plan.recommendations
+    )
 
 
 def test_create_batch_applies_custom_quota(tmp_path: Path) -> None:

@@ -1,222 +1,118 @@
-# PDT Observation Harvester
+# OASIS
 
-This repository is a small proof of concept for harvesting Population Density Table
-observations. The default workflow is designed for Codex / ChatGPT subscription usage:
-Codex performs a prompted or scheduled investigation, writes a local JSON candidate, and this
-Python package validates the candidate deterministically.
+<img
+  src="src/pdt_observer/static/oasis-logo.jpg"
+  alt="OASIS logo"
+  width="180"
+>
 
-The app can still run an optional OpenAI Agents SDK path, but that is no longer the default.
+**Observation Acquisition and Spatial Information Synthesis**
 
-## What Decides What
+OASIS is a local human-AI workbench for finding, reviewing, geocoding, and spatially
+enriching public-web observations of people at facilities. It was created to support
+Population Density Table (PDT) research, where a defensible observation needs more than
+a facility name or stated capacity: it needs source-backed evidence that a particular
+number of people were present at a real place.
 
-- Codex decides how to investigate when you run a prompted chat or scheduled Codex automation.
-- The JSON run artifact records the task, source bundle, geocoder bundle, and proposed result.
-- Python application code validates exact quotes, counts, document IDs, source URLs, place IDs,
-  coordinates, locality, country, and time-context consistency when time context is present.
-- The model output is only a proposal; accepted observations must pass deterministic validation.
+The application combines several bounded AI research stages with deterministic Python
+validation and explicit human review. It is not a general autonomous web crawler, and
+model output is never treated as accepted data merely because a model produced it.
 
-During one run, state exists as a task, source documents, place records, a candidate result, and a
-validation report. Offline tests do not call an LLM because they prove the local harness without
-network access, cost, or non-determinism.
+> Project status: active proof of concept. The complete local workflow is operational
+> from harvest through QAQC, address enrichment, geocoding, coverage review, manual
+> coordinate resolution, footprint digitization, and verified export. The system is
+> ready for structured pilot work, but not yet a hosted multi-user data service or an
+> unattended nationwide runner.
 
-## Install
+## What OASIS Does
 
-Use Python 3.12 or newer.
+OASIS currently supports:
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\python -m pip install -e ".[dev]"
-```
+- Single facility-type harvests, subtype batches, and multi-locality campaigns.
+- A Geographer Agent that adapts search terminology to local language, administrative
+  structure, agency names, and facility vernacular.
+- Facility-aware evidence strategies rather than one incident-only search pattern.
+- Parallel campaign and gap-fill jobs with one Harvester Agent per job and bounded
+  concurrency.
+- Source-by-source QAQC of quotations, counts, facility identity, dates, and geographic
+  scope.
+- Address enrichment followed by Nominatim geocoding and spatial extent validation.
+- Human coordinate resolution using focused research, ranked candidates, Google Search
+  and Google Maps links, map placement, or pasted coordinates/Google Maps URLs.
+- Coverage analysis and reviewer-approved gap-fill campaigns.
+- Footprint digitization, geometry storage, and planar building-area calculation.
+- QAQC-gated JSON, CSV, and footprint GeoJSON exports.
+- A persistent, downloadable pipeline transcript written as concise colleague-style
+  agent reports rather than hidden chain-of-thought.
 
-For the optional API-backed agent command, install:
+The built-in PDT facility families are `schools`, `manufacturing`, and `restaurants`.
+Each family includes more specific subtypes. Older profile families remain available
+for compatibility.
 
-```powershell
-.\.venv\Scripts\python -m pip install -e ".[api-agent,dev]"
-```
-
-For the local browser app, install:
-
-```powershell
-.\.venv\Scripts\python -m pip install -e ".[app]"
-```
-
-Copy `.env.example` only if you want to run the optional API mode. Do not store a real key in
-source control.
-
-## Local Browser App
-
-The local app gives a browser-based workflow without a hosted backend or app-owned API key. It
-runs on your machine and uses your locally authenticated Codex CLI session.
-
-One-time requirements:
-
-- Python 3.12 or newer
-- Codex CLI installed and authenticated
-- This repository cloned locally
-
-On macOS, double-click:
+## Human-AI Workflow
 
 ```text
-Observation Harvester.command
+Country, locality, facility scope, and target
+                       |
+                       v
+               Geographer review
+                       |
+                       v
+          Strategy-guided lead harvest
+                       |
+                       v
+          Evidence and location QAQC
+                       |
+                       v
+              Address enrichment
+                       |
+                       v
+     Geocoding + geographic-scope validation
+                       |
+                       v
+       Sample creation + coverage analysis
+                       |
+                 human decision
+                  /           \
+          accept coverage    run gap fill
+                                  |
+                                  v
+                         QAQC/enrich new leads
+                       |
+                       v
+     Human coordinate and footprint review
+                       |
+                       v
+              Verified data exports
 ```
 
-On Windows, double-click:
+The **Run Full Pipeline** button performs the first harvest, QAQC, address enrichment,
+automated geocoding, sample creation, and coverage analysis. It deliberately pauses
+before gap fill so a person can inspect the coverage recommendations before creating
+more research jobs.
 
-```text
-Observation Harvester.bat
-```
+## How Decisions Are Divided
 
-The launchers create `.venv` if needed, bootstrap `pip` inside it when necessary, install `.[app]`,
-check that `codex` is on `PATH`,
-start the local server, and open:
+- The **Geographer Agent** proposes search-language and vernacular adjustments for the
+  requested geography and facility scope.
+- The deterministic **strategy planner** assigns an ordered set of evidence strategies
+  to each job.
+- **Harvester Agents** use web research to propose source-backed observations.
+- **QAQC Agents** independently revisit the evidence and recommend keep, review, reject,
+  or retry.
+- **Address Agents** research precise facility addresses for approved observations.
+- Python validates schemas, exact quotations, counts, identifiers, URLs, locality,
+  country, coordinates, and spatial scope.
+- Human reviewers resolve ambiguous coordinates, approve gap-fill work, and digitize
+  footprints.
 
-```text
-http://127.0.0.1:8771
-```
-
-Manual fallback:
-
-```powershell
-python -m pip install -e ".[app]"
-python -m pdt_observer app
-```
-
-The first screen is the tool itself: enter a country, optional region/locality, facility type,
-optional subtype, and target count. The app writes the same runtime artifacts as the CLI:
-`work/`, `lead_runs/`, `harvest_runs/`, `harvest_logs/`, `qaqc_runs/`, `address_runs/`,
-`sample_sets/`, `coverage_runs/`, `geometry_reviews/`, `geocode_cache/`, `exports/`, and `runs/`.
-Results are displayed as copyable JSON, with QAQC-gated CSV/JSON export buttons.
-
-The header includes a Light/Dark/System theme selector. The preference is stored in the browser
-only, so it does not change project files or app configuration.
-
-The app includes an Agent Activity panel while a harvest runs. It polls the run manifest and log
-file so the user can see prompt rendering, Codex launch, validation, completion, failure, or
-cancellation. Cancel Run stops active Codex harvest subprocesses launched by the current app
-session. Exit Application cancels active harvest children and shuts down this local app server; it
-does not kill unrelated Python or Codex processes elsewhere on the machine.
-
-Before single, batch, and campaign harvests, a minimal Geographer Agent reviews the requested
-country, locality or localities, and facility scope for vernacular changes that may improve
-discovery. Campaigns run this preflight once and share its guidance across every child harvest. It
-can add useful
-search languages, administrative terms, local police/fire/regulator names, facility terms, and
-short query adjustments. It does not harvest observations, create a nationwide plan, or weaken
-the evidence rules. If its output fails, the harvest continues with the existing deterministic
-country and facility vocabulary.
-
-The app keeps the raw Agent Activity log and also shows an Agent Dialogue panel. The dialogue is
-an append-only, colleague-style summary from the geographer, harvester, QAQC, and address agents:
-what each stage found, what it did, and a concise decision rationale. It intentionally reports
-operational findings rather than hidden model chain-of-thought.
-
-Campaign child jobs run as independent Harvester Agents with bounded concurrency: up to three jobs
-are active at once by default, while additional locality and facility jobs remain queued. Child
-artifacts stay isolated, and the Campaign Coordinator restores the original deterministic job order
-when consolidating the manifest.
-
-The Recent Runs panel can reopen completed runs. **Clear All** removes generated harvest history
-from `harvest_runs/`, `harvest_logs/`, `lead_runs/`, `qaqc_runs/`, and generated `work/` prompts.
-It also removes generated address-enrichment outputs from `address_runs/`, sample manifests from
-`sample_sets/`, and coverage reviews from `coverage_runs/`. It does not delete promoted
-observations in `runs/`, exported files in `exports/`, profiles, geometry reviews, or source code.
-The app refuses to clear history while it is tracking an active Codex harvest, QAQC,
-address-enrichment, coverage, or gap-fill process.
-
-Use **Run QAQC** after selecting a completed run. For a single child run, the app launches one
-Codex verifier agent. For a batch or campaign parent, it launches one verifier agent per child
-facility-type run and displays the combined QAQC review JSON when the pass finishes.
-
-Use **Run Address Enrichment** after QAQC when you want a second agent to search for precise
-facility addresses before mapping. For batch or campaign parents, the app launches one address
-agent per child facility-type run and stores results separately under `address_runs/`.
-
-Use **Create Sample Set** after an initial run, batch, or campaign when you want to build an
-augmented collection. **Analyze Coverage** runs a steering agent over verified/geocoded records and
-recommends locality-adjusted gap-fill jobs. **Run Gap Fill** launches those targeted child
-harvests into the same sample set. **Run QAQC Missing** and **Run Address Missing** process only
-new child runs that do not already have those review outputs.
-
-Gap-fill recommendations also run as bounded parallel job teams. Each targeted locality and
-facility job receives its own minimal Geographer review before its Harvester Agent starts, and the
-Gap-Fill Coordinator adds completed jobs to the sample round in recommendation order.
-
-Use **Geometry Review** after QAQC, ideally after address enrichment. **Load Approved** shows only
-observations where QAQC returned `verification_status: verified` and `recommended_action: keep`.
-Use **Geocode All** to attempt every loaded observation that is missing a point and has an address
-query; the app reports successful, not-found, error, already-positioned, and missing-query counts.
-Select an observation to manually search an address when needed, adjust its point, draw or edit one
-building footprint polygon on the Leaflet map, and save the footprint. Geometry review files are
-durable user work and are not removed by Clear All. Verified downloads in the app are QAQC-gated,
-and footprint GeoJSON includes only approved observations with saved polygons.
-
-## Codex Subscription Workflow
-
-Use one of the prompts in `prompts/` from a Codex chat or automation. For multi-agent harvesting,
-start with `prompts/building_type_agent.md` and a facility-type definition such as
-`profiles/schools.json`, `profiles/manufacturing.json`, or `profiles/restaurants.json`.
-
-Create a local batch of subtype-specific work items:
-
-```powershell
-python -m pdt_observer batch create --locality Tennessee --country US --facility-type schools
-```
-
-Each Codex agent claims work for one subtype:
-
-```powershell
-python -m pdt_observer work claim --profile primary_secondary_education --claimed-by codex-schools
-```
-
-Render a subtype-specific working prompt for the claimed item:
-
-```powershell
-python -m pdt_observer work prompt --work-item-id <work_item_id>
-```
-
-For country pilots, claims can be narrowed to a locality or exact work item:
-
-```powershell
-python -m pdt_observer work claim --profile light_manufacturing --locality Manila --country PH --claimed-by codex-manufacturing
-python -m pdt_observer work claim --work-item-id ph-manila-pilot-001-light_manufacturing --claimed-by codex-manufacturing
-```
-
-Claiming is protected by a local file-backed lock so two agents do not intentionally receive the
-same open work item during normal file-backed operation.
-
-Each work item has quotas and progress counters. Check whether to continue:
-
-```powershell
-python -m pdt_observer work status --work-item-id <work_item_id>
-```
-
-The agent performs web discovery using Codex web capabilities, inspects one source at a time, and
-records progress:
-
-```powershell
-python -m pdt_observer work record-source --work-item-id <work_item_id> --outcome empty
-python -m pdt_observer work record-source --work-item-id <work_item_id> --outcome failed
-python -m pdt_observer work record-source --work-item-id <work_item_id> --outcome examined
-```
-
-The building-type agent prompt uses evidence-first quoted searches such as
-`"<locality>" "people were inside" <venue>`, `"<locality>" "customers were evacuated" <venue>`,
-and `"<locality>" "inside the <venue> when"` before broad venue discovery.
-
-Facility types are the top-level PDT observation families. Subtypes tune search and extraction
-inside a family. The built-in PDT-oriented facility types are currently `schools`, `manufacturing`,
-and `restaurants`, with subtypes such as `primary_secondary_education`, `university_college`,
-`light_manufacturing`, `heavy_manufacturing`, `full_service_restaurants`,
-`quick_service_restaurants`, and `bars_nightlife`. Legacy profile sets such as
-`commercial_business`, `public_venues`, and `residential` remain available for compatibility.
+This is an agentic workflow, but a bounded one. Agents research and propose; deterministic
+checks and human decisions control what becomes usable output.
 
 ## Evidence Strategies
 
-Facility type and evidence strategy are separate concepts. When the application creates a work
-item or direct harvest run, its strategy planner attaches an ordered, reasoned `strategy_plan`.
-The downstream lead agent receives that plan and records which strategy produced each lead.
-
-The built-in strategies are:
+Facility type and evidence strategy are separate concepts. A job may receive several
+ordered strategies and the Harvester Agent can use more than one when useful:
 
 - `incident_evacuation`
 - `enforcement_inspection`
@@ -227,392 +123,244 @@ The built-in strategies are:
 - `temporary_use_occupancy`
 - `research_measured_occupancy`
 
-Strategy selection is facility-aware. Manufacturing jobs prioritize incidents, shift presence,
-and investigative records. Restaurant jobs prioritize enforcement and incident evidence. School
-jobs add routine and official-event attendance. `temporary_use_occupancy` is recommended only
-when the selected subtype includes intermittently occupied arenas, halls, theaters, event venues,
-or shelters; it is not a generic fallback for every facility.
+For example, manufacturing prioritizes incident, shift-presence, and investigative
+records; restaurants prioritize inspections and incident evidence; schools add routine
+attendance and official events. Temporary-use evidence is reserved for intermittently
+occupied places such as arenas, halls, theaters, event venues, and shelters.
 
-Each strategy defines an objective, query templates, preferred source types, accepted count
-semantics, negative traps, and a default representativeness label. Lead output can store
-`strategy_id`, `count_semantics`, and `representativeness`. QAQC checks whether the source supports
-the claimed strategy and count meaning, so ticket sales cannot silently become attendance and
-scheduled staffing cannot silently become physical presence.
+Capacity pages, directories, map listings, encyclopedias, travel guides, and unsourced
+social reposts can suggest leads but do not qualify as accepted occupancy evidence.
+Ticket sales, scheduled staffing, enrollment, and maximum capacity must not silently
+become claims about physical presence.
 
-The strategy planner is deterministic and versioned today. This keeps job construction
-reproducible while providing a typed contract that a future orchestration agent can propose or
-revise without bypassing application validation.
+## Install and Launch
 
-The CLI still accepts `--profiles` and `--profile`, but new usage can read more naturally as
-`--facility-type` and `--subtype`. For example, `--facility-type manufacturing --country PH`
-searches manufacturing facilities in the Philippines, while `--subtype light_manufacturing`
-narrows that run to light industrial facilities. Source-tied phrases such as evacuated employees,
-trapped workers, rescued students, evacuated diners, and patrons inside a venue are acceptable
-real-time occupancy proxies, while accepted observations remain gated by exact URL, exact quote,
-count, facility identity, locality/country, and georeference validation.
+### Requirements
 
-Qualifying evidence should come from source types that can plausibly document a count-bearing
-event or incident: news articles, wire-service stories, official public-safety or government
-reports, official venue/event attendance announcements, and official press releases. Wikipedia,
-encyclopedias, directories, travel guides, map listings, venue profile pages, capacity pages, and
-unsourced social reposts are context only; they may provide leads, but not accepted observations.
+- Python 3.12 or newer
+- Codex CLI installed and authenticated
+- A local clone of this repository
 
-## Broad Lead Harvest
+OASIS uses the locally authenticated Codex CLI for its default agent workflow. It does
+not require an application-owned OpenAI API key.
 
-For country-wide discovery, start with a permissive lead harvest. This mirrors a broad
-ChatGPT-style extraction prompt: collect many facility-specific occupancy leads, allow missing
-metadata as `Unknown` or `Not provided`, and keep subgroup counts when a source breaks them out.
-Lead harvests are not final accepted observations; they are reviewable candidates that can later
-be promoted into strict `InvestigationRun` artifacts.
+### Windows
 
-Prepare a broad lead prompt:
+Double-click:
 
-```powershell
-python -m pdt_observer harvest prepare --country PH --facility-type manufacturing --target 20 --output work/ph-manufacturing-leads.md
+```text
+OASIS.bat
 ```
 
-Or run the harvest end-to-end through Codex CLI without manual shell piping:
+### macOS
 
-```powershell
-python -m pdt_observer harvest run --country PH --facility-type manufacturing --target 20
+Double-click:
+
+```text
+OASIS.command
 ```
 
-For region-specific or subtype-specific pilots, add `--locality` and `--subtype`:
+The launchers:
+
+1. create a local `.venv` when needed;
+2. bootstrap `pip` inside that environment if it is missing;
+3. install the browser-app dependencies;
+4. locate the authenticated Codex CLI;
+5. start OASIS and open `http://127.0.0.1:8771`.
+
+The previous `Observation Harvester` launcher filenames remain as compatibility
+wrappers, so existing shortcuts continue to work.
+
+### Manual installation
 
 ```powershell
-python -m pdt_observer harvest run --country US --locality Tennessee --facility-type schools --subtype university_college --target 5
+python -m venv .venv
+.\.venv\Scripts\python -m pip install -e ".[app,dev]"
+.\.venv\Scripts\python -m pdt_observer app
 ```
 
-`harvest run` writes the rendered prompt under `work/`, the JSON lead output under `lead_runs/`,
-activity logs under `harvest_logs/`, and a run manifest under `harvest_runs/`. The manifest records
-the run ID, scope, facility type, optional subtype, Codex command, output paths, log path, exit
-code, validation result, summary, and failure or cancellation message when applicable.
+On macOS or Linux:
 
-If you prefer to run Codex manually, pass the prepared prompt through Codex CLI with web search:
-
-```powershell
-codex --search exec --sandbox workspace-write --cd . -o lead_runs/ph-manufacturing-001.json - < work/ph-manufacturing-leads.md
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -e ".[app,dev]"
+.venv/bin/python -m pdt_observer app
 ```
 
-Codex should return only the JSON array, and `-o` writes the final response to
-`lead_runs/ph-manufacturing-001.json`. Validate and summarize it:
+`pdt_observer`, `pdt-observer`, and `PDT_OBSERVER_MODEL` are retained as technical
+compatibility identifiers in this release. The launchers accept `OASIS_PORT` and, on
+Windows, `OASIS_CODEX_BIN`; the previous `OBSERVATION_HARVESTER_*` names remain valid
+fallbacks.
+
+## Using the Browser Application
+
+### Agentic Workbench
+
+1. Enter a country and, optionally, a region or locality.
+2. Choose a facility type, mode, and target.
+3. Select **Run Full Pipeline** for the guided workflow, or run individual stages.
+4. Follow progress in the project workflow and agent-activity panels.
+5. Read or download the full pipeline transcript.
+6. Review coverage before deciding whether to run gap fill.
+7. Download only records that passed QAQC.
+
+The modes are:
+
+- **Single:** one facility type and optional subtype.
+- **Batch:** one child job for each enabled subtype in a facility family.
+- **Campaign:** one child job for every selected locality/facility-type pair. If no
+  locality is provided, each selected facility type receives one countrywide job; OASIS
+  does not automatically invent a nationwide locality plan.
+
+Campaign and gap-fill children run concurrently, up to three jobs at once by default.
+Their artifacts remain isolated and are consolidated in deterministic job order.
+
+### Geometry Studio
+
+Geometry Studio loads QAQC-approved observations and supports:
+
+- Geocoding all accepted observations with visible progress and a result summary.
+- Rejecting coordinates outside the campaign country/region/locality extent.
+- Retrying address research when geocoding exposes an address problem.
+- Reviewing ranked coordinate candidates.
+- Opening pre-populated Google Search or Google Maps queries in a new browser tab.
+- Pasting `latitude, longitude` or a Google Maps URL, previewing the point, and saving
+  it only after human confirmation.
+- Clicking the map to assign or adjust a coordinate.
+- Drawing and editing a building-footprint polygon.
+- Saving multiple geometry records on an observation and computing `area_m2` for the
+  active footprint.
+
+Automated geocoding uses OpenStreetMap Nominatim and a local cache. Google links are
+human research aids; OASIS does not call the Google Maps API or scrape Google results.
+
+## Artifacts and Data
+
+OASIS stores work locally in the repository workspace:
+
+| Directory | Contents |
+| --- | --- |
+| `work/` | Rendered prompts and temporary job inputs |
+| `lead_runs/` | Proposed lead JSON |
+| `harvest_runs/` | Single, batch, and campaign manifests |
+| `harvest_logs/` | Runtime activity logs |
+| `qaqc_runs/` | Evidence-verification results |
+| `address_runs/` | Address-enrichment results |
+| `sample_sets/` | Combined sample manifests and rounds |
+| `coverage_runs/` | Coverage reviews and recommendations |
+| `geometry_reviews/` | Durable human spatial-review records |
+| `geocode_cache/` | Cached geocoder responses |
+| `exports/` | CSV, JSON, JSONL, and GeoJSON outputs |
+| `runs/` | Promoted strict investigation records |
+
+**Clear All** removes generated working history but preserves promoted observations,
+exports, profiles, geometry reviews, and source code. Geometry review is considered
+durable human work.
+
+The repository does not yet provide a shared global observation pool or hosted
+multi-user database. Sharing and aggregating reviewed datasets is a future product
+layer, not an implicit side effect of running the local app.
+
+## Command-Line Examples
+
+The CLI retains its original command and module names for compatibility.
+
+Run one harvest:
 
 ```powershell
-python -m pdt_observer leads validate lead_runs/ph-manufacturing-001.json
-python -m pdt_observer leads summarize lead_runs/ph-manufacturing-001.json
-```
-
-Run one harvest per enabled subtype in a facility type:
-
-```powershell
-python -m pdt_observer harvest batch-run --country US --locality Tennessee --facility-type restaurants --target 10
-```
-
-Run a country-anchored campaign across multiple localities and facility types:
-
-```powershell
-python -m pdt_observer harvest campaign-run \
-  --country PH \
-  --locality Manila \
-  --locality Makati \
-  --locality "Cebu City" \
-  --facility-type schools \
-  --facility-type manufacturing \
-  --facility-type restaurants \
+python -m pdt_observer harvest run `
+  --country US `
+  --locality Georgia `
+  --facility-type manufacturing `
   --target 10
 ```
 
-`campaign-run` runs one child harvest per locality/facility-type pair. If no `--locality` is
-provided, it runs countrywide once per selected facility type. Campaign manifests are written to
-`harvest_runs/<campaign_id>.campaign.json` and summarize planned, completed, failed, and total
-lead counts across all child runs.
-
-Export lead outputs for review:
+Run all enabled subtypes in a facility family:
 
 ```powershell
-python -m pdt_observer leads export lead_runs/us-tennessee-factories.json --format csv --output exports/us-tennessee-factories.csv
-python -m pdt_observer leads export lead_runs/us-tennessee-factories.json --format jsonl --output exports/us-tennessee-factories.jsonl
+python -m pdt_observer harvest batch-run `
+  --country US `
+  --locality Georgia `
+  --facility-type schools `
+  --target 10
 ```
 
-Generate a QAQC verifier prompt for a harvested lead file:
+Run a campaign:
 
 ```powershell
-python -m pdt_observer leads qaqc-prompt lead_runs/us-tennessee-factories.json --output work/us-tennessee-factories-qaqc.md
+python -m pdt_observer harvest campaign-run `
+  --country PH `
+  --locality Manila `
+  --locality Makati `
+  --facility-type schools `
+  --facility-type restaurants `
+  --target 10
 ```
 
-Run that prompt through Codex CLI or Codex chat with web search, or use **Run QAQC** in the local
-browser app. The QAQC agent should open each `source_url`, verify that the reported count appears
-in the source, check facility/location match, and return a separate review JSON array. Validate
-that review output:
+Validate and summarize harvested leads:
 
 ```powershell
-python -m pdt_observer leads qaqc-validate qaqc_runs/us-tennessee-factories-qaqc.json --pretty
+python -m pdt_observer leads validate lead_runs/<file>.json
+python -m pdt_observer leads summarize lead_runs/<file>.json
 ```
 
-Generate an address-enrichment prompt for QAQC-approved leads:
+Create a sample and prepare coverage work:
 
 ```powershell
-python -m pdt_observer leads address-prompt lead_runs/us-tennessee-factories.json --qaqc qaqc_runs/us-tennessee-factories-qaqc.json --output work/us-tennessee-factories-address.md
+python -m pdt_observer samples create-from-run <run-id> `
+  --sample-set-id <sample-id>
+python -m pdt_observer samples coverage-prompt <sample-id> `
+  --output work/<sample-id>-coverage.md
 ```
 
-Run that prompt through Codex CLI or Codex chat with web search, or use **Run Address Enrichment**
-in the local browser app. Validate the returned address review output:
+Run `python -m pdt_observer --help` for the complete command tree.
+
+## Optional API-Backed Mode
+
+The default workflow uses Codex subscription authentication. A direct OpenAI Agents SDK
+path remains available for experiments:
 
 ```powershell
-python -m pdt_observer leads address-validate address_runs/us-tennessee-factories-address.json --pretty
-```
-
-Promote a promising lead into a draft strict run:
-
-```powershell
-python -m pdt_observer leads promote lead_runs/us-tennessee-factories.json --index 0 --output runs/us-tennessee-factories-001.json
-```
-
-Use QAQC results to choose whether each lead should be kept, reviewed, rejected, or retried.
-Promoted runs are intentionally marked `review` until exact source text, exact supporting quote,
-and georeference details are completed well enough for strict validation.
-
-In the local browser app, geometry review can turn verified and optionally address-enriched leads
-into footprint exports:
-
-```text
-Run QAQC -> Run Address Enrichment -> Load Approved -> Geocode All -> review misses -> adjust point -> draw footprint -> Save Footprint
-```
-
-The app uses user-triggered Nominatim geocoding with a local cache under `geocode_cache/`, and a
-Leaflet map with OSM streets plus Esri World Imagery for visual footprint tracing.
-
-Create a sample set from an existing run, batch, or campaign:
-
-```powershell
-python -m pdt_observer samples create-from-run us-tennessee-schools-campaign --sample-set-id us-tennessee-schools-sample
-```
-
-Generate a coverage steering prompt, validate the returned review, and run recommended gap-fill
-jobs:
-
-```powershell
-python -m pdt_observer samples coverage-prompt us-tennessee-schools-sample --output work/us-tennessee-schools-coverage.md
-python -m pdt_observer samples coverage-validate coverage_runs/us-tennessee-schools-coverage.json --pretty
-python -m pdt_observer samples gap-fill-run us-tennessee-schools-sample --coverage coverage_runs/us-tennessee-schools-coverage.json
-```
-
-## Harvest Flow
-
-```text
-User chooses harvest level
-  |
-  +--> run
-  |      country + optional locality + one facility type + optional subtype
-  |
-  +--> batch-run
-  |      country + optional locality + one facility type expanded across subtypes
-  |
-  +--> campaign-run
-         one country + N localities + N facility types
-              |
-              |  creates one child run per locality/facility-type pair
-              v
-         harvest_runs/<campaign-id>.campaign.json
-              |
-              |  lists child run IDs and aggregate summary
-              v
-
-Child harvest run
-  |
-  |  country + optional locality + facility type + target count
-  v
-python -m pdt_observer harvest prepare
-  |
-  |  writes/reprints a reusable Codex prompt
-  v
-work/<country>-<facility-type>-leads.md
-  |
-  |  Codex CLI/Desktop runs prompt with web search
-  v
-lead_runs/<country>-<facility-type>-001.json
-  |
-  |  run metadata and validation summary
-  v
-harvest_runs/<country>-<facility-type>-001.json
-  |
-  |  permissive lead schema:
-  |  - partial metadata allowed
-  |  - Unknown / Not provided allowed
-  |  - subgroup counts preserved
-  |  - source/quote/quality flags captured when available
-  v
-python -m pdt_observer leads validate
-python -m pdt_observer leads summarize
-  |
-  |  optional second pass checks source URLs, counts, facility, and location
-  v
-python -m pdt_observer leads qaqc-prompt
-Codex/web-search QAQC agent
-python -m pdt_observer leads qaqc-validate
-  |
-  |  optional second pass searches for precise facility addresses
-  v
-python -m pdt_observer leads address-prompt
-Codex/web-search address enrichment agent
-python -m pdt_observer leads address-validate
-  |
-  |  app filters verified + keep observations for geometry review
-  |  and prefers enriched addresses when available
-  v
-Leaflet Geometry Review
-  |
-  |  user-triggered geocode/search creates a candidate point
-  |  user adjusts point and draws one building footprint polygon
-  v
-geometry_reviews/<child-run-id>.json
-exports verified JSON / CSV / footprint GeoJSON
-  |
-  |  optional sample-set loop for representative coverage
-  v
-sample_sets/<sample-set-id>.json
-  |
-  |  coverage steering reviews verified/geocoded dispersion
-  v
-coverage_runs/<coverage-id>.json
-  |
-  |  recommended locality-adjusted jobs launch as a gap-fill round
-  v
-harvest child runs -> QAQC missing -> address missing -> Load Augmented Sample
-  |
-  |  combined verified JSON / CSV / footprint GeoJSON exports
-  v
-sample-set exports
-  |
-  |  human/Codex selects verified or reviewable leads for audit-grade promotion
-  v
-runs/<specific-observation>.json
-  |
-  |  strict InvestigationRun schema:
-  |  - exact source text
-  |  - exact supporting quote
-  |  - count appears in quote
-  |  - source URL and place record included
-  v
-python -m pdt_observer validate
-python -m pdt_observer work record-run
-  |
-  |  deterministic validation and review queue ingestion
-  v
-review/<review-item>.json
-exports/*.jsonl
-```
-
-When a source supports a candidate, write an `InvestigationRun` JSON file shaped like
-`examples/milltown_codex_run.json`, then validate, ingest, and count it. Keep
-`observed_time_text` as the exact source phrase and use `time_context` for normalized values such
-as `observed_time_local`, `time_precision`, `day_part`, and `daylight_state`:
-
-```powershell
-python -m pdt_observer work record-run --work-item-id <work_item_id> --run-file runs/<file>.json
-```
-
-`record-run` counts as one examined source and increments accepted/review/not_found counters.
-Python marks the work item completed when it reaches its accepted target or an early-stop limit.
-
-List and export review queue entries:
-
-```powershell
-python -m pdt_observer review list --status review
-python -m pdt_observer export --status accepted --format jsonl
-```
-
-Quota defaults per work item are:
-
-```json
-{
-  "target_accepted_count": 5,
-  "max_review_count": 10,
-  "max_sources_examined": 40,
-  "max_failed_sources": 20,
-  "max_empty_sources": 15,
-  "max_runtime_minutes": 60
-}
-```
-
-Override them during batch creation with flags such as `--target-accepted`,
-`--max-sources`, `--max-failed-sources`, `--max-empty-sources`, `--max-review`, and
-`--max-runtime-minutes`.
-
-Ad-hoc batch, work, run, review, and export artifacts are ignored by git.
-
-## Time Context
-
-The first-class observation remains `people_present`; time is supporting context. If a source says
-when the count was observed, store the exact phrase in `observed_time_text` and optionally add:
-
-```json
-{
-  "observed_time_local": "21:10",
-  "time_precision": "approximate",
-  "day_part": "night",
-  "daylight_state": "unknown",
-  "timezone": null
-}
-```
-
-Clock times are bucketed as `early_morning`, `morning`, `afternoon`, `evening`, or `night`.
-Broad phrases such as "Friday night" may be stored as `day_part_only`. Solar daylight is left
-`unknown` unless a future source or local place record gives enough deterministic evidence.
-
-## Direct URL Fetching
-
-Python is not a general search engine here. It can fetch direct public URLs supplied by Codex or a
-user:
-
-```powershell
-python -m pdt_observer source fetch https://example.com/story --output runs/source.json
-```
-
-The fetcher uses GET-only requests, robots.txt checks, a custom user agent, content-type and size
-limits, timeouts, URL canonicalization, basic HTML text extraction, and RSS/sitemap URL extraction.
-It does not bypass logins, paywalls, CAPTCHAs, or site blocks.
-
-## Offline Demo
-
-The deterministic mock demo still exercises search, fetch, extraction, geocoding, and validation
-without an API key:
-
-```powershell
-python -m pdt_observer demo
-```
-
-## Optional API Mode
-
-The OpenAI Agents SDK path remains available only for future comparison. It is not part of the
-recommended no-key workflow:
-
-```powershell
-$env:OPENAI_API_KEY = "sk-..."
+.\.venv\Scripts\python -m pip install -e ".[api-agent,dev]"
 python -m pdt_observer investigate-api examples/milltown_task.json
 ```
 
-The model defaults to `gpt-5.4-mini`. Override it with `PDT_OBSERVER_MODEL`.
+This optional mode requires `OPENAI_API_KEY`. Never commit keys or generated `.env`
+files. The model can be overridden with `PDT_OBSERVER_MODEL`.
 
-## Verify
+## Verification
+
+The ordinary test suite is offline and does not require API credentials:
 
 ```powershell
 pytest
 ruff check .
-mypy
+mypy src
 ```
 
-The ordinary test suite is offline and deterministic. Any live SDK test should remain behind an
-explicit marker and environment-variable gate.
+Tests must not make unapproved network calls. External services remain behind typed
+interfaces, and model output must pass deterministic validation.
 
-## Replacing Mocks Later
+## Current Boundaries and Next Development Areas
 
-Codex is expected to gather source and place records directly into an `InvestigationRun` artifact,
-then hand validation back to this package. If future deployments use real APIs, keep them behind
-typed ports and optional extras so the no-key Codex workflow remains intact.
+Implemented now:
 
-## Outside This Proof Of Concept
+- End-to-end local human-AI workflow.
+- Localized search guidance and multi-strategy harvesting.
+- Concurrent campaign and coverage-gap jobs.
+- Evidence QAQC, address research, and spatial validation.
+- Human coordinate resolution and building-footprint area.
+- Local sample, transcript, and verified-export artifacts.
 
-This project does not include continuous scraping, social-media integrations, databases, building
-footprints, floor counting, occupancy estimation, Docker, a hosted orchestration system, or a
-graphical UI.
+Not implemented yet:
+
+- Automatic nationwide locality planning.
+- A hosted or shared multi-user observation pool.
+- Background scheduling or unattended large-scale crawling.
+- Automatic floor-count or total-floor-area estimation.
+- Production authentication, permissions, database storage, or deployment.
+
+Likely next steps are to harden the complete pilot workflow, improve recovery and
+observability across long-running agent stages, expand evaluation datasets, and then
+design floor-count/total-floor-area enrichment and shared-data architecture on top of
+the validated observation pipeline.

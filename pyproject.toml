@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pdt-observer"
 version = "0.1.0"
-description = "Bounded PDT observation-harvesting proof of concept."
+description = "OASIS human-AI workbench for observation acquisition and spatial synthesis."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -34,6 +34,9 @@ pdt-observer = "pdt_observer.cli:console"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+pdt_observer = ["static/*.jpg"]
 
 [tool.pytest.ini_options]
 addopts = "-q"

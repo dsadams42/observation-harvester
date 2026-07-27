@@ -17,7 +17,13 @@ from pydantic import BaseModel, Field, ValidationError
 from starlette.applications import Starlette
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
+from starlette.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    Response,
+)
 from starlette.routing import Route
 
 from pdt_observer.addresses import (
@@ -470,7 +476,7 @@ def _pipeline_transcript_text(
         *(load_dialogue(root, conversation_id) for conversation_id in conversation_ids)
     )
     heading = (
-        "OBSERVATION HARVESTER PIPELINE TRANSCRIPT\n"
+        "OASIS PIPELINE TRANSCRIPT\n"
         f"Pipeline: {title_id or 'unknown'}\n"
         f"Conversation sources: {', '.join(conversation_ids) or 'none'}\n"
     )
@@ -1977,6 +1983,12 @@ def create_app(
     async def index(request: Request) -> HTMLResponse:
         return HTMLResponse(INDEX_HTML)
 
+    async def oasis_logo(request: Request) -> FileResponse:
+        return FileResponse(
+            Path(__file__).with_name("static") / "oasis-logo.jpg",
+            media_type="image/jpeg",
+        )
+
     async def profiles(request: Request) -> JSONResponse:
         return JSONResponse(_profiles_payload())
 
@@ -3214,6 +3226,7 @@ def create_app(
 
     routes = [
         Route("/", index),
+        Route("/assets/oasis-logo.jpg", oasis_logo),
         Route("/api/profiles", profiles),
         Route("/api/geographer/plan", geographer_plan, methods=["POST"]),
         Route("/api/harvest/run", harvest_run, methods=["POST"]),
@@ -3329,7 +3342,8 @@ INDEX_HTML = r"""<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Observation Harvester</title>
+  <title>OASIS</title>
+  <link rel="icon" href="/assets/oasis-logo.jpg" type="image/jpeg">
   <link
     rel="stylesheet"
     href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -3400,6 +3414,30 @@ INDEX_HTML = r"""<!doctype html>
       font-size: 20px;
       line-height: 1.2;
       letter-spacing: 0;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+    .brand-mark {
+      display: block;
+      width: 58px;
+      height: 58px;
+      flex: 0 0 58px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 50%;
+      background: #0b3445;
+      box-shadow: 0 2px 8px rgb(15 44 57 / 18%);
+    }
+    .brand-logo {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scale(1.82);
     }
     main {
       display: grid;
@@ -3828,7 +3866,22 @@ INDEX_HTML = r"""<!doctype html>
 </head>
 <body>
   <header>
-    <h1>Observation Harvester</h1>
+    <div class="brand">
+      <span class="brand-mark">
+        <img
+          class="brand-logo"
+          src="/assets/oasis-logo.jpg"
+          alt=""
+          aria-hidden="true"
+        >
+      </span>
+      <div>
+        <h1>OASIS</h1>
+        <div class="workflow-summary">
+          Observation Acquisition and Spatial Information Synthesis
+        </div>
+      </div>
+    </div>
     <div class="theme-control">
       <label for="themeSelect">Theme</label>
       <select id="themeSelect">
@@ -6144,7 +6197,7 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     async function exitApplication() {
-      if (!window.confirm('Exit Observation Harvester and cancel active harvests?')) return;
+      if (!window.confirm('Exit OASIS and cancel active harvests?')) return;
       try {
         await api('/api/app/exit', { method: 'POST' });
       } catch (_) {

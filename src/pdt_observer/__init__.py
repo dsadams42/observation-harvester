@@ -1,4 +1,4 @@
-"""Population Density Table observation-harvesting proof of concept."""
+"""OASIS: Observation Acquisition and Spatial Information Synthesis."""
 
 __all__ = ["__version__"]
 

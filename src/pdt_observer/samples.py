@@ -117,6 +117,46 @@ def load_any_harvest_manifest(root: Path, run_id: str) -> Any:
     raise ValueError(f"harvest manifest not found: {run_id}")
 
 
+def _failed_gap_fill_manifest(
+    *,
+    root: Path,
+    run_id: str,
+    job: RecommendedGapFillJob,
+    error_message: str,
+) -> HarvestRunManifest:
+    path = _run_manifest_path(root, run_id)
+    try:
+        manifest = HarvestRunManifest.model_validate_json(path.read_text(encoding="utf-8"))
+    except Exception:
+        manifest = HarvestRunManifest(
+            run_id=run_id,
+            status=HarvestRunStatus.FAILED,
+            country=job.country,
+            locality=job.locality,
+            profile_set=job.facility_type,
+            profile_id=None,
+            target=job.target,
+            prompt_path=str(root / "work" / f"{run_id}.md"),
+            lead_path=str(root / "lead_runs" / f"{run_id}.json"),
+            started_at=utc_now_text(),
+            validation_valid=False,
+            log_path=str(root / "harvest_logs" / f"{run_id}.log"),
+        )
+    append_harvest_log(root, run_id, f"Gap-fill child failed: {error_message}.")
+    write_model(
+        path,
+        manifest.model_copy(
+            update={
+                "status": HarvestRunStatus.FAILED,
+                "completed_at": utc_now_text(),
+                "validation_valid": False,
+                "error_message": error_message,
+            }
+        ),
+    )
+    return HarvestRunManifest.model_validate_json(path.read_text(encoding="utf-8"))
+
+
 def child_run_ids_for_manifest(manifest: Any) -> tuple[str, ...]:
     run_id = getattr(manifest, "run_id", None)
     if run_id is not None:
@@ -541,7 +581,7 @@ def run_gap_fill(
         )
         for index, job in enumerate(review.recommended_child_jobs, start=1)
     )
-    child_results: list[tuple[HarvestRunManifest, str] | None] = [None] * len(jobs)
+    child_results: list[tuple[HarvestRunManifest, str | None] | None] = [None] * len(jobs)
     active_runner = runner or _default_codex_runner
     worker_count = min(max_concurrent_jobs, len(jobs)) if jobs else 1
     append_harvest_log(
@@ -602,7 +642,18 @@ def run_gap_fill(
             for index, (job, run_id) in enumerate(jobs)
         }
         for future in as_completed(future_indexes):
-            child_results[future_indexes[future]] = future.result()
+            index = future_indexes[future]
+            job, run_id = jobs[index]
+            try:
+                child_results[index] = future.result()
+            except Exception as exc:
+                manifest = _failed_gap_fill_manifest(
+                    root=root,
+                    run_id=run_id,
+                    job=job,
+                    error_message=str(exc) or exc.__class__.__name__,
+                )
+                child_results[index] = (manifest, None)
 
     completed_results = [result for result in child_results if result is not None]
     child_run_ids = [manifest.run_id for manifest, _ in completed_results]

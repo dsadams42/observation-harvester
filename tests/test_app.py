@@ -11,6 +11,8 @@ from unittest.mock import patch
 from starlette.testclient import TestClient
 
 from pdt_observer.app import ActiveCodexRegistry, create_app
+from pdt_observer.jobs import create_job, mark_job_running
+from pdt_observer.models import JobType
 
 LEAD_PAYLOAD = [
     {
@@ -167,11 +169,19 @@ def failing_runner(
     return subprocess.CompletedProcess(command, 2, stdout="", stderr="codex failed")
 
 
+def raising_runner(
+    command: Sequence[str],
+    prompt: str,
+    cwd: Path,
+) -> subprocess.CompletedProcess[str]:
+    raise RuntimeError("runner exploded")
+
+
 def test_active_codex_registry_sends_prompts_as_utf8(tmp_path: Path) -> None:
     prompt = "Georgia’s GEMA/HS technical college search"
     registry = ActiveCodexRegistry(tmp_path)
 
-    with patch("pdt_observer.app.subprocess.Popen") as popen:
+    with patch("pdt_observer.app_runtime.subprocess.Popen") as popen:
         process = popen.return_value
         process.communicate.return_value = ("", "")
         process.returncode = 0
@@ -358,6 +368,10 @@ def test_index_page_contains_local_app_controls(tmp_path: Path) -> None:
     assert "QAQC still running" in html
     assert "/api/runs/clear" in html
     assert "/api/app/exit" in html
+    assert "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" in html
+    assert "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" in html
+    assert "https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" in html
+    assert "https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js" in html
 
 
 def test_profiles_endpoint_returns_builtin_profile_sets(tmp_path: Path) -> None:
@@ -1618,15 +1632,62 @@ output.write_text("[]")
     exited = client.post("/api/app/exit")
 
     assert created.status_code == 200
-    assert created.json()["manifest"]["status"] == "running"
+    assert created.json()["manifest"]["status"] == "queued"
+    assert created.json()["job"]["status"] == "queued"
     assert status.json()["active"] is True
-    assert "Launching Codex command" in log.text
+    assert "Manifest prepared" in log.text or "Launching Codex command" in log.text
     assert clear.status_code == 409
     assert "Cannot clear history" in clear.json()["error"]
     assert cancelled.json()["cancelled"] is True
     assert final_status["manifest"]["status"] == "cancelled"
     assert exited.json()["shutting_down"] is True
     assert exit_called is True
+
+
+def test_background_harvest_exception_writes_failed_job_and_manifest(tmp_path: Path) -> None:
+    client = TestClient(create_app(workspace=tmp_path, runner=raising_runner))
+
+    created = client.post(
+        "/api/harvest/run",
+        json={"country": "US", "locality": "Tennessee", "profiles": "schools", "target": 5},
+    )
+    run_id = created.json()["manifest"]["run_id"]
+
+    for _ in range(40):
+        status = client.get(f"/api/runs/{run_id}/status").json()
+        if status["manifest"]["status"] == "failed":
+            break
+        time.sleep(0.05)
+
+    assert created.status_code == 200
+    assert status["manifest"]["status"] == "failed"
+    assert status["manifest"]["error_message"] == "runner exploded"
+    assert status["job"]["status"] == "failed"
+    assert (tmp_path / f"harvest_runs/{run_id}.json").is_file()
+    assert "runner exploded" in (tmp_path / f"harvest_logs/{run_id}.log").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_running_job_from_prior_session_is_visible_but_inactive(tmp_path: Path) -> None:
+    job = create_job(
+        tmp_path,
+        job_id="prior-session-run",
+        job_type=JobType.HARVEST,
+        log_path=str(tmp_path / "harvest_logs/prior-session-run.log"),
+    )
+    mark_job_running(tmp_path, job.job_id)
+    client = TestClient(create_app(workspace=tmp_path, runner=successful_runner))
+
+    runs = client.get("/api/runs")
+    status = client.get("/api/runs/prior-session-run/status")
+
+    assert runs.status_code == 200
+    assert runs.json()["runs"][0]["run_id"] == "prior-session-run"
+    assert status.status_code == 200
+    assert status.json()["manifest"]["status"] == "running"
+    assert status.json()["active"] is False
+    assert status.json()["job"]["active"] is False
 
 
 def test_launcher_references_bootstrap_steps() -> None:

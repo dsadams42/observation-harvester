@@ -64,6 +64,24 @@ def test_example_codex_run_file_exists() -> None:
     assert Path("examples/milltown_codex_run.json").is_file()
 
 
+def test_cli_artifacts_inspect_and_migrate(tmp_path, capsys) -> None:
+    manifest = tmp_path / "harvest_runs/example.json"
+    manifest.parent.mkdir()
+    manifest.write_text(json.dumps({"run_id": "example", "status": "completed"}), encoding="utf-8")
+
+    inspect_code = main(["artifacts", "inspect", "--workspace", str(tmp_path)])
+    inspect_output = json.loads(capsys.readouterr().out)
+    migrate_code = main(["artifacts", "migrate", "--workspace", str(tmp_path)])
+    migrate_output = json.loads(capsys.readouterr().out)
+
+    assert inspect_code == 0
+    assert inspect_output["dry_run"] is True
+    assert inspect_output["changed_count"] == 1
+    assert migrate_code == 0
+    assert migrate_output["dry_run"] is False
+    assert json.loads(manifest.read_text(encoding="utf-8"))["schema_version"] == 1
+
+
 def test_cli_batch_create_and_work_claim(tmp_path, capsys) -> None:
     exit_code = main(
         [

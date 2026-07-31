@@ -132,6 +132,27 @@ class HarvestRunStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class JobType(StrEnum):
+    HARVEST = "harvest"
+    BATCH = "batch"
+    CAMPAIGN = "campaign"
+    QAQC = "qaqc"
+    ADDRESS = "address"
+    COVERAGE = "coverage"
+    GAP_FILL = "gap_fill"
+    SAMPLE_QAQC_MISSING = "sample_qaqc_missing"
+    SAMPLE_ADDRESS_MISSING = "sample_address_missing"
+
+
+class JobStatus(StrEnum):
+    QUEUED = "queued"
+    STARTING = "starting"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
 class GeographerPlanStatus(StrEnum):
     COMPLETED = "completed"
     FALLBACK = "fallback"
@@ -381,6 +402,7 @@ class GeometryPoint(StrictModel):
 
 
 class GeometryReviewItem(StrictModel):
+    schema_version: int = Field(default=1, ge=1)
     item_id: str = Field(min_length=1)
     child_run_id: str = Field(min_length=1)
     lead_index: int = Field(ge=0)
@@ -441,6 +463,7 @@ class GeographerProposal(StrictModel):
 
 
 class GeographerPlan(StrictModel):
+    schema_version: int = Field(default=1, ge=1)
     plan_id: str = Field(min_length=1)
     status: GeographerPlanStatus
     country: str = Field(min_length=2)
@@ -495,6 +518,7 @@ class StrategyScoutRecommendation(StrictModel):
 
 
 class StrategyScoutPlan(StrictModel):
+    schema_version: int = Field(default=1, ge=1)
     run_id: str = Field(min_length=1)
     country: str = Field(min_length=2)
     locality: str | None = None
@@ -531,6 +555,7 @@ class HarvesterStrategyActivity(StrictModel):
 
 
 class HarvesterActivityReport(StrictModel):
+    schema_version: int = Field(default=1, ge=1)
     run_id: str = Field(min_length=1)
     overall_summary: str = Field(min_length=1)
     strategy_activity: tuple[HarvesterStrategyActivity, ...] = ()
@@ -562,6 +587,7 @@ class WorkProgress(StrictModel):
 
 
 class WorkItem(StrictModel):
+    schema_version: int = Field(default=1, ge=1)
     work_item_id: str = Field(min_length=1)
     batch_id: str = Field(min_length=1)
     locality: str = Field(min_length=1)
@@ -590,6 +616,7 @@ class WorkStatusReport(StrictModel):
 
 
 class HarvestBatch(StrictModel):
+    schema_version: int = Field(default=1, ge=1)
     batch_id: str = Field(min_length=1)
     locality: str = Field(min_length=1)
     country: str = Field(min_length=2)
@@ -600,6 +627,7 @@ class HarvestBatch(StrictModel):
 
 
 class HarvestRunManifest(StrictModel):
+    schema_version: int = Field(default=1, ge=1)
     run_id: str = Field(min_length=1)
     status: HarvestRunStatus
     country: str = Field(min_length=2)
@@ -624,6 +652,7 @@ class HarvestRunManifest(StrictModel):
 
 
 class HarvestBatchRunManifest(StrictModel):
+    schema_version: int = Field(default=1, ge=1)
     batch_id: str = Field(min_length=1)
     status: HarvestRunStatus
     country: str = Field(min_length=2)
@@ -641,6 +670,7 @@ class HarvestBatchRunManifest(StrictModel):
 
 
 class HarvestCampaignRunManifest(StrictModel):
+    schema_version: int = Field(default=1, ge=1)
     campaign_id: str = Field(min_length=1)
     status: HarvestRunStatus
     country: str = Field(min_length=2)
@@ -668,6 +698,7 @@ class SampleSetRound(StrictModel):
 
 
 class SampleSetManifest(StrictModel):
+    schema_version: int = Field(default=1, ge=1)
     sample_set_id: str = Field(min_length=1)
     country: str = Field(min_length=2)
     requested_localities: tuple[str, ...] = ()
@@ -695,6 +726,7 @@ class CoverageFlag(StrictModel):
 
 
 class CoverageSteeringReview(StrictModel):
+    schema_version: int = Field(default=1, ge=1)
     coverage_id: str = Field(min_length=1)
     sample_set_id: str = Field(min_length=1)
     dispersion_status: CoverageDispersionStatus = CoverageDispersionStatus.UNKNOWN
@@ -735,3 +767,20 @@ class DirectFetchResult(StrictModel):
     content_sha256: str = Field(min_length=64, max_length=64)
     fetched_at: str = Field(min_length=1)
     discovered_urls: tuple[str, ...] = ()
+
+
+class JobRecord(StrictModel):
+    schema_version: int = Field(default=1, ge=1)
+    job_id: str = Field(min_length=1)
+    job_type: JobType
+    parent_id: str | None = None
+    status: JobStatus = JobStatus.QUEUED
+    created_at: str = Field(min_length=1)
+    started_at: str | None = None
+    completed_at: str | None = None
+    updated_at: str = Field(min_length=1)
+    manifest_path: str | None = None
+    log_path: str | None = None
+    error_message: str | None = None
+    active_child_ids: tuple[str, ...] = ()
+    summary: dict[str, object] | None = None

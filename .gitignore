@@ -21,6 +21,7 @@ geometry_reviews/
 geographer_runs/
 harvest_runs/
 harvest_logs/
+job_runs/
 lead_runs/
 qaqc_runs/
 review/

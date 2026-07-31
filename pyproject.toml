@@ -36,7 +36,9 @@ pdt-observer = "pdt_observer.cli:console"
 where = ["src"]
 
 [tool.setuptools.package-data]
-pdt_observer = ["static/*.jpg"]
+pdt_observer = [
+    "static/*.jpg",
+]
 
 [tool.pytest.ini_options]
 addopts = "-q"

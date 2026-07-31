@@ -267,6 +267,7 @@ OASIS stores work locally in the repository workspace:
 | `agent_activity/` | Public Harvester activity sidecars |
 | `harvest_runs/` | Single, batch, and campaign manifests |
 | `harvest_logs/` | Runtime activity logs |
+| `job_runs/` | Durable app job records for queued/running/completed/failed work |
 | `qaqc_runs/` | Evidence-verification results |
 | `address_runs/` | Address-enrichment results |
 | `sample_sets/` | Combined sample manifests and rounds |
@@ -279,6 +280,19 @@ OASIS stores work locally in the repository workspace:
 **Clear All** removes generated working history but preserves promoted observations,
 exports, profiles, geometry reviews, and source code. Geometry review is considered
 durable human work.
+
+Every app-launched background job also writes a `job_runs/*.job.json` record before
+work starts. This lets the UI show queued or failed work even when a manifest has not
+been produced yet, and old running jobs from a previous app session remain visible as
+inactive/non-cancellable history.
+
+New durable artifacts include `schema_version` fields. Legacy runtime JSON can be
+inspected or conservatively upgraded with the artifact commands below; migrations add
+missing versions and write `.bak` backups before mutating files.
+
+The local browser app assumes an internet-connected user machine. Leaflet and
+Leaflet.draw load from public CDN URLs, and map tiles come from the configured OSM/Esri
+tile services.
 
 The repository does not yet provide a shared global observation pool or hosted
 multi-user database. Sharing and aggregating reviewed datasets is a future product
@@ -325,6 +339,14 @@ Validate and summarize harvested leads:
 ```powershell
 python -m pdt_observer leads validate lead_runs/<file>.json
 python -m pdt_observer leads summarize lead_runs/<file>.json
+```
+
+Inspect or migrate local runtime artifacts:
+
+```powershell
+python -m pdt_observer artifacts inspect --workspace .
+python -m pdt_observer artifacts migrate --workspace . --dry-run
+python -m pdt_observer artifacts migrate --workspace .
 ```
 
 Create a sample and prepare coverage work:

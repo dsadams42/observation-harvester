@@ -125,6 +125,51 @@ def _write_manifest(root: Path, manifest: HarvestRunManifest) -> HarvestRunManif
     return manifest
 
 
+def _failed_child_manifest(
+    *,
+    root: Path,
+    run_id: str,
+    country: str,
+    locality: str | None,
+    profile_set_name: str,
+    profile_id: str | None,
+    target: int,
+    started_at: str,
+    error_message: str,
+) -> HarvestRunManifest:
+    try:
+        manifest = HarvestRunManifest.model_validate_json(
+            _manifest_path(root, run_id).read_text(encoding="utf-8")
+        )
+    except Exception:
+        manifest = HarvestRunManifest(
+            run_id=run_id,
+            status=HarvestRunStatus.FAILED,
+            country=country,
+            locality=locality,
+            profile_set=profile_set_name,
+            profile_id=profile_id,
+            target=target,
+            prompt_path=str(root / "work" / f"{run_id}.md"),
+            lead_path=str(root / "lead_runs" / f"{run_id}.json"),
+            started_at=started_at,
+            validation_valid=False,
+            log_path=str(log_path_for_run(root, run_id)),
+        )
+    append_harvest_log(root, run_id, f"Child job failed with an unhandled error: {error_message}.")
+    return _write_manifest(
+        root,
+        manifest.model_copy(
+            update={
+                "status": HarvestRunStatus.FAILED,
+                "completed_at": utc_now_text(),
+                "validation_valid": False,
+                "error_message": error_message,
+            }
+        ),
+    )
+
+
 def _run_strategy_scout(
     *,
     root: Path,
@@ -756,7 +801,21 @@ def run_harvest_campaign(
             future_indexes[future] = index
         for future in as_completed(future_indexes):
             index = future_indexes[future]
-            child_manifest = future.result()
+            locality, facility_type, child_run_id = jobs[index]
+            try:
+                child_manifest = future.result()
+            except Exception as exc:
+                child_manifest = _failed_child_manifest(
+                    root=root,
+                    run_id=child_run_id,
+                    country=country,
+                    locality=locality,
+                    profile_set_name=facility_type,
+                    profile_id=None,
+                    target=target,
+                    started_at=started_at,
+                    error_message=str(exc) or exc.__class__.__name__,
+                )
             child_manifests_by_index[index] = child_manifest
             append_harvest_log(
                 root,

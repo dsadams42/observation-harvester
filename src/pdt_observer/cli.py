@@ -13,6 +13,7 @@ from pdt_observer.addresses import (
     render_address_enrichment_prompt,
 )
 from pdt_observer.agent import load_task, run_agent_investigation, run_offline_demo
+from pdt_observer.artifact_migrations import migrate_workspace
 from pdt_observer.config import MissingAPIKeyError
 from pdt_observer.harvest import run_harvest, run_harvest_batch, run_harvest_campaign
 from pdt_observer.leads import (
@@ -350,6 +351,23 @@ def build_parser() -> argparse.ArgumentParser:
     samples_gap_fill.add_argument("--workspace", type=Path, default=Path("."))
     samples_gap_fill.add_argument("--codex-bin", default="codex")
 
+    artifacts = subparsers.add_parser(
+        "artifacts",
+        help="Inspect and migrate local OASIS runtime artifacts.",
+    )
+    artifacts_subparsers = artifacts.add_subparsers(dest="artifacts_command", required=True)
+    artifacts_inspect = artifacts_subparsers.add_parser(
+        "inspect",
+        help="Inspect versioned runtime artifacts without modifying them.",
+    )
+    artifacts_inspect.add_argument("--workspace", type=Path, default=Path("."))
+    artifacts_migrate = artifacts_subparsers.add_parser(
+        "migrate",
+        help="Add conservative schema versions to runtime artifacts.",
+    )
+    artifacts_migrate.add_argument("--workspace", type=Path, default=Path("."))
+    artifacts_migrate.add_argument("--dry-run", action="store_true")
+
     investigate_api = subparsers.add_parser(
         "investigate-api",
         help="Run the optional OpenAI Agents SDK path with OPENAI_API_KEY.",
@@ -382,6 +400,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 open_browser=not args.no_open,
             )
             return 0
+        if args.command == "artifacts":
+            dry_run = args.artifacts_command == "inspect" or args.dry_run
+            artifact_result = migrate_workspace(args.workspace, dry_run=dry_run)
+            print(json.dumps(artifact_result, indent=2))
+            return 1 if artifact_result["error_count"] else 0
         if args.command == "batch" and args.batch_command == "create":
             quota = WorkQuota(
                 target_accepted_count=args.target_accepted,

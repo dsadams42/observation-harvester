@@ -13,6 +13,7 @@ build/
 batches/
 exports/
 address_runs/
+agent_activity/
 agent_dialogue/
 coverage_runs/
 geocode_cache/
@@ -25,5 +26,6 @@ qaqc_runs/
 review/
 runs/
 sample_sets/
+strategy_runs/
 work/
 work_items/

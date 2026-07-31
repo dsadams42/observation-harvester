@@ -187,11 +187,23 @@ RESIDENTIAL_PROFILES = _load_profile_set("residential.json")
 SCHOOLS_PROFILES = _load_profile_set("schools.json")
 MANUFACTURING_PROFILES = _load_profile_set("manufacturing.json")
 RESTAURANTS_PROFILES = _load_profile_set("restaurants.json")
+RETAIL_SERVICE_PROFILES = _load_profile_set("retail_service.json")
+PUBLIC_INSTITUTIONAL_PROFILES = _load_profile_set("public_institutional.json")
+TRANSPORTATION_PROFILES = _load_profile_set("transportation.json")
+RECREATION_ENTERTAINMENT_PROFILES = _load_profile_set("recreation_entertainment.json")
+AGRICULTURE_PROFILES = _load_profile_set("agriculture.json")
+PDT_RESIDENTIAL_PROFILES = _load_profile_set("pdt_residential.json")
 
 BUILTIN_PROFILE_SETS = {
     SCHOOLS_PROFILES.profile_set_id: SCHOOLS_PROFILES,
     MANUFACTURING_PROFILES.profile_set_id: MANUFACTURING_PROFILES,
     RESTAURANTS_PROFILES.profile_set_id: RESTAURANTS_PROFILES,
+    RETAIL_SERVICE_PROFILES.profile_set_id: RETAIL_SERVICE_PROFILES,
+    PUBLIC_INSTITUTIONAL_PROFILES.profile_set_id: PUBLIC_INSTITUTIONAL_PROFILES,
+    TRANSPORTATION_PROFILES.profile_set_id: TRANSPORTATION_PROFILES,
+    RECREATION_ENTERTAINMENT_PROFILES.profile_set_id: RECREATION_ENTERTAINMENT_PROFILES,
+    AGRICULTURE_PROFILES.profile_set_id: AGRICULTURE_PROFILES,
+    PDT_RESIDENTIAL_PROFILES.profile_set_id: PDT_RESIDENTIAL_PROFILES,
     PUBLIC_VENUE_PROFILES.profile_set_id: PUBLIC_VENUE_PROFILES,
     COMMERCIAL_BUSINESS_PROFILES.profile_set_id: COMMERCIAL_BUSINESS_PROFILES,
     RESIDENTIAL_PROFILES.profile_set_id: RESIDENTIAL_PROFILES,

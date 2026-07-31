@@ -5,6 +5,11 @@ from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+from pdt_observer.activity import (
+    activity_report_dialogue_message,
+    harvester_activity_path,
+    load_harvester_activity_report,
+)
 from pdt_observer.dialogue import append_dialogue
 from pdt_observer.leads import load_leads, render_lead_harvest_prompt, summarize_leads
 from pdt_observer.models import (
@@ -13,9 +18,17 @@ from pdt_observer.models import (
     HarvestCampaignRunManifest,
     HarvestRunManifest,
     HarvestRunStatus,
+    StrategyPlan,
+    StrategyScoutPlan,
 )
-from pdt_observer.profiles import get_profile_set
+from pdt_observer.profiles import get_profile_set, narrow_profile_set
 from pdt_observer.strategies import build_strategy_plan
+from pdt_observer.strategy_scout import (
+    effective_strategy_plan,
+    load_strategy_scout_plan,
+    render_strategy_scout_prompt,
+    strategy_scout_path,
+)
 from pdt_observer.workflow import slugify, utc_now_text, write_model
 
 CodexRunner = Callable[[Sequence[str], str, Path], subprocess.CompletedProcess[str]]
@@ -112,6 +125,83 @@ def _write_manifest(root: Path, manifest: HarvestRunManifest) -> HarvestRunManif
     return manifest
 
 
+def _run_strategy_scout(
+    *,
+    root: Path,
+    run_id: str,
+    country: str,
+    locality: str | None,
+    profile_set_name: str,
+    profile_id: str | None,
+    deterministic_plan: StrategyPlan,
+    geographer_plan: GeographerPlan | None,
+    codex_bin: str,
+    runner: CodexRunner,
+) -> tuple[StrategyPlan, StrategyScoutPlan | None, int | None, str | None]:
+    profile_set = get_profile_set(profile_set_name)
+    if profile_id is not None:
+        profile_set = narrow_profile_set(profile_set, profile_id)
+    output_path = strategy_scout_path(root, run_id)
+    prompt_path = root / "work" / f"{run_id}-strategy.md"
+    prompt = render_strategy_scout_prompt(
+        run_id=run_id,
+        country=country,
+        locality=locality,
+        profile_set=profile_set,
+        profile_id=profile_id,
+        strategy_plan=deterministic_plan,
+        geographer_plan=geographer_plan,
+    )
+    prompt_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    prompt_path.write_text(prompt, encoding="utf-8")
+    append_harvest_log(root, run_id, f"Strategy Scout prompt written to {prompt_path}.")
+
+    command = (
+        codex_bin,
+        "--search",
+        "exec",
+        "--sandbox",
+        "workspace-write",
+        "--cd",
+        str(root),
+        "-o",
+        str(output_path),
+        "-",
+    )
+    append_harvest_log(
+        root,
+        run_id,
+        f"Launching Codex command (Strategy Scout): {' '.join(command)}",
+    )
+    result = runner(command, prompt, root)
+    if result.stdout.strip():
+        append_harvest_log(root, run_id, f"Strategy Scout stdout: {result.stdout.strip()}")
+    if result.stderr.strip():
+        append_harvest_log(root, run_id, f"Strategy Scout stderr: {result.stderr.strip()}")
+    append_harvest_log(root, run_id, f"Strategy Scout exited with code {result.returncode}.")
+    if result.returncode < 0:
+        return deterministic_plan, None, result.returncode, "Strategy Scout cancelled by user."
+    if result.returncode != 0:
+        message = result.stderr.strip() or result.stdout.strip() or "Strategy Scout failed."
+        append_harvest_log(root, run_id, f"Strategy Scout fallback: {message}")
+        return deterministic_plan, None, result.returncode, None
+
+    try:
+        scout_plan = load_strategy_scout_plan(output_path)
+        effective_plan = effective_strategy_plan(deterministic_plan, scout_plan)
+    except Exception as exc:
+        append_harvest_log(root, run_id, f"Strategy Scout validation failed; fallback: {exc}.")
+        return deterministic_plan, None, result.returncode, None
+
+    append_harvest_log(
+        root,
+        run_id,
+        f"Strategy Scout completed with confidence {scout_plan.confidence.value}.",
+    )
+    return effective_plan, scout_plan, result.returncode, None
+
+
 def run_harvest(
     *,
     root: Path,
@@ -127,7 +217,7 @@ def run_harvest(
     conversation_id: str | None = None,
 ) -> HarvestRunManifest:
     profile_set = get_profile_set(profile_set_name)
-    strategy_plan = build_strategy_plan(profile_set, profile_id=profile_id)
+    deterministic_strategy_plan = build_strategy_plan(profile_set, profile_id=profile_id)
     resolved_run_id = run_id or build_harvest_run_id(
         country=country,
         locality=locality,
@@ -137,20 +227,10 @@ def run_harvest(
     prompt_path = root / "work" / f"{resolved_run_id}.md"
     lead_path = root / "lead_runs" / f"{resolved_run_id}.json"
     log_path = log_path_for_run(root, resolved_run_id)
-    append_harvest_log(root, resolved_run_id, "Rendering harvest prompt.")
-    prompt = render_lead_harvest_prompt(
-        country=country,
-        profile_set_name=profile_set_name,
-        target=target,
-        locality=locality,
-        profile_id=profile_id,
-        geographer_plan=geographer_plan,
-    )
+    scout_path = strategy_scout_path(root, resolved_run_id)
+    activity_path = harvester_activity_path(root, resolved_run_id)
     prompt_path.parent.mkdir(parents=True, exist_ok=True)
     lead_path.parent.mkdir(parents=True, exist_ok=True)
-    prompt_path.write_text(prompt, encoding="utf-8")
-    append_harvest_log(root, resolved_run_id, f"Prompt written to {prompt_path}.")
-
     command = (
         codex_bin,
         "--search",
@@ -171,7 +251,7 @@ def run_harvest(
         locality=locality,
         profile_set=profile_set_name,
         profile_id=profile_id,
-        strategy_plan=strategy_plan,
+        strategy_plan=deterministic_strategy_plan,
         geographer_plan_path=(
             geographer_plan.artifact_path if geographer_plan is not None else None
         ),
@@ -181,12 +261,102 @@ def run_harvest(
         started_at=started_at,
         codex_command=command,
         log_path=str(log_path),
+        strategy_scout_path=str(scout_path),
+        activity_path=str(activity_path),
     )
     _write_manifest(root, manifest)
     append_harvest_log(root, resolved_run_id, "Manifest prepared.")
     manifest = manifest.model_copy(update={"status": HarvestRunStatus.RUNNING})
     _write_manifest(root, manifest)
     resolved_conversation_id = conversation_id or resolved_run_id
+    process_runner = runner or _default_codex_runner
+    append_harvest_log(root, resolved_run_id, "Starting Strategy Scout.")
+    (
+        strategy_plan,
+        strategy_scout_plan,
+        scout_exit_code,
+        scout_error_message,
+    ) = _run_strategy_scout(
+        root=root,
+        run_id=resolved_run_id,
+        country=country,
+        locality=locality,
+        profile_set_name=profile_set_name,
+        profile_id=profile_id,
+        deterministic_plan=deterministic_strategy_plan,
+        geographer_plan=geographer_plan,
+        codex_bin=codex_bin,
+        runner=process_runner,
+    )
+    if scout_error_message is not None and scout_exit_code is not None and scout_exit_code < 0:
+        append_harvest_log(root, resolved_run_id, "Harvest cancelled during Strategy Scout.")
+        append_harvest_log(root, resolved_run_id, "Harvest cancelled.")
+        append_dialogue(
+            root,
+            resolved_conversation_id,
+            speaker="Strategy Scout",
+            stage="lead_harvest",
+            message=(
+                "I stopped before harvest because cancellation was requested during "
+                "strategy review."
+            ),
+        )
+        return _write_manifest(
+            root,
+            manifest.model_copy(
+                update={
+                    "status": HarvestRunStatus.CANCELLED,
+                    "completed_at": utc_now_text(),
+                    "exit_code": scout_exit_code,
+                    "validation_valid": False,
+                    "error_message": "Harvest cancelled by user.",
+                }
+            ),
+        )
+    if strategy_scout_plan is not None:
+        append_dialogue(
+            root,
+            resolved_conversation_id,
+            speaker="Strategy Scout",
+            stage="lead_harvest",
+            message=(
+                "I reviewed the facility scope and geography, then adjusted the harvest "
+                "strategy order."
+            ),
+            rationale=strategy_scout_plan.overall_rationale,
+        )
+    else:
+        append_dialogue(
+            root,
+            resolved_conversation_id,
+            speaker="Strategy Scout",
+            stage="lead_harvest",
+            message=(
+                "I used the deterministic strategy order because no valid Scout plan "
+                "was available."
+            ),
+            rationale=(
+                "The fallback preserves the configured facility-specific evidence rules and "
+                "keeps the harvest moving."
+            ),
+        )
+    append_harvest_log(root, resolved_run_id, "Rendering harvest prompt.")
+    prompt = render_lead_harvest_prompt(
+        country=country,
+        profile_set_name=profile_set_name,
+        target=target,
+        locality=locality,
+        profile_id=profile_id,
+        geographer_plan=geographer_plan,
+        strategy_plan=strategy_plan,
+        strategy_scout_plan=strategy_scout_plan,
+        run_id=resolved_run_id,
+        activity_path=activity_path,
+    )
+    prompt_path.write_text(prompt, encoding="utf-8")
+    append_harvest_log(root, resolved_run_id, f"Prompt written to {prompt_path}.")
+    manifest = manifest.model_copy(update={"strategy_plan": strategy_plan})
+    _write_manifest(root, manifest)
     strategy_labels = ", ".join(
         item.strategy_id.value for item in strategy_plan.recommendations
     )
@@ -203,7 +373,6 @@ def run_harvest(
     )
     append_harvest_log(root, resolved_run_id, f"Launching Codex command: {' '.join(command)}")
 
-    process_runner = runner or _default_codex_runner
     result = process_runner(command, prompt, root)
     completed_at = utc_now_text()
     if result.stdout.strip():
@@ -290,6 +459,31 @@ def run_harvest(
     append_harvest_log(root, resolved_run_id, "Harvest completed.")
     lead_count = summary.get("lead_count", 0)
     counts_by_strategy = summary.get("counts_by_strategy", {})
+    if activity_path.is_file():
+        try:
+            activity_report = load_harvester_activity_report(activity_path)
+            message, rationale = activity_report_dialogue_message(activity_report)
+            append_dialogue(
+                root,
+                resolved_conversation_id,
+                speaker="Harvester Agent",
+                stage="lead_harvest",
+                message=message,
+                rationale=rationale or None,
+            )
+            append_harvest_log(root, resolved_run_id, "Harvester activity report loaded.")
+        except Exception as exc:
+            append_harvest_log(
+                root,
+                resolved_run_id,
+                f"Harvester activity report validation failed; transcript fallback used: {exc}.",
+            )
+    else:
+        append_harvest_log(
+            root,
+            resolved_run_id,
+            "No Harvester activity report was written; transcript fallback used.",
+        )
     append_dialogue(
         root,
         resolved_conversation_id,

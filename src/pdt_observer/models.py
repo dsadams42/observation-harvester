@@ -67,6 +67,26 @@ class LeadConfidence(StrEnum):
     UNKNOWN = "unknown"
 
 
+class StrategyScoutConfidence(StrEnum):
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+    UNKNOWN = "unknown"
+
+
+class StrategyScoutEmphasis(StrEnum):
+    PRIMARY = "primary"
+    SECONDARY = "secondary"
+    DE_EMPHASIZED = "de_emphasized"
+
+
+class HarvesterActivityOutcome(StrEnum):
+    PRODUCTIVE = "productive"
+    PARTIALLY_PRODUCTIVE = "partially_productive"
+    UNPRODUCTIVE = "unproductive"
+    REVIEW_ONLY = "review_only"
+
+
 class LeadQaqcVerificationStatus(StrEnum):
     VERIFIED = "verified"
     AMBIGUOUS = "ambiguous"
@@ -378,6 +398,14 @@ class GeometryReviewItem(StrictModel):
 class BuildingTypeProfile(StrictModel):
     profile_id: str = Field(min_length=1)
     label: str = Field(min_length=1)
+    pdt_subtype: str | None = None
+    area_defined: str | None = None
+    day_occurrence: str | None = None
+    night_occurrence: str | None = None
+    episodic_occurrence: tuple[str, ...] = ()
+    occupancy_groups: tuple[str, ...] = ()
+    contextual_count_fields: tuple[str, ...] = ()
+    preferred_strategy_ids: tuple[EvidenceStrategyType, ...] = ()
     source_search_prompt: str = Field(min_length=1)
     preferred_source_types: tuple[str, ...] = ()
     context_only_source_types: tuple[str, ...] = ()
@@ -456,6 +484,59 @@ class StrategyRecommendation(StrictModel):
 class StrategyPlan(StrictModel):
     planner: str = Field(default="deterministic_strategy_planner_v1", min_length=1)
     recommendations: tuple[StrategyRecommendation, ...] = Field(min_length=1)
+
+
+class StrategyScoutRecommendation(StrictModel):
+    strategy_id: EvidenceStrategyType
+    emphasis: StrategyScoutEmphasis = StrategyScoutEmphasis.SECONDARY
+    rationale: str = Field(min_length=1)
+    query_patterns: tuple[str, ...] = ()
+    expected_traps: tuple[str, ...] = ()
+
+
+class StrategyScoutPlan(StrictModel):
+    run_id: str = Field(min_length=1)
+    country: str = Field(min_length=2)
+    locality: str | None = None
+    profile_set: str = Field(min_length=1)
+    profile_id: str | None = None
+    recommended_strategy_order: tuple[EvidenceStrategyType, ...] = Field(min_length=1)
+    recommendations: tuple[StrategyScoutRecommendation, ...] = Field(min_length=1)
+    local_source_ideas: tuple[str, ...] = ()
+    overall_rationale: str = Field(min_length=1)
+    confidence: StrategyScoutConfidence = StrategyScoutConfidence.UNKNOWN
+
+    @model_validator(mode="after")
+    def recommended_order_has_recommendations(self) -> Self:
+        recommendation_ids = {item.strategy_id for item in self.recommendations}
+        missing = [
+            strategy_id.value
+            for strategy_id in self.recommended_strategy_order
+            if strategy_id not in recommendation_ids
+        ]
+        if missing:
+            raise ValueError(
+                "recommended_strategy_order contains strategy id(s) without "
+                f"recommendations: {', '.join(missing)}"
+            )
+        return self
+
+
+class HarvesterStrategyActivity(StrictModel):
+    strategy_id: EvidenceStrategyType
+    outcome: HarvesterActivityOutcome
+    query_examples: tuple[str, ...] = ()
+    notes: str = Field(min_length=1)
+    accepted_lead_count: int = Field(default=0, ge=0)
+
+
+class HarvesterActivityReport(StrictModel):
+    run_id: str = Field(min_length=1)
+    overall_summary: str = Field(min_length=1)
+    strategy_activity: tuple[HarvesterStrategyActivity, ...] = ()
+    accepted_lead_count: int = Field(default=0, ge=0)
+    rejected_or_context_notes: tuple[str, ...] = ()
+    follow_up_suggestions: tuple[str, ...] = ()
 
 
 class WorkQuota(StrictModel):
@@ -538,6 +619,8 @@ class HarvestRunManifest(StrictModel):
     summary: dict[str, object] | None = None
     error_message: str | None = None
     log_path: str | None = None
+    strategy_scout_path: str | None = None
+    activity_path: str | None = None
 
 
 class HarvestBatchRunManifest(StrictModel):

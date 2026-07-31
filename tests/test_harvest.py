@@ -33,6 +33,69 @@ LEAD_PAYLOAD = [
     }
 ]
 
+SCOUT_PAYLOAD = {
+    "run_id": "us-tn-factories",
+    "country": "US",
+    "locality": "Tennessee",
+    "profile_set": "commercial_business",
+    "profile_id": "factories_warehouses",
+    "recommended_strategy_order": [
+        "shift_operational_presence",
+        "incident_evacuation",
+        "enforcement_inspection",
+    ],
+    "recommendations": [
+        {
+            "strategy_id": "shift_operational_presence",
+            "emphasis": "primary",
+            "rationale": "Shift reports are likely for factories in this geography.",
+            "query_patterns": ["workers on shift factory Tennessee"],
+            "expected_traps": ["total workforce"],
+        },
+        {
+            "strategy_id": "incident_evacuation",
+            "emphasis": "secondary",
+            "rationale": "Incident reports may still expose evacuated workers.",
+            "query_patterns": ["factory workers evacuated Tennessee"],
+            "expected_traps": ["injury counts"],
+        },
+        {
+            "strategy_id": "enforcement_inspection",
+            "emphasis": "secondary",
+            "rationale": "Inspection reports may count workers present.",
+            "query_patterns": ["factory inspection workers present Tennessee"],
+            "expected_traps": ["number of employees"],
+        },
+    ],
+    "local_source_ideas": ["Tennessee OSHA reports"],
+    "overall_rationale": "I would test shift records first, then use incidents and inspections.",
+    "confidence": "medium",
+}
+
+ACTIVITY_PAYLOAD = {
+    "run_id": "us-tn-factories",
+    "overall_summary": "I sampled shift, incident, and inspection pathways and found one lead.",
+    "strategy_activity": [
+        {
+            "strategy_id": "shift_operational_presence",
+            "outcome": "productive",
+            "query_examples": ["workers on shift factory Tennessee"],
+            "notes": "Shift language helped find facility-level worker counts.",
+            "accepted_lead_count": 1,
+        },
+        {
+            "strategy_id": "incident_evacuation",
+            "outcome": "review_only",
+            "query_examples": ["factory workers evacuated Tennessee"],
+            "notes": "Some incident results were casualty-only and stayed as context.",
+            "accepted_lead_count": 0,
+        },
+    ],
+    "accepted_lead_count": 1,
+    "rejected_or_context_notes": ["Workforce-size pages were treated as context only."],
+    "follow_up_suggestions": ["Try state occupational safety PDFs."],
+}
+
 
 def successful_runner(
     command: Sequence[str],
@@ -43,6 +106,28 @@ def successful_runner(
     output_path.write_text(json.dumps(LEAD_PAYLOAD), encoding="utf-8")
     assert "Tennessee" in prompt
     assert cwd.is_dir()
+    return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+
+def scout_and_activity_runner(
+    command: Sequence[str],
+    prompt: str,
+    cwd: Path,
+) -> subprocess.CompletedProcess[str]:
+    output_path = Path(command[command.index("-o") + 1])
+    if output_path.name.endswith("-strategy.json"):
+        output_path.write_text(json.dumps(SCOUT_PAYLOAD), encoding="utf-8")
+        assert "Strategy Scout" in prompt
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+    output_path.write_text(json.dumps(LEAD_PAYLOAD), encoding="utf-8")
+    activity_path = cwd / "agent_activity" / f"{output_path.stem}.harvester.json"
+    activity_path.parent.mkdir(parents=True, exist_ok=True)
+    activity_path.write_text(
+        json.dumps(ACTIVITY_PAYLOAD | {"run_id": output_path.stem}),
+        encoding="utf-8",
+    )
+    assert "bounded time, incident, event, shift" in prompt
+    assert "Public Harvester Activity Report" in prompt
     return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
 
@@ -122,6 +207,63 @@ def test_run_harvest_writes_prompt_leads_and_completed_manifest(tmp_path: Path) 
     assert saved["codex_command"][0] == "codex-test"
     assert saved["profile_id"] == "factories_warehouses"
     assert saved["strategy_plan"]["planner"] == "deterministic_strategy_planner_v1"
+
+
+def test_run_harvest_uses_strategy_scout_and_activity_dialogue(tmp_path: Path) -> None:
+    manifest = run_harvest(
+        root=tmp_path,
+        country="US",
+        locality="Tennessee",
+        profile_set_name="commercial_business",
+        profile_id="factories_warehouses",
+        target=5,
+        run_id="us-tn-factories",
+        codex_bin="codex-test",
+        runner=scout_and_activity_runner,
+    )
+
+    assert manifest.status == HarvestRunStatus.COMPLETED
+    assert manifest.strategy_plan is not None
+    assert manifest.strategy_plan.planner == "strategy_scout_guided_v1"
+    assert [
+        recommendation.strategy_id.value
+        for recommendation in manifest.strategy_plan.recommendations
+    ][:2] == [
+        "shift_operational_presence",
+        "incident_evacuation",
+    ]
+    assert manifest.strategy_scout_path is not None
+    assert Path(manifest.strategy_scout_path).is_file()
+    assert manifest.activity_path is not None
+    assert Path(manifest.activity_path).is_file()
+    dialogue = (tmp_path / "agent_dialogue/us-tn-factories.json").read_text(
+        encoding="utf-8"
+    )
+    assert "Strategy Scout" in dialogue
+    assert "I sampled shift, incident, and inspection pathways" in dialogue
+
+
+def test_run_harvest_falls_back_when_activity_report_missing(tmp_path: Path) -> None:
+    manifest = run_harvest(
+        root=tmp_path,
+        country="US",
+        locality="Tennessee",
+        profile_set_name="commercial_business",
+        profile_id="factories_warehouses",
+        target=5,
+        run_id="us-tn-factories",
+        runner=successful_runner,
+    )
+
+    assert manifest.status == HarvestRunStatus.COMPLETED
+    assert manifest.strategy_plan is not None
+    assert manifest.strategy_plan.planner == "deterministic_strategy_planner_v1"
+    assert manifest.activity_path is not None
+    assert not Path(manifest.activity_path).is_file()
+    assert manifest.log_path is not None
+    assert "No Harvester activity report was written" in Path(manifest.log_path).read_text(
+        encoding="utf-8"
+    )
 
 
 def test_run_harvest_failed_codex_run_writes_failed_manifest(tmp_path: Path) -> None:

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from pydantic import TypeAdapter
 
+from pdt_observer.activity import render_activity_prompt_instructions
 from pdt_observer.geographer import geographer_prompt_guidance
 from pdt_observer.models import (
     BuildingProfileSet,
@@ -22,6 +23,8 @@ from pdt_observer.models import (
     ResultStatus,
     SourceBundle,
     SourceDocument,
+    StrategyPlan,
+    StrategyScoutPlan,
 )
 from pdt_observer.profiles import get_profile_set, narrow_profile_set
 from pdt_observer.prompting import country_search_context
@@ -336,22 +339,24 @@ def _bullet_list(values: tuple[str, ...]) -> str:
 def _profile_scope_guidance(profile_set: BuildingProfileSet) -> str:
     if profile_set.profile_set_id == "schools":
         return (
-            "Include incident-tied counts for school buildings and campus facilities. Do not treat "
+            "Include bounded counts for school buildings and campus facilities. Do not treat "
             "ordinary enrollment, attendance, campus population, or seating capacity as occupancy "
-            "observations unless the count is tied to a specific incident or evacuation."
+            "observations unless the count is tied to a bounded date, session, event, incident, "
+            "evacuation, or measured period."
         )
     if profile_set.profile_set_id == "manufacturing":
         return (
-            "Include incident-tied counts for factories, plants, mills, workshops, and industrial "
-            "production facilities. Evacuated workers, trapped employees, and rescued crew members "
-            "are acceptable occupancy proxies. Do not treat workforce size or production capacity "
-            "as occupancy observations."
+            "Include bounded counts for factories, plants, mills, workshops, and industrial "
+            "production facilities. Workers on shift, evacuated workers, trapped employees, and "
+            "rescued crew members are acceptable occupancy proxies. Do not treat workforce size "
+            "or production capacity as occupancy observations."
         )
     if profile_set.profile_set_id == "restaurants":
         return (
-            "Include incident-tied counts for restaurants, cafes, quick-service outlets, bars, and "
-            "nightlife venues. Customers, patrons, diners, employees, and evacuated people are "
-            "acceptable occupancy groups when tied to the incident."
+            "Include bounded counts for restaurants, cafes, quick-service outlets, bars, and "
+            "nightlife venues. Customers, patrons, diners, employees, attendees, and evacuated "
+            "people are acceptable occupancy groups when tied to a bounded service period, event, "
+            "inspection, or incident."
         )
     if profile_set.profile_set_id == "commercial_business":
         return (
@@ -370,6 +375,68 @@ def _profile_scope_guidance(profile_set: BuildingProfileSet) -> str:
     )
 
 
+def _profile_occurrence_guidance(profile_set: BuildingProfileSet) -> str:
+    lines: list[str] = []
+    for profile in profile_set.profiles:
+        if not profile.enabled:
+            continue
+        details: list[str] = []
+        if profile.pdt_subtype:
+            details.append(f"PDT subtype: {profile.pdt_subtype}")
+        if profile.area_defined:
+            details.append(f"Area scope: {profile.area_defined}")
+        if profile.occupancy_groups:
+            details.append(f"Expected groups: {', '.join(profile.occupancy_groups)}")
+        if profile.day_occurrence:
+            details.append(f"Day/open pattern: {profile.day_occurrence}")
+        if profile.night_occurrence:
+            details.append(f"Night/closed pattern: {profile.night_occurrence}")
+        if profile.episodic_occurrence:
+            details.append(f"Episodic patterns: {', '.join(profile.episodic_occurrence)}")
+        if profile.contextual_count_fields:
+            details.append(
+                "Context-only counts: " + ", ".join(profile.contextual_count_fields)
+            )
+        if details:
+            lines.append(f"- {profile.label}: {'; '.join(details)}.")
+    if not lines:
+        return "- No PDT occurrence hints are configured for this profile set."
+    return "\n".join(lines)
+
+
+def _strategy_scout_guidance(strategy_scout_plan: StrategyScoutPlan | None) -> str:
+    if strategy_scout_plan is None:
+        return (
+            "No Strategy Scout sidecar is available for this run. Use the deterministic strategy "
+            "plan below, sample more than one evidence pathway when practical, and lean into the "
+            "strategy that produces source-backed facility-level counts."
+        )
+
+    recommendations: list[str] = []
+    for item in strategy_scout_plan.recommendations:
+        queries = "; ".join(item.query_patterns[:3]) or "No query pattern supplied"
+        traps = "; ".join(item.expected_traps[:3]) or "No additional trap supplied"
+        recommendations.append(
+            f"- {item.strategy_id.value} ({item.emphasis.value}): {item.rationale} "
+            f"Query ideas: {queries}. Expected traps: {traps}."
+        )
+
+    return f"""The Strategy Scout reviewed this facility/geography before harvest.
+
+Recommended strategy order:
+{_bullet_list(tuple(item.value for item in strategy_scout_plan.recommended_strategy_order))}
+
+Scout rationale:
+{strategy_scout_plan.overall_rationale}
+
+Strategy notes:
+{chr(10).join(recommendations) or "- None"}
+
+Local source ideas:
+{_bullet_list(strategy_scout_plan.local_source_ideas)}
+"""
+
+
 def render_lead_harvest_prompt(
     *,
     country: str,
@@ -378,11 +445,15 @@ def render_lead_harvest_prompt(
     locality: str | None = None,
     profile_id: str | None = None,
     geographer_plan: GeographerPlan | None = None,
+    strategy_plan: StrategyPlan | None = None,
+    strategy_scout_plan: StrategyScoutPlan | None = None,
+    run_id: str | None = None,
+    activity_path: Path | None = None,
 ) -> str:
     profile_set = get_profile_set(profile_set_name)
     if profile_id is not None:
         profile_set = narrow_profile_set(profile_set, profile_id)
-    strategy_plan = build_strategy_plan(profile_set, profile_id=profile_id)
+    strategy_plan = strategy_plan or build_strategy_plan(profile_set, profile_id=profile_id)
     country_context = country_search_context(country)
     country_name = country_context["name"]
     locality_scope = (
@@ -398,6 +469,7 @@ def render_lead_harvest_prompt(
     preferred_sources = _unique_profile_values(profile_set, "preferred_source_types")
     context_only_sources = _unique_profile_values(profile_set, "context_only_source_types")
     scope_guidance = _profile_scope_guidance(profile_set)
+    occurrence_guidance = _profile_occurrence_guidance(profile_set)
     strategy_sections: list[str] = []
     for recommendation in strategy_plan.recommendations:
         strategy = get_strategy(recommendation.strategy_id)
@@ -410,6 +482,7 @@ def render_lead_harvest_prompt(
             f"Important traps:\n{_bullet_list(strategy.negative_traps)}"
         )
     strategy_guidance = "\n\n".join(strategy_sections)
+    scout_guidance = _strategy_scout_guidance(strategy_scout_plan)
     strategy_queries = _bullet_list(
         render_strategy_queries(
             strategy_plan,
@@ -420,12 +493,18 @@ def render_lead_harvest_prompt(
         )
     )
     vernacular_guidance = geographer_prompt_guidance(geographer_plan)
+    activity_guidance = (
+        render_activity_prompt_instructions(run_id=run_id, activity_path=activity_path)
+        if run_id is not None and activity_path is not None
+        else ""
+    )
 
     return f"""# Broad Occupancy Lead Harvest
 
-You are a specialized geospatial data extraction engine. Your objective is to search online news
-and public incident sources, inspect unstructured article text, and extract real-time occupancy
-lead records for facilities matching the selected PDT facility type and optional subtype.
+You are a specialized geospatial data extraction engine. Your objective is to search online public
+sources, inspect unstructured source text, and extract source-backed facility-level lead records
+for counts of people physically present during a bounded time, incident, event, shift, inspection,
+transfer, shelter activation, operating state, or measured period.
 
 Target: {target} lead records.
 Country: {country_name} (`{country}`).
@@ -444,10 +523,15 @@ Facility aliases and examples:
 
 ## Occupancy Extraction
 
-Identify any specific, historical headcount of people physically present inside, trapped in,
-rescued from, or evacuated from a matching facility during an incident such as fire, earthquake,
-chemical leak, code violation, overcrowding, police operation, raid, hostage event, or public
-safety response.
+Identify any specific, historical headcount of people physically present in, at, evacuated from,
+trapped in, rescued from, transferred from, checked in to, attending, on duty at, sheltered in, or
+measured within a matching facility during a bounded date, time, event, shift, inspection,
+incident, operating period, or study window. Incidents such as fires, earthquakes, chemical leaks,
+code violations, overcrowding, police operations, raids, hostage events, and public-safety
+responses are one high-value evidence pathway, not the only acceptable pathway.
+
+Facility-specific occupancy and occurrence hints:
+{occurrence_guidance}
 
 High-value evidence phrases:
 {_bullet_list(positive_patterns)}
@@ -461,12 +545,22 @@ workers, guests, shoppers, or people based on context. Evacuated residents, trap
 displaced families, rescued guests, and similar incident-tied groups are acceptable occupancy
 proxies.
 
+Use conventional occurrence hints to search and interpret likely subgroups, but do not treat
+capacity, enrollment, bed counts, workforce size, annual visitors, or other contextual counts as
+direct observed occupancy unless the source explicitly ties the count to people present during a
+bounded date, time, incident, event, shift, inspection, or measured period.
+
 ## Orchestrator Strategy Plan
 
 The job-building orchestrator recommends these ordered evidence strategies. Start with the
-highest-priority strategy and move down when searches become repetitive or unproductive. These
-recommendations are facility-aware: temporary-use occupancy is included only when the selected
-scope contains intermittently occupied arenas, halls, theaters, event venues, or shelters.
+Strategy Scout or deterministic plan, sample several strategies when practical, then lean into the
+productive pathway while preserving strategy attribution on each lead. These recommendations are
+facility-aware: temporary-use occupancy is included only when the selected scope contains
+intermittently occupied arenas, halls, theaters, event venues, or shelters.
+
+## Strategy Scout Guidance
+
+{scout_guidance}
 
 {strategy_guidance}
 
@@ -475,6 +569,8 @@ Suggested strategy-aware searches:
 {strategy_queries}
 
 {vernacular_guidance}
+
+{activity_guidance}
 
 Do not discard a lead because minor metadata is missing. Use "Unknown" or "Not provided" for
 missing metadata, and add a short `review_notes` value when the lead needs human review.

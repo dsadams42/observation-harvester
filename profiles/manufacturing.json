@@ -1,11 +1,39 @@
 {
   "profile_set_id": "manufacturing",
-  "label": "Manufacturing",
+  "label": "Manufacturing and industrial",
   "profiles": [
     {
       "profile_id": "light_manufacturing",
       "label": "Light manufacturing",
-      "source_search_prompt": "Find incident reports with quoted count-bearing phrases such as \"workers were inside\", \"employees were evacuated\", \"workers were trapped\", \"employees were rescued\", or \"inside the factory when\" for light manufacturing plants, assembly plants, electronics factories, garment factories, food processing plants, packaging plants, and small industrial workshops. Prioritize news articles, official reports, and labor or safety regulator incident reports; treat production capacity, workforce size, directory, and company profile pages as context only.",
+      "pdt_subtype": "Light Manufacturing",
+      "area_defined": "All buildings where employees are present.",
+      "day_occurrence": "Open during production, assembly, packaging, and administrative shifts.",
+      "night_occurrence": "Open or closed depending on facility operations, with possible reduced staff.",
+      "episodic_occurrence": [
+        "fires",
+        "industrial accidents",
+        "worker evacuations",
+        "safety inspections"
+      ],
+      "occupancy_groups": [
+        "workers",
+        "employees",
+        "staff",
+        "contractors"
+      ],
+      "contextual_count_fields": [
+        "workforce size",
+        "number of employees",
+        "production capacity",
+        "annual output"
+      ],
+      "preferred_strategy_ids": [
+        "incident_evacuation",
+        "shift_operational_presence",
+        "legal_investigative_records",
+        "enforcement_inspection"
+      ],
+      "source_search_prompt": "Find count-bearing reports for light manufacturing plants, assembly plants, electronics factories, garment factories, food processing plants, packaging plants, and small industrial workshops. Good evidence includes workers, employees, staff, or contractors physically present, on shift, inside, trapped, rescued, evacuated, or counted during an inspection. Treat production capacity, workforce size, directory, and company profile pages as context only.",
       "preferred_source_types": [
         "local or national news article",
         "wire-service article",
@@ -28,6 +56,8 @@
         "workers were trapped",
         "employees were trapped",
         "workers were rescued",
+        "workers on shift",
+        "employees on duty",
         "inside the factory when",
         "inside the plant when",
         "workers inside"
@@ -54,7 +84,37 @@
     {
       "profile_id": "heavy_manufacturing",
       "label": "Heavy manufacturing",
-      "source_search_prompt": "Find incident reports with quoted count-bearing phrases such as \"workers were inside\", \"employees were evacuated\", \"workers were trapped\", \"crew members were rescued\", or \"inside the mill when\" for steel mills, chemical plants, refineries, cement plants, shipyards, metal works, foundries, and large industrial plants. Prioritize news articles, official reports, and safety regulator incident reports; treat production capacity, workforce size, directory, and company profile pages as context only.",
+      "pdt_subtype": "Heavy Manufacturing",
+      "area_defined": "All buildings and work areas where employees are present, including outdoor work areas when the source ties the count to the facility.",
+      "day_occurrence": "Open during industrial, production, and maintenance shifts.",
+      "night_occurrence": "Open or closed depending on operations, with possible reduced staff.",
+      "episodic_occurrence": [
+        "explosions",
+        "fires",
+        "industrial accidents",
+        "worker evacuations",
+        "regulatory investigations"
+      ],
+      "occupancy_groups": [
+        "workers",
+        "employees",
+        "crew members",
+        "contractors",
+        "staff"
+      ],
+      "contextual_count_fields": [
+        "workforce size",
+        "number of employees",
+        "production capacity",
+        "tonnes per year"
+      ],
+      "preferred_strategy_ids": [
+        "incident_evacuation",
+        "shift_operational_presence",
+        "legal_investigative_records",
+        "enforcement_inspection"
+      ],
+      "source_search_prompt": "Find count-bearing reports for steel mills, shipyards, large machinery plants, foundries, automotive plants, aerospace plants, and other large industrial facilities. Good evidence includes workers, employees, crew members, contractors, or staff physically present, on shift, inside, trapped, rescued, evacuated, or counted during an investigation. Treat production capacity, workforce size, directory, and company profile pages as context only.",
       "preferred_source_types": [
         "local or national news article",
         "wire-service article",
@@ -77,8 +137,10 @@
         "employees were evacuated",
         "workers were trapped",
         "crew members were rescued",
+        "workers on shift",
+        "employees on duty",
         "inside the mill when",
-        "inside the refinery when",
+        "inside the plant when",
         "workers inside"
       ],
       "negative_evidence_patterns": [
@@ -90,15 +152,299 @@
       ],
       "venue_aliases": [
         "steel mill",
-        "chemical plant",
-        "refinery",
-        "cement plant",
+        "automotive plant",
+        "aerospace plant",
         "shipyard",
+        "large machinery plant",
         "metal works",
         "foundry",
         "industrial plant"
       ],
       "priority": 20
+    },
+    {
+      "profile_id": "chemical_refining_cement",
+      "label": "Chemical, refining, and cement",
+      "pdt_subtype": "Chemical, Refining, Cement",
+      "area_defined": "All buildings where employees are present; exclude tanks, silos, or storage areas not frequented by employees unless the source ties workers to those areas.",
+      "day_occurrence": "Open during industrial processing, maintenance, and operations shifts.",
+      "night_occurrence": "Open or closed depending on facility operations, with possible reduced staff.",
+      "episodic_occurrence": [
+        "chemical leaks",
+        "explosions",
+        "fires",
+        "industrial evacuations",
+        "environmental investigations"
+      ],
+      "occupancy_groups": [
+        "workers",
+        "employees",
+        "operators",
+        "contractors",
+        "crew members"
+      ],
+      "contextual_count_fields": [
+        "workforce size",
+        "production capacity",
+        "barrels per day",
+        "tonnes per year"
+      ],
+      "preferred_strategy_ids": [
+        "incident_evacuation",
+        "legal_investigative_records",
+        "shift_operational_presence",
+        "enforcement_inspection"
+      ],
+      "source_search_prompt": "Find count-bearing reports for chemical plants, refineries, cement factories, oil refineries, desalination chemical facilities, and industrial processing plants. Good evidence includes workers, operators, employees, contractors, or crew members inside, on shift, evacuated, sheltered in place, trapped, rescued, or counted in an incident investigation. Treat production capacity and workforce totals as context only.",
+      "preferred_source_types": [
+        "official environmental or industrial safety incident report",
+        "official workplace safety or labor regulator incident report",
+        "local or national news article",
+        "wire-service article",
+        "official company incident statement"
+      ],
+      "context_only_source_types": [
+        "company profile page without a count-bearing event or incident",
+        "production capacity or annual output page",
+        "industrial directory or map listing",
+        "Wikipedia or encyclopedia page"
+      ],
+      "positive_evidence_patterns": [
+        "workers were evacuated",
+        "employees were evacuated",
+        "operators were evacuated",
+        "workers were inside",
+        "employees were inside",
+        "workers on shift",
+        "sheltered in place",
+        "inside the refinery when",
+        "inside the chemical plant when"
+      ],
+      "negative_evidence_patterns": [
+        "production capacity",
+        "barrels per day",
+        "tonnes per year",
+        "workforce size",
+        "storage capacity"
+      ],
+      "venue_aliases": [
+        "chemical plant",
+        "cement factory",
+        "oil refinery",
+        "refinery",
+        "processing plant",
+        "industrial plant"
+      ],
+      "priority": 30
+    },
+    {
+      "profile_id": "heat_processing",
+      "label": "Heat processing",
+      "pdt_subtype": "Heat Processing",
+      "area_defined": "All buildings where employees are present.",
+      "day_occurrence": "Open during processing, production, and maintenance shifts.",
+      "night_occurrence": "Open or closed depending on facility operations, with possible reduced staff.",
+      "episodic_occurrence": [
+        "fires",
+        "explosions",
+        "worker evacuations",
+        "safety investigations"
+      ],
+      "occupancy_groups": [
+        "workers",
+        "employees",
+        "operators",
+        "staff"
+      ],
+      "contextual_count_fields": [
+        "workforce size",
+        "production capacity",
+        "annual output"
+      ],
+      "preferred_strategy_ids": [
+        "incident_evacuation",
+        "shift_operational_presence",
+        "legal_investigative_records"
+      ],
+      "source_search_prompt": "Find count-bearing reports for steel, iron, metal, rubber, plastic, and glass production facilities where heat is used to change material state. Good evidence includes workers, employees, operators, or staff inside, on shift, evacuated, trapped, rescued, or counted in an investigation.",
+      "preferred_source_types": [
+        "local or national news article",
+        "official workplace safety or labor regulator incident report",
+        "official emergency or public-safety incident report",
+        "official company incident statement"
+      ],
+      "context_only_source_types": [
+        "company profile page",
+        "production capacity page",
+        "industrial directory",
+        "Wikipedia or encyclopedia page"
+      ],
+      "positive_evidence_patterns": [
+        "workers were evacuated",
+        "workers were inside",
+        "employees were inside",
+        "workers were trapped",
+        "workers on shift",
+        "inside the plant when",
+        "inside the foundry when"
+      ],
+      "negative_evidence_patterns": [
+        "production capacity",
+        "annual output",
+        "workforce size",
+        "number of employees"
+      ],
+      "venue_aliases": [
+        "foundry",
+        "steel plant",
+        "metal plant",
+        "glass factory",
+        "rubber plant",
+        "plastic plant"
+      ],
+      "priority": 40
+    },
+    {
+      "profile_id": "power_plants",
+      "label": "Power plants",
+      "pdt_subtype": "Power Plants",
+      "area_defined": "All buildings and areas where employees are present.",
+      "day_occurrence": "Operational during generating, maintenance, and control-room shifts.",
+      "night_occurrence": "Open or closed depending on operations, often with reduced staff.",
+      "episodic_occurrence": [
+        "plant incidents",
+        "outages",
+        "evacuations",
+        "regulatory investigations"
+      ],
+      "occupancy_groups": [
+        "employees",
+        "operators",
+        "workers",
+        "contractors",
+        "maintenance staff"
+      ],
+      "contextual_count_fields": [
+        "generating capacity",
+        "megawatts",
+        "workforce size",
+        "number of employees"
+      ],
+      "preferred_strategy_ids": [
+        "shift_operational_presence",
+        "legal_investigative_records",
+        "incident_evacuation",
+        "enforcement_inspection"
+      ],
+      "source_search_prompt": "Find count-bearing reports for hydropower, nuclear, solar, wind, geothermal, coal, fossil-fuel, and other power plants. Good evidence includes operators, employees, workers, contractors, or maintenance staff on duty, on shift, inside, evacuated, rescued, or counted in an incident or investigation. Treat generating capacity and workforce totals as context only.",
+      "preferred_source_types": [
+        "official regulator or investigation report",
+        "official emergency or public-safety incident report",
+        "official company incident statement",
+        "local or national news article"
+      ],
+      "context_only_source_types": [
+        "generating capacity page",
+        "company profile page",
+        "energy directory",
+        "Wikipedia or encyclopedia page"
+      ],
+      "positive_evidence_patterns": [
+        "operators were on duty",
+        "employees were on duty",
+        "workers were inside",
+        "workers were evacuated",
+        "staff were evacuated",
+        "inside the power plant when",
+        "workers on shift"
+      ],
+      "negative_evidence_patterns": [
+        "megawatts",
+        "generating capacity",
+        "workforce size",
+        "number of employees",
+        "households served"
+      ],
+      "venue_aliases": [
+        "power plant",
+        "power station",
+        "generating station",
+        "nuclear plant",
+        "hydropower plant",
+        "coal plant"
+      ],
+      "priority": 50
+    },
+    {
+      "profile_id": "warehouses",
+      "label": "Warehouses and storage",
+      "pdt_subtype": "Warehouse",
+      "area_defined": "All buildings and areas used for storage.",
+      "day_occurrence": "Open during warehouse, logistics, loading, distribution, and inventory shifts.",
+      "night_occurrence": "Operational or closed depending on facility, often with reduced employees.",
+      "episodic_occurrence": [
+        "warehouse fires",
+        "worker evacuations",
+        "labor inspections",
+        "safety investigations"
+      ],
+      "occupancy_groups": [
+        "warehouse workers",
+        "employees",
+        "staff",
+        "drivers",
+        "contractors"
+      ],
+      "contextual_count_fields": [
+        "workforce size",
+        "storage capacity",
+        "square footage",
+        "number of employees"
+      ],
+      "preferred_strategy_ids": [
+        "incident_evacuation",
+        "shift_operational_presence",
+        "enforcement_inspection",
+        "legal_investigative_records"
+      ],
+      "source_search_prompt": "Find count-bearing reports for warehouses, storage facilities, logistics centers, fulfillment centers, and distribution centers. Good evidence includes warehouse workers, employees, staff, drivers, or contractors inside, on shift, evacuated, trapped, rescued, or counted during an inspection. Treat storage capacity, square footage, and total workforce as context only.",
+      "preferred_source_types": [
+        "local or national news article",
+        "official workplace safety or labor regulator incident report",
+        "official emergency or public-safety incident report",
+        "official company incident statement"
+      ],
+      "context_only_source_types": [
+        "warehouse directory",
+        "company profile page",
+        "capacity or square-footage page",
+        "Wikipedia or encyclopedia page"
+      ],
+      "positive_evidence_patterns": [
+        "workers were inside",
+        "employees were inside",
+        "workers were evacuated",
+        "employees were evacuated",
+        "warehouse workers were evacuated",
+        "workers on shift",
+        "inside the warehouse when",
+        "inside the fulfillment center when"
+      ],
+      "negative_evidence_patterns": [
+        "storage capacity",
+        "square feet",
+        "workforce size",
+        "number of employees",
+        "annual throughput"
+      ],
+      "venue_aliases": [
+        "warehouse",
+        "storage facility",
+        "logistics center",
+        "fulfillment center",
+        "distribution center"
+      ],
+      "priority": 60
     }
   ]
 }

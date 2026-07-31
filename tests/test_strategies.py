@@ -50,6 +50,26 @@ def test_strategy_plan_contains_auditable_reasons() -> None:
     assert plan.planner == "deterministic_strategy_planner_v1"
 
 
+def test_profile_level_strategy_preferences_override_family_defaults() -> None:
+    religious = _ids("public_institutional", "religious")
+    power_plants = _ids("manufacturing", "power_plants")
+    theaters = _ids("recreation_entertainment", "theaters")
+
+    assert religious[:3] == (
+        "official_event_attendance",
+        "incident_evacuation",
+        "temporary_use_occupancy",
+    )
+    assert power_plants[:2] == (
+        "shift_operational_presence",
+        "legal_investigative_records",
+    )
+    assert theaters[:2] == (
+        "official_event_attendance",
+        "temporary_use_occupancy",
+    )
+
+
 def test_strategy_queries_mix_recommended_evidence_pathways() -> None:
     plan = build_strategy_plan(
         get_profile_set("manufacturing"),

@@ -112,6 +112,25 @@ def _strategy_plan_text(plan: StrategyPlan) -> str:
     return "\n\n".join(sections)
 
 
+def _profile_occurrence_text(profile: BuildingTypeProfile) -> str:
+    values: list[str] = []
+    if profile.pdt_subtype:
+        values.append(f"PDT subtype: {profile.pdt_subtype}")
+    if profile.area_defined:
+        values.append(f"Area scope: {profile.area_defined}")
+    if profile.occupancy_groups:
+        values.append(f"Expected groups: {', '.join(profile.occupancy_groups)}")
+    if profile.day_occurrence:
+        values.append(f"Day/open pattern: {profile.day_occurrence}")
+    if profile.night_occurrence:
+        values.append(f"Night/closed pattern: {profile.night_occurrence}")
+    if profile.episodic_occurrence:
+        values.append(f"Episodic patterns: {', '.join(profile.episodic_occurrence)}")
+    if profile.contextual_count_fields:
+        values.append("Context-only counts: " + ", ".join(profile.contextual_count_fields))
+    return _bullet_list(tuple(values))
+
+
 def render_work_prompt(
     *,
     item: WorkItem,
@@ -146,6 +165,7 @@ def render_work_prompt(
     positive_patterns = _bullet_list(profile.positive_evidence_patterns)
     negative_patterns = _bullet_list(profile.negative_evidence_patterns)
     venue_aliases = _bullet_list(profile.venue_aliases)
+    occurrence_hints = _profile_occurrence_text(profile)
     country_context = country_search_context(item.country)
     country_name = country_context["name"]
     admin_terms = _bullet_list(country_context["admin_terms"])
@@ -173,19 +193,29 @@ the local Python validation harness in this repository. Do not use external API 
 
 ## Objective
 
-Find explicit historical headcounts of people physically present, trapped, rescued, or evacuated
-from facilities matching this assigned subtype. Evacuated, trapped, and rescued groups are
-acceptable real-time occupancy proxies when the source ties the count to a named facility.
+Find explicit historical headcounts of people physically present in, at, evacuated from, trapped
+in, rescued from, transferred from, checked in to, attending, on duty at, sheltered in, or measured
+within facilities matching this assigned subtype during a bounded date, time, event, shift,
+inspection, incident, operating period, or study window. Incidents are one high-value evidence
+pathway, not the only acceptable pathway.
 
 Profile guidance:
 {profile.source_search_prompt}
 
+PDT occurrence hints:
+{occurrence_hints}
+
+Use these hints to search for likely subgroups and time patterns. Do not treat contextual counts
+such as capacity, enrollment, bed counts, workforce size, annual visitors, or scheduled staffing
+as direct observed occupancy unless the source explicitly ties the number to people present during
+a bounded date, time, incident, event, shift, inspection, or measured period.
+
 ## Orchestrator Strategy Plan
 
 The job-building orchestrator recommends the following ordered evidence strategies. Start with
-the highest-priority strategy. Move to the next strategy when exact searches are exhausted or
-yield repeated context-only sources. Do not invent an unlisted strategy when it would weaken the
-evidence contract.
+the assigned strategy sequence, sample more than one pathway when practical, then lean into the
+productive strategy while preserving strategy attribution on each candidate. Do not invent an
+unlisted strategy when it would weaken the evidence contract.
 
 {strategy_plan_text}
 

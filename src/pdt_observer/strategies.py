@@ -317,17 +317,21 @@ def build_strategy_plan(
             f"no enabled profile {profile_id!r} in profile set {profile_set.profile_set_id!r}"
         )
 
-    strategy_ids = list(
-        _PROFILE_SET_PRIORITIES.get(
-            profile_set.profile_set_id,
-            (
-                EvidenceStrategyType.INCIDENT_EVACUATION,
-                EvidenceStrategyType.ENFORCEMENT_INSPECTION,
-                EvidenceStrategyType.LEGAL_INVESTIGATIVE_RECORDS,
-                EvidenceStrategyType.RESEARCH_MEASURED_OCCUPANCY,
-            ),
+    strategy_ids: list[EvidenceStrategyType] = []
+    for profile in sorted(profiles, key=lambda item: item.priority):
+        strategy_ids.extend(profile.preferred_strategy_ids)
+    if not strategy_ids:
+        strategy_ids = list(
+            _PROFILE_SET_PRIORITIES.get(
+                profile_set.profile_set_id,
+                (
+                    EvidenceStrategyType.INCIDENT_EVACUATION,
+                    EvidenceStrategyType.ENFORCEMENT_INSPECTION,
+                    EvidenceStrategyType.LEGAL_INVESTIGATIVE_RECORDS,
+                    EvidenceStrategyType.RESEARCH_MEASURED_OCCUPANCY,
+                ),
+            )
         )
-    )
     if _profiles_support_temporary_use(profiles):
         insertion_index = min(2, len(strategy_ids))
         strategy_ids.insert(insertion_index, EvidenceStrategyType.TEMPORARY_USE_OCCUPANCY)

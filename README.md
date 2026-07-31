@@ -45,9 +45,12 @@ OASIS currently supports:
 - A persistent, downloadable pipeline transcript written as concise colleague-style
   agent reports rather than hidden chain-of-thought.
 
-The built-in PDT facility families are `schools`, `manufacturing`, and `restaurants`.
-Each family includes more specific subtypes. Older profile families remain available
-for compatibility.
+The built-in PDT facility families include `schools`, `manufacturing`, `restaurants`,
+`retail_service`, `public_institutional`, `transportation`,
+`recreation_entertainment`, `agriculture`, and `pdt_residential`. Each family includes
+more specific PDT subtypes with aliases, evidence phrases, negative traps, expected
+occupancy groups, occurrence hints, and preferred evidence strategies. Older profile
+families remain available for compatibility.
 
 ## Human-AI Workflow
 
@@ -132,6 +135,14 @@ Capacity pages, directories, map listings, encyclopedias, travel guides, and uns
 social reposts can suggest leads but do not qualify as accepted occupancy evidence.
 Ticket sales, scheduled staffing, enrollment, and maximum capacity must not silently
 become claims about physical presence.
+
+Profile subtypes can now provide PDT occurrence hints such as day/open use, night/closed
+use, episodic use, expected occupancy groups, and contextual count fields. These hints
+guide search and interpretation without weakening the evidence contract. For example,
+school enrollment, hotel room count, hospital licensed beds, airport annual passengers,
+or factory workforce size may help understand a facility, but they are not direct
+observed occupancy unless the source ties the count to a bounded date, time, event,
+shift, inspection, incident, or measured period.
 
 ## Install and Launch
 
@@ -242,6 +253,8 @@ OASIS stores work locally in the repository workspace:
 | --- | --- |
 | `work/` | Rendered prompts and temporary job inputs |
 | `lead_runs/` | Proposed lead JSON |
+| `strategy_runs/` | Strategy Scout recommendations |
+| `agent_activity/` | Public Harvester activity sidecars |
 | `harvest_runs/` | Single, batch, and campaign manifests |
 | `harvest_logs/` | Runtime activity logs |
 | `qaqc_runs/` | Evidence-verification results |

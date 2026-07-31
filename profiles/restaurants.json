@@ -1,11 +1,43 @@
 {
   "profile_set_id": "restaurants",
-  "label": "Restaurants",
+  "label": "Restaurants and nightlife",
   "profiles": [
     {
       "profile_id": "full_service_restaurants",
       "label": "Full-service restaurants",
-      "source_search_prompt": "Find incident reports with quoted count-bearing phrases such as \"people were inside\", \"customers were inside\", \"patrons were inside\", \"diners were evacuated\", or \"inside the restaurant when\" for full-service restaurants, cafes, diners, bistros, and family restaurants. Prioritize news articles, official reports, and official incident announcements; treat restaurant guides, review pages, directory listings, seating capacity, and generic venue pages as context only.",
+      "pdt_subtype": "Restaurant",
+      "area_defined": "All buildings and restaurant areas, including outdoor dining areas where customers dine.",
+      "day_occurrence": "Open during meal service, preparation, cleaning, and staff operating periods.",
+      "night_occurrence": "Usually closed, with possible reduced staff, maintenance, janitorial, or security presence.",
+      "episodic_occurrence": [
+        "mealtimes",
+        "gatherings",
+        "events",
+        "fires",
+        "overcrowding inspections"
+      ],
+      "occupancy_groups": [
+        "customers",
+        "patrons",
+        "diners",
+        "guests",
+        "employees",
+        "workers",
+        "staff"
+      ],
+      "contextual_count_fields": [
+        "seating capacity",
+        "maximum occupancy",
+        "reservation count",
+        "tickets sold"
+      ],
+      "preferred_strategy_ids": [
+        "enforcement_inspection",
+        "incident_evacuation",
+        "official_event_attendance",
+        "routine_dated_attendance"
+      ],
+      "source_search_prompt": "Find count-bearing reports for full-service restaurants, cafes, diners, bistros, family restaurants, and similar food establishments. Good evidence includes customers, patrons, diners, guests, employees, workers, or staff inside, evacuated, rescued, counted during a fire/code/health inspection, or attending a bounded event. Treat restaurant guides, review pages, directory listings, seating capacity, and generic venue pages as context only.",
       "preferred_source_types": [
         "local or national news article",
         "wire-service article",
@@ -29,12 +61,15 @@
         "customers were evacuated",
         "diners were evacuated",
         "people were rescued",
+        "people found inside",
+        "inspection people present",
         "inside the restaurant when",
         "patrons inside"
       ],
       "negative_evidence_patterns": [
         "capacity",
         "seats",
+        "seating capacity",
         "reservation",
         "address",
         "reviews"
@@ -52,7 +87,37 @@
     {
       "profile_id": "quick_service_restaurants",
       "label": "Quick-service restaurants",
-      "source_search_prompt": "Find incident reports with quoted count-bearing phrases such as \"employees were inside\", \"customers were inside\", \"people were evacuated\", \"workers were rescued\", or \"inside the fast-food restaurant when\" for fast-food restaurants, quick-service restaurants, takeout shops, food courts, coffee shops, and chain restaurant outlets. Prioritize news articles, official reports, and official incident announcements; treat restaurant guides, directory listings, seating capacity, and generic venue pages as context only.",
+      "pdt_subtype": "Restaurant",
+      "area_defined": "All buildings and restaurant areas, including customer counters, seating areas, kitchens, and drive-through/customer areas when the count is tied to the facility.",
+      "day_occurrence": "Open during service, food preparation, and staff operating periods.",
+      "night_occurrence": "Open or closed depending on facility hours, with possible reduced staff.",
+      "episodic_occurrence": [
+        "meal rush",
+        "fires",
+        "robberies",
+        "health inspections",
+        "overcrowding inspections"
+      ],
+      "occupancy_groups": [
+        "customers",
+        "employees",
+        "workers",
+        "staff",
+        "patrons"
+      ],
+      "contextual_count_fields": [
+        "seating capacity",
+        "store count",
+        "employees nationwide",
+        "sales volume"
+      ],
+      "preferred_strategy_ids": [
+        "enforcement_inspection",
+        "incident_evacuation",
+        "shift_operational_presence",
+        "routine_dated_attendance"
+      ],
+      "source_search_prompt": "Find count-bearing reports for fast-food restaurants, quick-service restaurants, takeout shops, food courts, coffee shops, and chain restaurant outlets. Good evidence includes employees, workers, customers, patrons, or staff inside, evacuated, rescued, on duty, or counted during a bounded incident or inspection. Treat restaurant guides, directory listings, seating capacity, and generic venue pages as context only.",
       "preferred_source_types": [
         "local or national news article",
         "wire-service article",
@@ -76,6 +141,7 @@
         "customers were evacuated",
         "employees were evacuated",
         "workers were rescued",
+        "employees on duty",
         "inside the fast-food restaurant when",
         "employees inside"
       ],
@@ -99,7 +165,38 @@
     {
       "profile_id": "bars_nightlife",
       "label": "Bars and nightlife",
-      "source_search_prompt": "Find incident reports with quoted count-bearing phrases such as \"patrons were inside\", \"people were inside\", \"customers were evacuated\", \"people were rescued\", or \"inside the bar when\" for bars, pubs, breweries, clubs, lounges, nightclubs, and nightlife venues. Prioritize news articles, official reports, and official incident announcements; treat nightlife guides, directory listings, venue capacity, and generic venue pages as context only.",
+      "pdt_subtype": "Night Club",
+      "area_defined": "All buildings used for nightlife, music, alcohol service, entertainment, and patron areas.",
+      "day_occurrence": "Often closed or lightly staffed during the day.",
+      "night_occurrence": "Open during evening and night entertainment periods.",
+      "episodic_occurrence": [
+        "entertainment nights",
+        "concerts",
+        "overcrowding inspections",
+        "police operations",
+        "fires"
+      ],
+      "occupancy_groups": [
+        "patrons",
+        "customers",
+        "guests",
+        "attendees",
+        "employees",
+        "staff"
+      ],
+      "contextual_count_fields": [
+        "venue capacity",
+        "tickets sold",
+        "seating capacity",
+        "maximum occupancy"
+      ],
+      "preferred_strategy_ids": [
+        "enforcement_inspection",
+        "incident_evacuation",
+        "official_event_attendance",
+        "temporary_use_occupancy"
+      ],
+      "source_search_prompt": "Find count-bearing reports for bars, pubs, breweries, clubs, lounges, nightclubs, and nightlife venues. Good evidence includes patrons, customers, guests, attendees, employees, or staff inside, evacuated, rescued, counted during a police/fire/code operation, or attending a bounded nightlife event. Treat nightlife guides, directory listings, venue capacity, and generic venue pages as context only.",
       "preferred_source_types": [
         "local or national news article",
         "wire-service article",
@@ -123,6 +220,8 @@
         "people were evacuated",
         "customers were evacuated",
         "people were rescued",
+        "people found inside",
+        "over capacity",
         "inside the bar when",
         "inside the nightclub when"
       ],

@@ -5,13 +5,43 @@
     {
       "profile_id": "primary_secondary_education",
       "label": "Primary and secondary education",
-      "source_search_prompt": "Find incident reports with quoted count-bearing phrases such as \"students were inside\", \"children were inside\", \"students were evacuated\", \"pupils were evacuated\", or \"inside the school when\" for elementary schools, primary schools, middle schools, high schools, secondary schools, preschools, and childcare centers. Prioritize news articles, official reports, and official attendance announcements; treat enrollment, directory, map, and generic school profile pages as context only.",
+      "pdt_subtype": "School (D-12)",
+      "area_defined": "All school buildings; include outdoor courtyards only when the source ties instruction or evacuation to that area.",
+      "day_occurrence": "Open during school or childcare sessions.",
+      "night_occurrence": "Usually closed, with possible staff, maintenance, janitorial, or security presence.",
+      "episodic_occurrence": [
+        "school assemblies",
+        "athletic events",
+        "evacuations",
+        "emergency sheltering"
+      ],
+      "occupancy_groups": [
+        "students",
+        "children",
+        "pupils",
+        "teachers",
+        "faculty",
+        "staff"
+      ],
+      "contextual_count_fields": [
+        "enrollment",
+        "school capacity",
+        "registered students"
+      ],
+      "preferred_strategy_ids": [
+        "incident_evacuation",
+        "routine_dated_attendance",
+        "official_event_attendance",
+        "legal_investigative_records"
+      ],
+      "source_search_prompt": "Find count-bearing reports for elementary schools, primary schools, middle schools, high schools, secondary schools, preschools, daycare facilities, and childcare centers. Good evidence includes students, children, pupils, teachers, or staff physically present, inside, evacuated, rescued, or recorded as attending on a bounded date. Treat enrollment, directory, map, and generic school profile pages as context only.",
       "preferred_source_types": [
         "local or national news article",
         "wire-service article",
         "official emergency or public-safety incident report",
         "official education department incident report",
-        "official school district or school incident announcement"
+        "official school district or school incident announcement",
+        "official dated attendance report"
       ],
       "context_only_source_types": [
         "Wikipedia or encyclopedia page",
@@ -28,6 +58,8 @@
         "children were evacuated",
         "pupils were evacuated",
         "students were rescued",
+        "student attendance",
+        "daily attendance",
         "inside the school when",
         "students inside",
         "children inside"
@@ -54,13 +86,44 @@
     {
       "profile_id": "university_college",
       "label": "University and college",
-      "source_search_prompt": "Find incident reports with quoted count-bearing phrases such as \"students were inside\", \"people were evacuated\", \"occupants were evacuated\", \"students were rescued\", or \"inside the campus building when\" for universities, colleges, dormitories, lecture halls, laboratories, libraries, and campus buildings. Prioritize news articles, official reports, and official campus safety announcements; treat enrollment, rankings, directory, and generic campus pages as context only.",
+      "pdt_subtype": "University",
+      "area_defined": "Academic buildings only unless the source identifies another specific campus facility; exclude dormitories, dining halls, recreation centers, and libraries unless separately targeted.",
+      "day_occurrence": "Open during class, laboratory, training, and administrative periods.",
+      "night_occurrence": "Some facilities may remain accessible to fewer students, faculty, staff, maintenance, janitorial, or security personnel.",
+      "episodic_occurrence": [
+        "lectures",
+        "exams",
+        "campus events",
+        "evacuations",
+        "laboratory incidents"
+      ],
+      "occupancy_groups": [
+        "students",
+        "faculty",
+        "staff",
+        "trainees",
+        "visitors"
+      ],
+      "contextual_count_fields": [
+        "enrollment",
+        "campus population",
+        "student population",
+        "seating capacity"
+      ],
+      "preferred_strategy_ids": [
+        "incident_evacuation",
+        "routine_dated_attendance",
+        "official_event_attendance",
+        "legal_investigative_records"
+      ],
+      "source_search_prompt": "Find count-bearing reports for universities, colleges, vocational schools, training centers, lecture halls, laboratories, and academic campus buildings. Good evidence includes students, faculty, staff, trainees, or visitors physically present, inside, evacuated, rescued, or recorded as attending a bounded class, event, incident, or operating period. Treat enrollment, rankings, directory, and generic campus pages as context only.",
       "preferred_source_types": [
         "local or national news article",
         "wire-service article",
         "official campus safety incident report",
         "official emergency or public-safety incident report",
-        "official university or college announcement"
+        "official university or college announcement",
+        "official dated attendance or event report"
       ],
       "context_only_source_types": [
         "Wikipedia or encyclopedia page",
@@ -77,6 +140,7 @@
         "people were evacuated",
         "occupants were evacuated",
         "students were rescued",
+        "student attendance",
         "inside the campus building when",
         "inside the dormitory when",
         "people inside"
@@ -92,13 +156,82 @@
         "university",
         "college",
         "campus",
-        "dormitory",
+        "vocational school",
+        "training center",
         "lecture hall",
         "laboratory",
-        "library",
-        "student center"
+        "academic building"
       ],
       "priority": 20
+    },
+    {
+      "profile_id": "university_library",
+      "label": "University library",
+      "pdt_subtype": "University Library",
+      "area_defined": "All areas of the library; exclude coffee shops or other facilities inside the library unless the count is explicitly tied to the library occupancy.",
+      "day_occurrence": "Open to students, faculty, staff, visitors, and library employees.",
+      "night_occurrence": "Open or closed depending on facility hours, with possible reduced visitors, staff, maintenance, janitorial, or security personnel.",
+      "episodic_occurrence": [
+        "special events",
+        "exam periods",
+        "evacuations",
+        "library closures"
+      ],
+      "occupancy_groups": [
+        "students",
+        "visitors",
+        "library staff",
+        "faculty",
+        "employees"
+      ],
+      "contextual_count_fields": [
+        "library capacity",
+        "annual visitors",
+        "collection size"
+      ],
+      "preferred_strategy_ids": [
+        "incident_evacuation",
+        "routine_dated_attendance",
+        "official_event_attendance",
+        "temporary_use_occupancy"
+      ],
+      "source_search_prompt": "Find count-bearing reports for university libraries and study halls inside libraries. Good evidence includes students, visitors, employees, faculty, or staff present, evacuated, checked in, or attending a bounded library event. Treat library capacity, collection size, annual visitors, and directory pages as context only.",
+      "preferred_source_types": [
+        "official university library announcement",
+        "official campus safety incident report",
+        "official event attendance report",
+        "local or national news article"
+      ],
+      "context_only_source_types": [
+        "library directory page",
+        "library hours page",
+        "capacity or collection statistics page",
+        "Wikipedia or encyclopedia page"
+      ],
+      "positive_evidence_patterns": [
+        "students were evacuated",
+        "people were evacuated",
+        "library was evacuated",
+        "students were inside",
+        "people were inside",
+        "library attendance",
+        "checked in at the library",
+        "attended the library event"
+      ],
+      "negative_evidence_patterns": [
+        "collection size",
+        "annual visitors",
+        "library capacity",
+        "hours",
+        "enrollment"
+      ],
+      "venue_aliases": [
+        "university library",
+        "campus library",
+        "college library",
+        "study hall"
+      ],
+      "priority": 30
     }
   ]
 }

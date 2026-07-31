@@ -342,6 +342,12 @@ def test_profiles_endpoint_returns_builtin_profile_sets(tmp_path: Path) -> None:
         "schools",
         "manufacturing",
         "restaurants",
+        "retail_service",
+        "public_institutional",
+        "transportation",
+        "recreation_entertainment",
+        "agriculture",
+        "pdt_residential",
         "commercial_business",
         "public_venues",
         "residential",
@@ -363,6 +369,8 @@ def test_profiles_endpoint_returns_builtin_profile_sets(tmp_path: Path) -> None:
         if profile["profile_id"] == "university_college"
     )
     assert university["strategy_plan"]["recommendations"]
+    assert university["pdt_subtype"] == "University"
+    assert "students" in university["occupancy_groups"]
 
 
 def test_geographer_plan_flows_into_harvest_prompt_and_dialogue(tmp_path: Path) -> None:

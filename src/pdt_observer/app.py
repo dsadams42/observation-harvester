@@ -300,9 +300,11 @@ def _clear_runtime_history(root: Path) -> int:
         "lead_runs": ("*.json",),
         "qaqc_runs": ("*.json",),
         "address_runs": ("*.json",),
+        "agent_activity": ("*.json",),
         "coverage_runs": ("*.json",),
         "sample_sets": ("*.json",),
         "geographer_runs": ("*.json",),
+        "strategy_runs": ("*.json",),
         "agent_dialogue": ("*.json",),
         "work": ("*.md",),
     }
@@ -395,7 +397,17 @@ def _list_manifests(root: Path) -> list[dict[str, Any]]:
 
 
 def _profiles_payload() -> dict[str, Any]:
-    preferred_order = {"schools": 0, "manufacturing": 1, "restaurants": 2}
+    preferred_order = {
+        "schools": 0,
+        "manufacturing": 1,
+        "restaurants": 2,
+        "retail_service": 3,
+        "public_institutional": 4,
+        "transportation": 5,
+        "recreation_entertainment": 6,
+        "agriculture": 7,
+        "pdt_residential": 8,
+    }
     profile_sets: list[dict[str, Any]] = []
     for profile_set_id, profile_set in BUILTIN_PROFILE_SETS.items():
         if profile_set_id.startswith("philippines_"):
@@ -410,6 +422,16 @@ def _profiles_payload() -> dict[str, Any]:
                         "label": profile.label,
                         "enabled": profile.enabled,
                         "priority": profile.priority,
+                        "pdt_subtype": profile.pdt_subtype,
+                        "area_defined": profile.area_defined,
+                        "day_occurrence": profile.day_occurrence,
+                        "night_occurrence": profile.night_occurrence,
+                        "episodic_occurrence": profile.episodic_occurrence,
+                        "occupancy_groups": profile.occupancy_groups,
+                        "contextual_count_fields": profile.contextual_count_fields,
+                        "preferred_strategy_ids": tuple(
+                            strategy_id.value for strategy_id in profile.preferred_strategy_ids
+                        ),
                         "strategy_plan": build_strategy_plan(
                             profile_set,
                             profile_id=profile.profile_id,

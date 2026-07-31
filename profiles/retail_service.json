@@ -1,0 +1,123 @@
+{
+  "profile_set_id": "retail_service",
+  "label": "Retail and service outlets",
+  "profiles": [
+    {
+      "profile_id": "stores",
+      "label": "Stores",
+      "pdt_subtype": "Stores",
+      "area_defined": "All buildings where consumers purchase goods or services.",
+      "day_occurrence": "Open during customer shopping and staff work periods.",
+      "night_occurrence": "Usually closed, with possible reduced staff, maintenance, janitorial, or security presence.",
+      "episodic_occurrence": ["fires", "evacuations", "sales events", "overcrowding inspections"],
+      "occupancy_groups": ["shoppers", "customers", "visitors", "employees", "staff"],
+      "contextual_count_fields": ["store capacity", "maximum occupancy", "annual visitors", "sales volume"],
+      "preferred_strategy_ids": [
+        "incident_evacuation",
+        "enforcement_inspection",
+        "official_event_attendance",
+        "routine_dated_attendance"
+      ],
+      "source_search_prompt": "Find count-bearing reports for stores, shops, grocery stores, supermarkets, malls, and retail buildings. Good evidence includes shoppers, customers, visitors, employees, or staff inside, evacuated, rescued, counted during an inspection, or attending a bounded store event. Treat store capacity, directory listings, annual visitors, and sales volume as context only.",
+      "preferred_source_types": ["local or national news article", "official emergency or public-safety incident report", "official fire or code enforcement report", "official retailer incident statement"],
+      "context_only_source_types": ["retail directory or map listing", "store marketing page", "capacity or annual visitor page", "Wikipedia or encyclopedia page"],
+      "positive_evidence_patterns": ["shoppers were inside", "customers were inside", "people were inside", "shoppers were evacuated", "customers were evacuated", "employees were evacuated", "people found inside", "inside the store when"],
+      "negative_evidence_patterns": ["capacity", "annual visitors", "sales", "store count", "square feet"],
+      "venue_aliases": ["store", "shop", "grocery store", "supermarket", "mall", "retail building"],
+      "priority": 10
+    },
+    {
+      "profile_id": "public_markets",
+      "label": "Public markets",
+      "pdt_subtype": "Public Market",
+      "area_defined": "All buildings and areas used by stalls, tents, or open stores selling goods.",
+      "day_occurrence": "Open during market trading periods.",
+      "night_occurrence": "Usually closed, with possible reduced staff, maintenance, janitorial, or security presence.",
+      "episodic_occurrence": ["market fires", "evacuations", "holiday crowds", "code inspections"],
+      "occupancy_groups": ["vendors", "customers", "shoppers", "visitors", "employees"],
+      "contextual_count_fields": ["stall count", "market capacity", "vendor count", "annual visitors"],
+      "preferred_strategy_ids": [
+        "incident_evacuation",
+        "enforcement_inspection",
+        "official_event_attendance"
+      ],
+      "source_search_prompt": "Find count-bearing reports for public markets, farmers markets, goods markets, covered markets, wet markets, and market halls. Good evidence includes vendors, customers, shoppers, visitors, or employees inside, evacuated, rescued, counted during an inspection, or present during a bounded market event. Treat stall counts and market capacity as context only.",
+      "preferred_source_types": ["local or national news article", "official fire or public-safety report", "official market authority statement", "official code enforcement report"],
+      "context_only_source_types": ["market directory", "tourism guide", "map listing", "capacity or stall-count page"],
+      "positive_evidence_patterns": ["vendors were evacuated", "customers were evacuated", "people were inside", "shoppers were inside", "people were evacuated", "people found inside", "inside the market when"],
+      "negative_evidence_patterns": ["stall count", "vendor count", "capacity", "annual visitors", "market days"],
+      "venue_aliases": ["public market", "farmers market", "goods market", "wet market", "market hall", "covered market"],
+      "priority": 20
+    },
+    {
+      "profile_id": "kiosks_food_trucks",
+      "label": "Kiosks and food trucks",
+      "pdt_subtype": "Kiosk",
+      "area_defined": "The kiosk, stand, food truck, and immediate area where employees and customers are present.",
+      "day_occurrence": "Open during vending and customer service periods.",
+      "night_occurrence": "Usually closed, with possible reduced staff.",
+      "episodic_occurrence": ["fires", "explosions", "inspection actions", "event vending"],
+      "occupancy_groups": ["employees", "vendors", "customers", "patrons"],
+      "contextual_count_fields": ["permit count", "vendor count", "capacity"],
+      "preferred_strategy_ids": [
+        "incident_evacuation",
+        "enforcement_inspection",
+        "official_event_attendance"
+      ],
+      "source_search_prompt": "Find count-bearing reports for kiosks, stands, carts, booths, and food trucks. Good evidence includes employees, vendors, customers, or patrons present, injured in a way that confirms presence, evacuated, rescued, or counted during an inspection. Treat permits, capacity, and generic listings as context only.",
+      "preferred_source_types": ["local or national news article", "official fire or police report", "official health or code inspection report"],
+      "context_only_source_types": ["map listing", "vendor directory", "permit list without observed presence", "review page"],
+      "positive_evidence_patterns": ["employees were inside", "vendors were inside", "customers were nearby", "people were evacuated", "people found inside", "inside the food truck when"],
+      "negative_evidence_patterns": ["permit count", "capacity", "reviews", "address", "menu"],
+      "venue_aliases": ["kiosk", "stand", "food truck", "cart", "booth"],
+      "priority": 30
+    },
+    {
+      "profile_id": "hotels_motels",
+      "label": "Hotels and motels",
+      "pdt_subtype": "Hotel/Motel",
+      "area_defined": "Only rooms and suites unless the source explicitly ties the count to another hotel area.",
+      "day_occurrence": "Open with guests, employees, visitors, and service staff.",
+      "night_occurrence": "Open with guests and reduced employees.",
+      "episodic_occurrence": ["fires", "evacuations", "shelter use", "police operations"],
+      "occupancy_groups": ["guests", "occupants", "employees", "staff", "visitors"],
+      "contextual_count_fields": ["room count", "hotel occupancy rate", "guest capacity", "number of rooms"],
+      "preferred_strategy_ids": [
+        "incident_evacuation",
+        "temporary_use_occupancy",
+        "enforcement_inspection",
+        "legal_investigative_records"
+      ],
+      "source_search_prompt": "Find count-bearing reports for hotels, motels, inns, lodges, and lodging properties. Good evidence includes guests, occupants, employees, staff, or visitors inside, evacuated, rescued, displaced, sheltered, or counted during a bounded incident or official action. Treat room count, occupancy rate, and booking pages as context only.",
+      "preferred_source_types": ["local or national news article", "official emergency or public-safety incident report", "official hotel statement", "official shelter or evacuation report"],
+      "context_only_source_types": ["hotel booking page", "travel guide", "room-count page", "map listing"],
+      "positive_evidence_patterns": ["guests were inside", "occupants were inside", "guests were evacuated", "people were evacuated", "guests were rescued", "displaced guests", "inside the hotel when"],
+      "negative_evidence_patterns": ["rooms", "room count", "occupancy rate", "room rate", "booking"],
+      "venue_aliases": ["hotel", "motel", "inn", "lodge", "lodging property"],
+      "priority": 40
+    },
+    {
+      "profile_id": "filling_stations",
+      "label": "Filling stations",
+      "pdt_subtype": "Filling Stations",
+      "area_defined": "All buildings and outdoor fueling areas where customers fuel vehicles.",
+      "day_occurrence": "Open during fuel sales, retail, and staff work periods.",
+      "night_occurrence": "Open or closed depending on facility, with reduced staff and some visitors.",
+      "episodic_occurrence": ["fires", "explosions", "robberies", "chemical spills", "evacuations"],
+      "occupancy_groups": ["customers", "visitors", "employees", "staff"],
+      "contextual_count_fields": ["pump count", "store capacity", "fuel capacity"],
+      "preferred_strategy_ids": [
+        "incident_evacuation",
+        "enforcement_inspection",
+        "legal_investigative_records"
+      ],
+      "source_search_prompt": "Find count-bearing reports for filling stations, gas stations, petrol stations, service stations, and fuel stops. Good evidence includes customers, visitors, employees, or staff present, inside, evacuated, rescued, or counted during an incident or official action. Treat pump counts and fuel capacity as context only.",
+      "preferred_source_types": ["local or national news article", "official fire or police report", "official environmental or safety incident report"],
+      "context_only_source_types": ["gas station directory", "map listing", "fuel capacity page", "brand locator page"],
+      "positive_evidence_patterns": ["customers were inside", "employees were inside", "people were evacuated", "people were rescued", "people were at the gas station", "inside the filling station when"],
+      "negative_evidence_patterns": ["pump count", "fuel capacity", "store count", "address", "gas prices"],
+      "venue_aliases": ["filling station", "gas station", "petrol station", "service station", "fuel stop"],
+      "priority": 50
+    }
+  ]
+}

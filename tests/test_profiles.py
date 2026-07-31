@@ -67,10 +67,15 @@ def test_pdt_facility_type_profile_sets_load_from_builtin() -> None:
     assert [profile.profile_id for profile in schools.profiles] == [
         "primary_secondary_education",
         "university_college",
+        "university_library",
     ]
     assert [profile.profile_id for profile in manufacturing.profiles] == [
         "light_manufacturing",
         "heavy_manufacturing",
+        "chemical_refining_cement",
+        "heat_processing",
+        "power_plants",
+        "warehouses",
     ]
     assert [profile.profile_id for profile in restaurants.profiles] == [
         "full_service_restaurants",
@@ -98,7 +103,17 @@ def test_builtin_residential_profiles_match_json() -> None:
 
 
 def test_builtin_pdt_facility_type_profiles_match_json() -> None:
-    for profile_set_id in ("schools", "manufacturing", "restaurants"):
+    for profile_set_id in (
+        "schools",
+        "manufacturing",
+        "restaurants",
+        "retail_service",
+        "public_institutional",
+        "transportation",
+        "recreation_entertainment",
+        "agriculture",
+        "pdt_residential",
+    ):
         builtin = get_profile_set(profile_set_id)
         from_json = BuildingProfileSet.model_validate_json(
             Path(f"profiles/{profile_set_id}.json").read_text(encoding="utf-8")
@@ -208,6 +223,33 @@ def test_pdt_facility_type_profiles_include_subtype_guidance() -> None:
     assert "workforce size" in heavy.negative_evidence_patterns
     assert "employees were evacuated" in quick_service.positive_evidence_patterns
     assert "fast-food restaurant" in quick_service.venue_aliases
+
+
+def test_pdt_facility_type_profiles_include_occurrence_guidance() -> None:
+    schools = get_profile_set("schools")
+    manufacturing = get_profile_set("manufacturing")
+    retail = get_profile_set("retail_service")
+    institutional = get_profile_set("public_institutional")
+    transportation = get_profile_set("transportation")
+    recreation = get_profile_set("recreation_entertainment")
+    agriculture = get_profile_set("agriculture")
+    residential = get_profile_set("pdt_residential")
+
+    assert schools.profiles[0].pdt_subtype == "School (D-12)"
+    assert "students" in schools.profiles[0].occupancy_groups
+    assert "workforce size" in manufacturing.profiles[0].contextual_count_fields
+    assert "shoppers" in retail.profiles[0].occupancy_groups
+    assert "patients" in next(
+        profile
+        for profile in institutional.profiles
+        if profile.profile_id == "hospitals_with_beds"
+    ).occupancy_groups
+    assert "passengers" in transportation.profiles[0].occupancy_groups
+    assert "official_event_attendance" in [
+        strategy.value for strategy in recreation.profiles[1].preferred_strategy_ids
+    ]
+    assert "workers" in agriculture.profiles[0].occupancy_groups
+    assert "average household size" in residential.profiles[0].contextual_count_fields
 
 
 def test_public_venue_profiles_include_evidence_first_phrases() -> None:

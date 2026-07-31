@@ -48,7 +48,7 @@ OASIS currently supports:
 
 The built-in PDT facility families include `schools`, `manufacturing`, `restaurants`,
 `retail_service`, `public_institutional`, `transportation`,
-`recreation_entertainment`, `agriculture`, and `pdt_residential`. Each family includes
+`recreation_entertainment`, `agriculture`, and residential facilities. Each family includes
 more specific PDT subtypes with aliases, evidence phrases, negative traps, expected
 occupancy groups, occurrence hints, and preferred evidence strategies. Older profile
 families remain available for compatibility.

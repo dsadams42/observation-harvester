@@ -1,6 +1,6 @@
 {
   "profile_set_id": "pdt_residential",
-  "label": "PDT residential",
+  "label": "Residential",
   "profiles": [
     {
       "profile_id": "single_family_urban",

@@ -41,6 +41,7 @@ OASIS currently supports:
   and Google Maps links, map placement, or pasted coordinates/Google Maps URLs.
 - Coverage analysis and reviewer-approved gap-fill campaigns.
 - Footprint digitization, geometry storage, and planar building-area calculation.
+- A tabular review workspace for QAQC-approved records or raw lead debugging.
 - QAQC-gated JSON, CSV, and footprint GeoJSON exports.
 - A persistent, downloadable pipeline transcript written as concise colleague-style
   agent reports rather than hidden chain-of-thought.
@@ -244,6 +245,15 @@ Geometry Studio loads QAQC-approved observations and supports:
 
 Automated geocoding uses OpenStreetMap Nominatim and a local cache. Google links are
 human research aids; OASIS does not call the Google Maps API or scrape Google results.
+
+### Tabular Data
+
+Tabular Data turns the selected run, batch, campaign, or sample set into one row per
+occupancy count. It defaults to **Verified Only**, joining harvest leads with QAQC,
+address enrichment, and saved geometry. For run-level debugging, **All Leads** shows
+raw harvested leads before QAQC. Visible rows can be searched, sorted, copied, exported
+as CSV from the browser, or opened directly in Geometry Studio when a geometry item is
+available.
 
 ## Artifacts and Data
 

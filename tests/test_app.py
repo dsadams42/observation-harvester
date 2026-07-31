@@ -108,6 +108,17 @@ COVERAGE_PAYLOAD = {
 }
 
 
+MULTI_COUNT_LEAD_PAYLOAD = [
+    {
+        **LEAD_PAYLOAD[0],
+        "occupancy_data": [
+            {"count": 12, "group_type": "workers evacuated"},
+            {"count": 4, "group_type": "security staff"},
+        ],
+    }
+]
+
+
 def successful_runner(
     command: Sequence[str],
     prompt: str,
@@ -135,6 +146,16 @@ def successful_runner(
         payload = LEAD_PAYLOAD
     output_path.write_text(json.dumps(payload), encoding="utf-8")
     assert "Tennessee" in prompt or "Coverage Steering" in prompt
+    return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+
+def multi_count_runner(
+    command: Sequence[str],
+    prompt: str,
+    cwd: Path,
+) -> subprocess.CompletedProcess[str]:
+    output_path = Path(command[command.index("-o") + 1])
+    output_path.write_text(json.dumps(MULTI_COUNT_LEAD_PAYLOAD), encoding="utf-8")
     return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
 
@@ -222,6 +243,7 @@ def test_index_page_contains_local_app_controls(tmp_path: Path) -> None:
     assert "Regions or Localities" in html
     assert "Agentic Workbench" in html
     assert "Geometry Studio" in html
+    assert "Tabular Data" in html
 
     logo = client.get("/assets/oasis-logo.jpg")
     assert logo.status_code == 200
@@ -230,6 +252,7 @@ def test_index_page_contains_local_app_controls(tmp_path: Path) -> None:
     assert 'role="tablist"' in html
     assert 'data-workspace="workbench"' in html
     assert 'data-workspace="geometry"' in html
+    assert 'data-workspace="table"' in html
     assert "setWorkspaceTab" in html
     assert "Run Full Pipeline" in html
     assert "Coverage ready - human review required" in html
@@ -316,6 +339,13 @@ def test_index_page_contains_local_app_controls(tmp_path: Path) -> None:
     assert "/api/runs/${state.currentRunId}/address-run" in html
     assert "/api/runs/${state.currentRunId}/address-results" in html
     assert "/api/runs/${state.currentRunId}/geometry-items" in html
+    assert "/api/runs/${state.currentRunId}/table?mode=${state.tableMode}" in html
+    assert "/api/samples/${state.currentSampleSetId}/table?mode=verified" in html
+    assert "Verified Only" in html
+    assert "All Leads" in html
+    assert "Copy Visible Rows" in html
+    assert "downloadVisibleTableCsv" in html
+    assert "openTableRowInGeometry" in html
     assert "/api/samples/from-run" in html
     assert "/api/samples/${state.currentSampleSetId}/coverage-run" in html
     assert "/api/samples/${state.currentSampleSetId}/gap-fill-run" in html
@@ -1169,6 +1199,126 @@ def test_geometry_review_endpoints_and_verified_exports(tmp_path: Path) -> None:
     assert "Example Warehouse" in verified_json.text
     assert "footprint_drawn" in verified_csv.text
     assert footprints.json()["features"][0]["geometry"]["type"] == "Polygon"
+
+
+def test_run_table_endpoint_flattens_all_leads_by_occupancy_count(tmp_path: Path) -> None:
+    client = TestClient(create_app(workspace=tmp_path, runner=multi_count_runner, background=False))
+    created = client.post(
+        "/api/harvest/run",
+        json={
+            "country": "US",
+            "locality": "Tennessee",
+            "profiles": "commercial_business",
+            "profile": "factories_warehouses",
+            "target": 5,
+        },
+    ).json()
+    run_id = created["manifest"]["run_id"]
+
+    response = client.get(f"/api/runs/{run_id}/table?mode=all")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["mode"] == "all"
+    assert payload["context_type"] == "run"
+    assert payload["row_count"] == 2
+    assert [row["count"] for row in payload["rows"]] == [12, 4]
+    assert payload["rows"][0]["item_id"] == f"{run_id}-0"
+    assert payload["rows"][1]["count_index"] == 1
+    assert payload["rows"][0]["qaqc_status"] == ""
+
+
+def test_run_table_verified_includes_review_address_and_geometry_fields(
+    tmp_path: Path,
+) -> None:
+    client = TestClient(create_app(workspace=tmp_path, runner=successful_runner, background=False))
+    created = client.post(
+        "/api/harvest/run",
+        json={
+            "country": "US",
+            "locality": "Tennessee",
+            "profiles": "commercial_business",
+            "profile": "factories_warehouses",
+            "target": 5,
+        },
+    ).json()
+    run_id = created["manifest"]["run_id"]
+    client.post(f"/api/runs/{run_id}/qaqc-run")
+    client.post(f"/api/runs/{run_id}/address-run")
+    item = client.get(f"/api/runs/{run_id}/geometry-items").json()["items"][0]
+    saved = client.post(
+        f"/api/geometry/items/{item['item_id']}",
+        json={
+            "item_id": item["item_id"],
+            "geocode_query": item["geocode_query"],
+            "point": {"latitude": 36.0, "longitude": -86.0, "source": "user"},
+            "geometry_status": "point_confirmed",
+            "review_notes": "Coordinate confirmed.",
+        },
+    )
+
+    response = client.get(f"/api/runs/{run_id}/table?mode=verified")
+
+    assert saved.status_code == 200
+    assert response.status_code == 200
+    row = response.json()["rows"][0]
+    assert row["qaqc_status"] == "verified"
+    assert row["recommended_action"] == "keep"
+    assert row["address_status"] == "found"
+    assert row["enriched_address"] == "100 Industrial Drive, Nashville, TN, US"
+    assert row["geometry_status"] == "point_confirmed"
+    assert row["source_url"] == "https://example.test/story"
+    assert row["review_notes"] == "Count, facility, and location are supported."
+
+
+def test_sample_table_endpoint_aggregates_verified_rows_across_rounds(
+    tmp_path: Path,
+) -> None:
+    client = TestClient(create_app(workspace=tmp_path, runner=successful_runner, background=False))
+    created = client.post(
+        "/api/harvest/campaign-run",
+        json={
+            "country": "US",
+            "localities": ["Tennessee"],
+            "facility_types": ["schools"],
+            "target": 3,
+        },
+    ).json()
+    campaign_id = created["manifest"]["campaign_id"]
+    child_run_id = created["manifest"]["child_run_ids"][0]
+    client.post(f"/api/runs/{campaign_id}/qaqc-run")
+    client.post(f"/api/runs/{campaign_id}/address-run")
+    sample = client.post(
+        "/api/samples/from-run",
+        json={"run_id": campaign_id, "sample_set_id": "tn-schools-sample"},
+    )
+
+    response = client.get("/api/samples/tn-schools-sample/table?mode=verified")
+
+    assert sample.status_code == 200
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["context_type"] == "sample"
+    assert payload["row_count"] == 1
+    row = payload["rows"][0]
+    assert row["sample_set_id"] == "tn-schools-sample"
+    assert row["sample_round"] == 1
+    assert row["run_id"] == child_run_id
+    assert row["facility_type"] == "schools"
+
+
+def test_verified_table_requires_qaqc(tmp_path: Path) -> None:
+    client = TestClient(create_app(workspace=tmp_path, runner=successful_runner, background=False))
+    created = client.post(
+        "/api/harvest/run",
+        json={"country": "US", "locality": "Tennessee", "profiles": "schools", "target": 5},
+    ).json()
+    run_id = created["manifest"]["run_id"]
+
+    response = client.get(f"/api/runs/{run_id}/table?mode=verified")
+
+    assert response.status_code == 409
+    assert "QAQC review not found" in response.json()["error"]
 
 
 def test_verified_export_requires_qaqc(tmp_path: Path) -> None:

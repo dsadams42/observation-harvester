@@ -1948,6 +1948,128 @@ def _verified_export_response(root: Path, run_id: str, *, output_format: str) ->
     )
 
 
+def _table_rows_from_records(records: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for record in records:
+        lead = record["lead"]
+        location = lead["location"]
+        review = record.get("qaqc_review") or {}
+        address = record.get("address_enrichment") or {}
+        geometry = record.get("geometry") or {}
+        for count_index, datum in enumerate(lead["occupancy_data"]):
+            rows.append(
+                {
+                    "row_id": f"{record['item_id']}-{count_index}",
+                    "item_id": record["item_id"],
+                    "run_id": record["child_run_id"],
+                    "sample_set_id": record.get("sample_set_id", ""),
+                    "sample_round": record.get("sample_round", ""),
+                    "facility_type": record.get("facility_type", ""),
+                    "lead_index": record["lead_index"],
+                    "count_index": count_index,
+                    "facility_name": location["facility_name"],
+                    "count": datum["count"],
+                    "group_type": datum["group_type"],
+                    "incident_date": lead["incident_date"],
+                    "incident_time": lead["incident_time"],
+                    "strategy_id": lead.get("strategy_id") or "",
+                    "representativeness": lead.get("representativeness") or "",
+                    "confidence": lead.get("confidence") or "",
+                    "city_or_region": location["city_or_region"],
+                    "country": location["country"],
+                    "source_url": lead["source_url"],
+                    "qaqc_status": review.get("verification_status", ""),
+                    "recommended_action": review.get("recommended_action", ""),
+                    "address_status": record.get("address_status", ""),
+                    "enriched_address": address.get("formatted_address") or "",
+                    "geometry_status": record.get("geometry_status", ""),
+                    "area_m2": record.get("area_m2") or geometry.get("area_m2") or "",
+                    "review_notes": (
+                        review.get("review_notes")
+                        or address.get("review_notes")
+                        or lead.get("review_notes")
+                        or ""
+                    ),
+                }
+            )
+    return rows
+
+
+def _all_lead_table_rows(root: Path, manifest: Any) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for child_run_id in _manifest_child_run_ids(manifest):
+        child_manifest = _load_run_manifest(root, child_run_id)
+        leads = load_leads(Path(child_manifest.lead_path))
+        for lead_index, lead in enumerate(leads):
+            lead_payload = lead.model_dump(mode="json")
+            location = lead_payload["location"]
+            item_id = f"{child_run_id}-{lead_index}"
+            for count_index, datum in enumerate(lead_payload["occupancy_data"]):
+                rows.append(
+                    {
+                        "row_id": f"{item_id}-{count_index}",
+                        "item_id": item_id,
+                        "run_id": child_run_id,
+                        "sample_set_id": "",
+                        "sample_round": "",
+                        "facility_type": child_manifest.profile_set,
+                        "lead_index": lead_index,
+                        "count_index": count_index,
+                        "facility_name": location["facility_name"],
+                        "count": datum["count"],
+                        "group_type": datum["group_type"],
+                        "incident_date": lead_payload["incident_date"],
+                        "incident_time": lead_payload["incident_time"],
+                        "strategy_id": lead_payload.get("strategy_id") or "",
+                        "representativeness": lead_payload.get("representativeness") or "",
+                        "confidence": lead_payload.get("confidence") or "",
+                        "city_or_region": location["city_or_region"],
+                        "country": location["country"],
+                        "source_url": lead_payload["source_url"],
+                        "qaqc_status": "",
+                        "recommended_action": "",
+                        "address_status": "",
+                        "enriched_address": "",
+                        "geometry_status": "",
+                        "area_m2": "",
+                        "review_notes": lead_payload.get("review_notes") or "",
+                    }
+                )
+    return rows
+
+
+def _run_table_payload(root: Path, run_id: str, *, mode: str) -> dict[str, Any]:
+    manifest = _load_any_manifest(root, run_id)
+    if mode == "all":
+        rows = _all_lead_table_rows(root, manifest)
+    elif mode == "verified":
+        records = merge_address_results(root, _approved_records_for_manifest(root, manifest))
+        rows = _table_rows_from_records(tuple(merge_geometry_items(root, records)))
+    else:
+        raise ValueError(f"unsupported table mode: {mode}")
+    return {
+        "mode": mode,
+        "context_type": "run",
+        "context_id": run_id,
+        "row_count": len(rows),
+        "rows": rows,
+    }
+
+
+def _sample_table_payload(root: Path, sample_set_id: str, *, mode: str) -> dict[str, Any]:
+    if mode != "verified":
+        raise ValueError("sample table only supports verified mode")
+    sample_set = refresh_sample_set(root, load_sample_set(root, sample_set_id))
+    rows = _table_rows_from_records(sample_records(root, sample_set))
+    return {
+        "mode": mode,
+        "context_type": "sample",
+        "context_id": sample_set_id,
+        "row_count": len(rows),
+        "rows": rows,
+    }
+
+
 def _read_log_text(path: Path) -> str:
     if not path.is_file():
         return ""
@@ -2681,6 +2803,16 @@ def create_app(
         except ValueError as exc:
             return _json_error(str(exc), status_code=404)
 
+    async def sample_table(request: Request) -> JSONResponse:
+        sample_set_id = request.path_params["sample_set_id"]
+        mode = request.query_params.get("mode", "verified")
+        try:
+            return JSONResponse(_sample_table_payload(root, sample_set_id, mode=mode))
+        except FileNotFoundError as exc:
+            return _json_error(str(exc), status_code=409)
+        except ValueError as exc:
+            return _json_error(str(exc), status_code=404)
+
     async def sample_export_verified_json(request: Request) -> Response:
         return _sample_verified_export_response(
             root,
@@ -2718,6 +2850,16 @@ def create_app(
         try:
             manifest = _load_any_manifest(root, run_id)
             return JSONResponse(_geometry_items_payload(root, manifest))
+        except FileNotFoundError as exc:
+            return _json_error(str(exc), status_code=409)
+        except ValueError as exc:
+            return _json_error(str(exc), status_code=404)
+
+    async def run_table(request: Request) -> JSONResponse:
+        run_id = request.path_params["run_id"]
+        mode = request.query_params.get("mode", "verified")
+        try:
+            return JSONResponse(_run_table_payload(root, run_id, mode=mode))
         except FileNotFoundError as exc:
             return _json_error(str(exc), status_code=409)
         except ValueError as exc:
@@ -3270,6 +3412,7 @@ def create_app(
         Route("/api/runs/{run_id}/address-results", run_address_results),
         Route("/api/runs/{run_id}/verified-leads", verified_leads),
         Route("/api/runs/{run_id}/geometry-items", geometry_items),
+        Route("/api/runs/{run_id}/table", run_table),
         Route("/api/geometry/geocode", geometry_geocode, methods=["POST"]),
         Route("/api/geometry/research", geometry_research, methods=["POST"]),
         Route(
@@ -3308,6 +3451,7 @@ def create_app(
             methods=["POST"],
         ),
         Route("/api/samples/{sample_set_id}/geometry-items", sample_geometry_items),
+        Route("/api/samples/{sample_set_id}/table", sample_table),
         Route("/api/samples/{sample_set_id}/export.verified.json", sample_export_verified_json),
         Route("/api/samples/{sample_set_id}/export.verified.csv", sample_export_verified_csv),
         Route(
@@ -3775,6 +3919,90 @@ INDEX_HTML = r"""<!doctype html>
       border-color: var(--accent);
       background: var(--selected);
     }
+    .table-toolbar {
+      display: grid;
+      grid-template-columns: auto minmax(220px, 1fr) auto auto auto auto;
+      gap: 8px;
+      align-items: end;
+      margin: 12px 0;
+    }
+    .table-mode {
+      display: flex;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .table-mode button {
+      border: 0;
+      border-radius: 0;
+      background: var(--input-bg);
+      color: var(--muted);
+      min-height: 38px;
+      padding: 8px 10px;
+    }
+    .table-mode button.active {
+      background: var(--accent);
+      color: var(--button-text);
+    }
+    .table-mode button:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+    .data-table-wrap {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: auto;
+      max-height: 620px;
+      background: var(--panel);
+    }
+    table.data-table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      font-size: 12px;
+      min-width: 1600px;
+    }
+    .data-table th,
+    .data-table td {
+      border-bottom: 1px solid var(--line);
+      padding: 7px 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+    .data-table th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: var(--panel-soft);
+      color: var(--muted);
+      font-weight: 750;
+      white-space: nowrap;
+    }
+    .data-table th button {
+      border: 0;
+      background: transparent;
+      color: inherit;
+      padding: 0;
+      min-height: 0;
+      font: inherit;
+      cursor: pointer;
+    }
+    .data-table td {
+      background: var(--panel);
+      color: var(--text);
+    }
+    .data-table a { color: var(--accent); }
+    .data-table .row-action {
+      padding: 5px 7px;
+      white-space: nowrap;
+    }
+    .table-empty {
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      color: var(--muted);
+      padding: 20px;
+      text-align: center;
+    }
     .geometry-queue-tabs {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3903,6 +4131,7 @@ INDEX_HTML = r"""<!doctype html>
       .workflow-header { flex-direction: column; }
       .workflow-step { grid-template-columns: 24px minmax(0, 1fr); }
       .workflow-step button { grid-column: 2; justify-self: start; }
+      .table-toolbar { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -3952,6 +4181,15 @@ INDEX_HTML = r"""<!doctype html>
       aria-controls="geometryPanel"
     >
       Geometry Studio <span id="geometryTabBadge" class="tab-badge">0</span>
+    </button>
+    <button
+      id="tableTab"
+      type="button"
+      role="tab"
+      aria-selected="false"
+      aria-controls="dataTablePanel"
+    >
+      Tabular Data <span id="tableTabBadge" class="tab-badge">0</span>
     </button>
   </nav>
   <main>
@@ -4256,6 +4494,46 @@ INDEX_HTML = r"""<!doctype html>
       </div>
     </section>
 
+    <section id="dataTablePanel" class="wide hidden" data-workspace="table">
+      <h2>Tabular Data</h2>
+      <div class="workflow-summary" id="tableContext">
+        Select a run or sample set to inspect collected observations as rows.
+      </div>
+      <div class="table-toolbar">
+        <div>
+          <label>Rows</label>
+          <div class="table-mode">
+            <button id="tableVerifiedMode" class="active" type="button">Verified Only</button>
+            <button id="tableAllMode" type="button">All Leads</button>
+          </div>
+        </div>
+        <div>
+          <label for="tableSearch">Search</label>
+          <input id="tableSearch" placeholder="Filter visible rows">
+        </div>
+        <button id="tableClearSearchButton" class="secondary" type="button">Clear Search</button>
+        <button id="tableRefreshButton" class="secondary" type="button">Refresh Table</button>
+        <button id="tableCopyButton" class="secondary" type="button">Copy Visible Rows</button>
+        <button id="tableCsvButton" class="secondary" type="button">Download CSV</button>
+      </div>
+      <div class="summary">
+        <div class="metric"><span>Context</span><strong id="tableMetricContext">-</strong></div>
+        <div class="metric"><span>Mode</span><strong id="tableMetricMode">Verified</strong></div>
+        <div class="metric"><span>Rows</span><strong id="tableMetricRows">0</strong></div>
+        <div class="metric"><span>Visible</span><strong id="tableMetricVisible">0</strong></div>
+      </div>
+      <div id="tableStatus" class="status">Ready.</div>
+      <div id="tableEmpty" class="table-empty">
+        No tabular data loaded.
+      </div>
+      <div id="tableWrap" class="data-table-wrap hidden">
+        <table class="data-table">
+          <thead id="tableHead"></thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+      </div>
+    </section>
+
     <section id="samplePanel" class="wide" data-workspace="workbench">
       <h2>Sample Set / Coverage</h2>
       <div class="actions">
@@ -4325,7 +4603,12 @@ INDEX_HTML = r"""<!doctype html>
       themePreference: 'system',
       workflow: null,
       activeWorkspace: 'workbench',
-      fullPipelineActive: false
+      fullPipelineActive: false,
+      tableMode: 'verified',
+      tableRows: [],
+      tableVisibleRows: [],
+      tableSortKey: 'facility_name',
+      tableSortDirection: 'asc'
     };
     const $ = (id) => document.getElementById(id);
     const terminalStatuses = ['completed', 'failed', 'cancelled'];
@@ -4354,17 +4637,23 @@ INDEX_HTML = r"""<!doctype html>
       for (const panel of document.querySelectorAll('[data-workspace]')) {
         panel.classList.toggle('hidden', panel.dataset.workspace !== workspace);
       }
-      const workbenchActive = workspace === 'workbench';
-      $('workbenchTab').classList.toggle('active', workbenchActive);
-      $('workbenchTab').setAttribute('aria-selected', String(workbenchActive));
-      $('geometryTab').classList.toggle('active', !workbenchActive);
-      $('geometryTab').setAttribute('aria-selected', String(!workbenchActive));
-      if (!workbenchActive) {
+      for (const [tabId, tabWorkspace] of [
+        ['workbenchTab', 'workbench'],
+        ['geometryTab', 'geometry'],
+        ['tableTab', 'table']
+      ]) {
+        const active = workspace === tabWorkspace;
+        $(tabId).classList.toggle('active', active);
+        $(tabId).setAttribute('aria-selected', String(active));
+      }
+      if (workspace === 'geometry') {
         initMap();
         window.setTimeout(() => {
           if (state.map) state.map.invalidateSize();
           if (state.selectedGeometryItemId) selectGeometryItem(state.selectedGeometryItemId);
         }, 0);
+      } else if (workspace === 'table') {
+        refreshDataTable().catch((error) => setTableStatus(error.message, 'error'));
       }
     }
 
@@ -4618,6 +4907,7 @@ INDEX_HTML = r"""<!doctype html>
         ? (summary.failed_count || 0)
         : (summary.regional_aggregate_count || 0);
       $('jsonOutput').value = JSON.stringify(leads.length ? leads : { manifest }, null, 2);
+      setTableBadge();
     }
 
     function resetResults() {
@@ -4628,6 +4918,8 @@ INDEX_HTML = r"""<!doctype html>
       state.currentLeads = [];
       state.geometryItems = [];
       state.selectedGeometryItemId = null;
+      state.tableRows = [];
+      state.tableVisibleRows = [];
       $('metricStatus').textContent = '-';
       $('metricLeads').textContent = '0';
       $('metricFacilityLabel').textContent = 'Facility';
@@ -4641,6 +4933,7 @@ INDEX_HTML = r"""<!doctype html>
       $('geometryDetail').value = '';
       renderGeometryList();
       renderWorkflow(null);
+      resetTable('No tabular data loaded.');
     }
 
     async function loadLog(runId) {
@@ -4727,6 +5020,7 @@ INDEX_HTML = r"""<!doctype html>
           $('metricAggregateLabel').textContent = 'Reviews';
           $('metricFacility').textContent = (reviews.child_reviews || []).length;
           $('metricAggregate').textContent = reviews.review_count || 0;
+          if (state.activeWorkspace === 'table') await refreshDataTable();
           setStatus('QAQC complete.', 'ok');
         }
         return payload;
@@ -4751,6 +5045,7 @@ INDEX_HTML = r"""<!doctype html>
           $('metricAggregateLabel').textContent = 'Addresses';
           $('metricFacility').textContent = (results.child_results || []).length;
           $('metricAggregate').textContent = results.result_count || 0;
+          if (state.activeWorkspace === 'table') await refreshDataTable();
           setStatus('Address enrichment complete.', 'ok');
         }
         return payload;
@@ -4904,6 +5199,246 @@ INDEX_HTML = r"""<!doctype html>
         stopPolling();
       }
       setStatus(`Loaded ${runId}.`);
+      if (state.activeWorkspace === 'table') {
+        await refreshDataTable();
+      } else {
+        setTableBadge();
+      }
+    }
+
+    const tableColumns = [
+      ['run_id', 'Run'],
+      ['sample_set_id', 'Sample'],
+      ['sample_round', 'Round'],
+      ['facility_type', 'Facility Type'],
+      ['lead_index', 'Lead'],
+      ['count_index', 'Count Row'],
+      ['facility_name', 'Facility'],
+      ['count', 'Count'],
+      ['group_type', 'Group'],
+      ['incident_date', 'Date'],
+      ['incident_time', 'Time'],
+      ['strategy_id', 'Strategy'],
+      ['representativeness', 'Representativeness'],
+      ['confidence', 'Confidence'],
+      ['city_or_region', 'City/Region'],
+      ['country', 'Country'],
+      ['source_url', 'Source'],
+      ['qaqc_status', 'QAQC'],
+      ['recommended_action', 'Action'],
+      ['address_status', 'Address'],
+      ['enriched_address', 'Enriched Address'],
+      ['geometry_status', 'Geometry'],
+      ['area_m2', 'Area m2'],
+      ['review_notes', 'Review Notes'],
+      ['actions', 'Actions']
+    ];
+
+    function setTableStatus(message, kind = '') {
+      $('tableStatus').textContent = message;
+      $('tableStatus').className = `status ${kind}`;
+    }
+
+    function tableContextLabel() {
+      if (state.currentSampleSetId) return `Sample set: ${state.currentSampleSetId}`;
+      if (state.currentRunId) return `Run: ${state.currentRunId}`;
+      return 'No run or sample set selected';
+    }
+
+    function setTableBadge() {
+      $('tableTabBadge').textContent = state.tableRows.length;
+      $('tableTabBadge').title = `${state.tableRows.length} loaded table row(s)`;
+    }
+
+    function resetTable(message = 'Select a run or sample set to inspect collected observations.') {
+      state.tableRows = [];
+      state.tableVisibleRows = [];
+      $('tableContext').textContent = tableContextLabel();
+      $('tableMetricContext').textContent = state.currentSampleSetId
+        ? 'sample'
+        : (state.currentRunId ? 'run' : '-');
+      $('tableMetricMode').textContent = state.tableMode === 'all' ? 'All' : 'Verified';
+      $('tableMetricRows').textContent = '0';
+      $('tableMetricVisible').textContent = '0';
+      $('tableHead').innerHTML = '';
+      $('tableBody').innerHTML = '';
+      $('tableWrap').classList.add('hidden');
+      $('tableEmpty').classList.remove('hidden');
+      $('tableEmpty').textContent = message;
+      setTableBadge();
+    }
+
+    function setTableMode(mode) {
+      state.tableMode = mode === 'all' ? 'all' : 'verified';
+      $('tableVerifiedMode').classList.toggle('active', state.tableMode === 'verified');
+      $('tableAllMode').classList.toggle('active', state.tableMode === 'all');
+      refreshDataTable().catch((error) => setTableStatus(error.message, 'error'));
+    }
+
+    function tableEndpoint() {
+      if (state.currentSampleSetId) {
+        return `/api/samples/${state.currentSampleSetId}/table?mode=verified`;
+      }
+      if (state.currentRunId) {
+        return `/api/runs/${state.currentRunId}/table?mode=${state.tableMode}`;
+      }
+      return null;
+    }
+
+    async function refreshDataTable() {
+      const endpoint = tableEndpoint();
+      $('tableContext').textContent = tableContextLabel();
+      $('tableAllMode').disabled = Boolean(state.currentSampleSetId);
+      if (state.currentSampleSetId && state.tableMode === 'all') {
+        state.tableMode = 'verified';
+        $('tableVerifiedMode').classList.add('active');
+        $('tableAllMode').classList.remove('active');
+      }
+      if (!endpoint) {
+        resetTable('No run or sample set selected.');
+        return;
+      }
+      setTableStatus('Loading table rows...');
+      try {
+        const payload = await api(endpoint);
+        state.tableRows = payload.rows || [];
+        $('tableMetricContext').textContent = payload.context_type || '-';
+        $('tableMetricMode').textContent = payload.mode === 'all' ? 'All' : 'Verified';
+        renderDataTable();
+        const noun = state.tableRows.length === 1 ? 'row' : 'rows';
+        setTableStatus(`Loaded ${state.tableRows.length} ${noun}.`, 'ok');
+      } catch (error) {
+        resetTable(
+          state.tableMode === 'verified'
+            ? 'Verified rows require a completed QAQC pass with keep decisions.'
+            : 'No table rows are available for this context.'
+        );
+        setTableStatus(error.message, 'error');
+      }
+    }
+
+    function tableCellValue(row, key) {
+      const value = row[key];
+      if (value == null) return '';
+      return String(value);
+    }
+
+    function sortedFilteredTableRows() {
+      const needle = $('tableSearch').value.trim().toLowerCase();
+      const filtered = state.tableRows.filter((row) => {
+        if (!needle) return true;
+        return Object.values(row).some((value) =>
+          String(value ?? '').toLowerCase().includes(needle)
+        );
+      });
+      const direction = state.tableSortDirection === 'desc' ? -1 : 1;
+      filtered.sort((left, right) => {
+        const leftValue = left[state.tableSortKey];
+        const rightValue = right[state.tableSortKey];
+        const leftNumber = Number(leftValue);
+        const rightNumber = Number(rightValue);
+        if (
+          leftValue !== '' &&
+          rightValue !== '' &&
+          Number.isFinite(leftNumber) &&
+          Number.isFinite(rightNumber)
+        ) {
+          return (leftNumber - rightNumber) * direction;
+        }
+        return String(leftValue ?? '').localeCompare(String(rightValue ?? '')) * direction;
+      });
+      return filtered;
+    }
+
+    function renderDataTable() {
+      state.tableVisibleRows = sortedFilteredTableRows();
+      $('tableMetricRows').textContent = state.tableRows.length;
+      $('tableMetricVisible').textContent = state.tableVisibleRows.length;
+      setTableBadge();
+      $('tableWrap').classList.toggle('hidden', !state.tableVisibleRows.length);
+      $('tableEmpty').classList.toggle('hidden', Boolean(state.tableVisibleRows.length));
+      if (!state.tableRows.length) {
+        $('tableEmpty').textContent = state.tableMode === 'verified'
+          ? 'No QAQC-approved rows are available for this context.'
+          : 'No leads are available for this context.';
+      } else if (!state.tableVisibleRows.length) {
+        $('tableEmpty').textContent = 'No rows match the current search.';
+      }
+      $('tableHead').innerHTML = `<tr>${tableColumns.map(([key, label]) => {
+        if (key === 'actions') return `<th>${label}</th>`;
+        const marker = state.tableSortKey === key
+          ? (state.tableSortDirection === 'asc' ? ' ▲' : ' ▼')
+          : '';
+        return `<th><button type="button" data-table-sort="${key}">` +
+          `${escapeHtml(label + marker)}</button></th>`;
+      }).join('')}</tr>`;
+      $('tableBody').innerHTML = state.tableVisibleRows.map((row) => {
+        const cells = tableColumns.map(([key]) => {
+          if (key === 'actions') {
+            return `<td><button class="row-action" type="button" ` +
+              `data-table-open-geometry="${escapeHtml(row.item_id || '')}">Open</button></td>`;
+          }
+          if (key === 'source_url' && /^https?:\/\//i.test(tableCellValue(row, key))) {
+            const url = tableCellValue(row, key);
+            return `<td><a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">` +
+              `${escapeHtml(url)}</a></td>`;
+          }
+          return `<td>${escapeHtml(tableCellValue(row, key))}</td>`;
+        }).join('');
+        return `<tr data-row-id="${escapeHtml(row.row_id || '')}">${cells}</tr>`;
+      }).join('');
+    }
+
+    function csvEscape(value) {
+      const text = String(value ?? '');
+      if (/[",\n\r]/.test(text)) return `"${text.replaceAll('"', '""')}"`;
+      return text;
+    }
+
+    function tableRowsToCsv(rows) {
+      const columns = tableColumns.filter(([key]) => key !== 'actions');
+      const header = columns.map(([, label]) => csvEscape(label)).join(',');
+      const lines = rows.map((row) =>
+        columns.map(([key]) => csvEscape(row[key])).join(',')
+      );
+      return [header, ...lines].join('\n');
+    }
+
+    async function copyVisibleTableRows() {
+      if (!state.tableVisibleRows.length) {
+        return setTableStatus('No visible rows to copy.', 'error');
+      }
+      await navigator.clipboard.writeText(tableRowsToCsv(state.tableVisibleRows));
+      setTableStatus(`Copied ${state.tableVisibleRows.length} visible row(s).`, 'ok');
+    }
+
+    function downloadVisibleTableCsv() {
+      if (!state.tableVisibleRows.length) {
+        return setTableStatus('No visible rows to download.', 'error');
+      }
+      const identity = state.currentSampleSetId || state.currentRunId || 'table';
+      downloadText(
+        `${identity}.${state.tableMode}.table.csv`,
+        tableRowsToCsv(state.tableVisibleRows),
+        'text/csv'
+      );
+      setTableStatus(`Downloaded ${state.tableVisibleRows.length} visible row(s).`, 'ok');
+    }
+
+    async function openTableRowInGeometry(itemId) {
+      if (!itemId) return setTableStatus('This row has no geometry item ID.', 'error');
+      setWorkspaceTab('geometry');
+      if (state.currentSampleSetId) {
+        await loadAugmentedSampleGeometry();
+      } else {
+        await loadApprovedGeometry();
+      }
+      const item = state.geometryItems.find((candidate) => candidate.item_id === itemId);
+      if (!item) {
+        return setGeometryStatus('That row is not available in Geometry Studio yet.', 'error');
+      }
+      selectGeometryItem(itemId);
+      setGeometryStatus('Opened table row in Geometry Studio.', 'ok');
     }
 
     async function cancelRun() {
@@ -5021,6 +5556,7 @@ INDEX_HTML = r"""<!doctype html>
       } else {
         setSampleStatus(`${state.samplePollPurpose} complete.`, 'ok');
       }
+      if (state.activeWorkspace === 'table') await refreshDataTable();
       return payload;
     }
 
@@ -5044,6 +5580,7 @@ INDEX_HTML = r"""<!doctype html>
       state.currentSampleSetId = payload.sample_set.sample_set_id;
       $('sampleOutput').value = JSON.stringify(payload, null, 2);
       setSampleStatus(`Sample set created: ${state.currentSampleSetId}.`, 'ok');
+      if (state.activeWorkspace === 'table') await refreshDataTable();
       await loadWorkflowStatus();
       await loadDialogue();
       return payload;
@@ -5211,6 +5748,7 @@ INDEX_HTML = r"""<!doctype html>
       });
       $('sampleOutput').value = JSON.stringify(payload, null, 2);
       setSampleStatus('Gap-fill started.', 'ok');
+      if (state.activeWorkspace === 'table') await refreshDataTable();
       if (payload.started) startSamplePolling(state.currentSampleSetId, 'gap fill');
     }
 
@@ -5224,6 +5762,7 @@ INDEX_HTML = r"""<!doctype html>
         payload.started ? 'Missing QAQC started.' : 'Missing QAQC pass complete.',
         'ok'
       );
+      if (state.activeWorkspace === 'table') await refreshDataTable();
       if (payload.started) startSamplePolling(state.currentSampleSetId, 'missing QAQC');
     }
 
@@ -5237,6 +5776,7 @@ INDEX_HTML = r"""<!doctype html>
         payload.started ? 'Missing address enrichment started.' : 'Missing address pass complete.',
         'ok'
       );
+      if (state.activeWorkspace === 'table') await refreshDataTable();
       if (payload.started) startSamplePolling(state.currentSampleSetId, 'missing address');
     }
 
@@ -6413,6 +6953,7 @@ INDEX_HTML = r"""<!doctype html>
       });
       $('workbenchTab').addEventListener('click', () => setWorkspaceTab('workbench'));
       $('geometryTab').addEventListener('click', () => setWorkspaceTab('geometry'));
+      $('tableTab').addEventListener('click', () => setWorkspaceTab('table'));
       $('profileSet').addEventListener('change', renderProfiles);
       $('singleMode').addEventListener('click', () => setMode('single'));
       $('batchMode').addEventListener('click', () => setMode('batch'));
@@ -6461,6 +7002,39 @@ INDEX_HTML = r"""<!doctype html>
       $('downloadSampleCsvButton').addEventListener('click', () => downloadSampleExport('csv'));
       $('downloadJsonButton').addEventListener('click', () => downloadExport('json'));
       $('downloadCsvButton').addEventListener('click', () => downloadExport('csv'));
+      $('tableVerifiedMode').addEventListener('click', () => setTableMode('verified'));
+      $('tableAllMode').addEventListener('click', () => setTableMode('all'));
+      $('tableSearch').addEventListener('input', renderDataTable);
+      $('tableClearSearchButton').addEventListener('click', () => {
+        $('tableSearch').value = '';
+        renderDataTable();
+      });
+      $('tableRefreshButton').addEventListener('click', () => {
+        refreshDataTable().catch((error) => setTableStatus(error.message, 'error'));
+      });
+      $('tableCopyButton').addEventListener('click', () => {
+        copyVisibleTableRows().catch((error) => setTableStatus(error.message, 'error'));
+      });
+      $('tableCsvButton').addEventListener('click', downloadVisibleTableCsv);
+      $('tableHead').addEventListener('click', (event) => {
+        const button = event.target.closest('[data-table-sort]');
+        if (!button) return;
+        const key = button.dataset.tableSort;
+        if (state.tableSortKey === key) {
+          state.tableSortDirection = state.tableSortDirection === 'asc' ? 'desc' : 'asc';
+        } else {
+          state.tableSortKey = key;
+          state.tableSortDirection = 'asc';
+        }
+        renderDataTable();
+      });
+      $('tableBody').addEventListener('click', (event) => {
+        const button = event.target.closest('[data-table-open-geometry]');
+        if (!button) return;
+        openTableRowInGeometry(button.dataset.tableOpenGeometry).catch(
+          (error) => setTableStatus(error.message, 'error')
+        );
+      });
       $('loadApprovedButton').addEventListener('click', () => {
         loadApprovedGeometry().catch((error) => setGeometryStatus(error.message, 'error'));
       });

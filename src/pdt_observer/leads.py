@@ -449,6 +449,7 @@ def render_lead_harvest_prompt(
     strategy_scout_plan: StrategyScoutPlan | None = None,
     run_id: str | None = None,
     activity_path: Path | None = None,
+    curation_guidance: str = "",
 ) -> str:
     profile_set = get_profile_set(profile_set_name)
     if profile_id is not None:
@@ -569,6 +570,8 @@ Suggested strategy-aware searches:
 {strategy_queries}
 
 {vernacular_guidance}
+
+{curation_guidance}
 
 {activity_guidance}
 

@@ -6,12 +6,14 @@ import threading
 from collections.abc import Sequence
 from pathlib import Path
 
+from pdt_observer.curation import approve_curation, set_exclusions
 from pdt_observer.dialogue import load_dialogue, render_dialogue
 from pdt_observer.geometry import GeometryPoint, GeometryStatus, geometry_item_from_payload
 from pdt_observer.harvest import run_harvest_campaign
 from pdt_observer.models import (
     CoverageFlag,
     CoverageSteeringReview,
+    CurationReasonCode,
     HarvestRunStatus,
     RecommendedGapFillJob,
     SampleSetManifest,
@@ -146,10 +148,21 @@ def test_sample_set_aggregates_campaign_child_runs_and_coverage_summary(
     coverage_path.parent.mkdir(exist_ok=True)
     coverage_path.write_text(review.model_dump_json(), encoding="utf-8")
 
-    filtered_records = sample_records(tmp_path, sample_set)
+    agent_flagged_records = sample_records(tmp_path, sample_set)
 
-    assert len(filtered_records) == 1
-    assert filtered_records[0]["item_id"] != records[0]["item_id"]
+    assert len(agent_flagged_records) == 2
+
+    set_exclusions(
+        tmp_path,
+        sample_set.sample_set_id,
+        item_ids=(str(records[0]["item_id"]),),
+        reason_code=CurationReasonCode.OUTSIDE_GEOGRAPHIC_SCOPE,
+        reason_note="Human review confirmed that this facility is outside Tennessee.",
+    )
+    curated_records = sample_records(tmp_path, sample_set)
+
+    assert len(curated_records) == 1
+    assert curated_records[0]["item_id"] != records[0]["item_id"]
 
 
 def test_gap_fill_appends_second_round_without_overwriting_initial_round(
@@ -175,11 +188,14 @@ def test_gap_fill_appends_second_round_without_overwriting_initial_round(
         updated_at="2026-07-24T00:00:00Z",
     )
     save_sample_set(tmp_path, sample_set)
+    curation = approve_curation(tmp_path, sample_set.sample_set_id, item_ids=())
+    assert curation.approval is not None
     review = CoverageSteeringReview(
         coverage_id="us-tn-sample-coverage",
         sample_set_id="us-tn-sample",
         dispersion_status="imbalanced",
         narrative_notes="Western Tennessee is underrepresented.",
+        curation_snapshot_id=curation.approval.snapshot_id,
         recommended_child_jobs=(
             RecommendedGapFillJob(
                 country="US",
@@ -230,11 +246,14 @@ def test_gap_fill_runs_job_teams_concurrently_with_geographer_reviews(
         updated_at="2026-07-24T00:00:00Z",
     )
     save_sample_set(tmp_path, sample_set)
+    curation = approve_curation(tmp_path, sample_set.sample_set_id, item_ids=())
+    assert curation.approval is not None
     review = CoverageSteeringReview(
         coverage_id="us-gap-parallel-coverage",
         sample_set_id="us-gap-parallel",
         dispersion_status="imbalanced",
         narrative_notes="Both ends of the state need targeted collection.",
+        curation_snapshot_id=curation.approval.snapshot_id,
         recommended_child_jobs=(
             RecommendedGapFillJob(
                 country="US",

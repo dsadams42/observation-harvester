@@ -45,11 +45,21 @@ from pdt_observer.app_api import (
     HarvestCampaignRunRequest,
     HarvestRunRequest,
     PromoteLeadRequest,
+    SampleCurationExcludeRequest,
+    SampleCurationRestoreRequest,
     SampleSetCreateRequest,
     SampleSetGapFillRequest,
 )
 from pdt_observer.app_runtime import ActiveCodexRegistry, delayed_hard_exit, run_background_job
 from pdt_observer.app_ui import INDEX_HTML
+from pdt_observer.curation import (
+    approve_curation,
+    curation_summary,
+    ensure_current_approval,
+    load_curation,
+    restore_items,
+    set_exclusions,
+)
 from pdt_observer.dialogue import (
     append_dialogue,
     combine_dialogue,
@@ -1638,25 +1648,61 @@ def _workflow_status_payload(
     else:
         sample_status = "blocked"
 
+    curation_state = "not_available"
+    curation_detail = "Create a sample set before human curation."
+    curation_included = 0
+    curation_excluded = 0
+    current_curation_approval = None
+    if sample_set is not None:
+        all_curation_items = sample_records(root, sample_set, include_excluded=True)
+        curation_manifest = load_curation(root, sample_set.sample_set_id)
+        curation_item_ids = tuple(str(item["item_id"]) for item in all_curation_items)
+        curation_payload = curation_summary(curation_manifest, curation_item_ids)
+        curation_state = str(curation_payload["approval_status"])
+        curation_included = int(curation_payload["included_count"])
+        curation_excluded = int(curation_payload["excluded_count"])
+        current_curation_approval = curation_manifest.approval
+        if curation_state == "approved":
+            curation_detail = (
+                f"Human-approved snapshot includes {curation_included} observation(s) and "
+                f"excludes {curation_excluded}."
+            )
+        elif curation_state == "stale":
+            curation_detail = (
+                "The sample or exclusions changed after approval. Review and approve it again."
+            )
+        else:
+            curation_detail = (
+                f"Review {len(all_curation_items)} observation(s), optionally exclude poor-fit "
+                "items, then approve. Individual review is not required."
+            )
+
     coverage_review = None
     coverage_status = "blocked"
-    coverage_detail = "Create a sample set and geocode observations first."
-    if sample_set is not None:
+    coverage_detail = "Approve the curated sample before coverage analysis."
+    if (
+        sample_set is not None
+        and curation_state == "approved"
+        and current_curation_approval is not None
+    ):
         try:
-            coverage_review = load_coverage_review(
+            candidate_review = load_coverage_review(
                 _latest_coverage_path(root, sample_set.sample_set_id)
             )
-            coverage_status = "complete"
-            coverage_detail = (
-                f"Latest assessment: {coverage_review.dispersion_status.value}; "
-                f"{len(coverage_review.recommended_child_jobs)} gap-fill job(s) recommended."
-            )
-        except FileNotFoundError:
-            if geocoded_count > 0:
-                coverage_status = "ready"
-                coverage_detail = f"{geocoded_count} geocoded observation(s) are ready to assess."
+            if candidate_review.curation_snapshot_id == current_curation_approval.snapshot_id:
+                coverage_review = candidate_review
+                coverage_status = "complete"
+                coverage_detail = (
+                    f"Latest assessment: {coverage_review.dispersion_status.value}; "
+                    f"{len(coverage_review.recommended_child_jobs)} gap-fill job(s) "
+                    "recommended."
+                )
             else:
-                coverage_detail = "Geocode at least one approved observation first."
+                coverage_status = "ready"
+                coverage_detail = "Curation changed; rerun coverage for the approved snapshot."
+        except FileNotFoundError:
+            coverage_status = "ready"
+            coverage_detail = f"{curation_included} included observation(s) are ready to assess."
 
     gap_rounds = (
         tuple(round_item for round_item in sample_set.rounds if round_item.role.value == "gap_fill")
@@ -1792,6 +1838,34 @@ def _workflow_status_payload(
             action_label="Create Sample Set" if sample_status == "ready" else None,
         ),
         _workflow_stage(
+            stage_id="curation",
+            label="Review and Approve Sample",
+            status=(
+                "complete"
+                if curation_state == "approved"
+                else ("attention" if curation_state == "stale" else (
+                    "ready" if sample_set is not None else "blocked"
+                ))
+            ),
+            current=curation_included,
+            total=curation_included + curation_excluded,
+            detail=curation_detail,
+            metrics={
+                "included_count": curation_included,
+                "excluded_count": curation_excluded,
+            },
+            action_id=(
+                "review_curation"
+                if sample_set is not None and curation_state != "approved"
+                else None
+            ),
+            action_label=(
+                "Review & Approve Sample"
+                if sample_set is not None and curation_state != "approved"
+                else None
+            ),
+        ),
+        _workflow_stage(
             stage_id="coverage",
             label="Analyze Coverage",
             status=coverage_status,
@@ -1820,12 +1894,21 @@ def _workflow_status_payload(
         _workflow_stage(
             stage_id="export",
             label="Export Dataset",
-            status="ready" if verified_count > 0 else "blocked",
-            current=verified_count,
-            total=verified_count,
-            detail=f"{verified_count} QAQC-approved observation(s) are available for export.",
-            action_id="export_json" if verified_count > 0 else None,
-            action_label="Download Verified JSON" if verified_count > 0 else None,
+            status="ready" if (approved_count if sample_set else verified_count) > 0 else "blocked",
+            current=approved_count if sample_set else verified_count,
+            total=approved_count if sample_set else verified_count,
+            detail=(
+                f"{approved_count if sample_set else verified_count} included observation(s) "
+                "are available for export."
+            ),
+            action_id=(
+                "export_json" if (approved_count if sample_set else verified_count) > 0 else None
+            ),
+            action_label=(
+                "Download Verified JSON"
+                if (approved_count if sample_set else verified_count) > 0
+                else None
+            ),
         ),
     ]
     next_action = next(
@@ -2044,6 +2127,9 @@ def _table_rows_from_records(records: Sequence[dict[str, Any]]) -> list[dict[str
                         or lead.get("review_notes")
                         or ""
                     ),
+                    "excluded_from_dataset": False,
+                    "exclusion_reason_code": "",
+                    "exclusion_reason_note": "",
                 }
             )
     return rows
@@ -2087,6 +2173,9 @@ def _all_lead_table_rows(root: Path, manifest: Any) -> list[dict[str, Any]]:
                         "geometry_status": "",
                         "area_m2": "",
                         "review_notes": lead_payload.get("review_notes") or "",
+                        "excluded_from_dataset": False,
+                        "exclusion_reason_code": "",
+                        "exclusion_reason_note": "",
                     }
                 )
     return rows
@@ -2114,13 +2203,44 @@ def _sample_table_payload(root: Path, sample_set_id: str, *, mode: str) -> dict[
     if mode != "verified":
         raise ValueError("sample table only supports verified mode")
     sample_set = refresh_sample_set(root, load_sample_set(root, sample_set_id))
-    rows = _table_rows_from_records(sample_records(root, sample_set))
+    records = sample_records(root, sample_set, include_excluded=True)
+    curation = load_curation(root, sample_set_id)
+    decisions = {decision.item_id: decision for decision in curation.decisions}
+    rows = _table_rows_from_records(records)
+    for row in rows:
+        decision = decisions.get(str(row["item_id"]))
+        if decision is None:
+            continue
+        row["excluded_from_dataset"] = True
+        row["exclusion_reason_code"] = decision.reason_code.value
+        row["exclusion_reason_note"] = decision.reason_note or ""
+    item_ids = tuple(str(record["item_id"]) for record in records)
     return {
         "mode": mode,
         "context_type": "sample",
         "context_id": sample_set_id,
         "row_count": len(rows),
         "rows": rows,
+        "curation": curation_summary(curation, item_ids),
+    }
+
+
+def _sample_curation_context(
+    root: Path,
+    sample_set_id: str,
+) -> tuple[Any, tuple[dict[str, Any], ...], Any, tuple[str, ...]]:
+    sample_set = refresh_sample_set(root, load_sample_set(root, sample_set_id))
+    records = sample_records(root, sample_set, include_excluded=True)
+    curation = load_curation(root, sample_set_id)
+    item_ids = tuple(str(record["item_id"]) for record in records)
+    return sample_set, records, curation, item_ids
+
+
+def _sample_curation_payload(root: Path, sample_set_id: str) -> dict[str, Any]:
+    sample_set, _, curation, item_ids = _sample_curation_context(root, sample_set_id)
+    return {
+        "sample_set": sample_set.model_dump(mode="json"),
+        "curation": curation_summary(curation, item_ids),
     }
 
 
@@ -2818,6 +2938,87 @@ def create_app(
         except ValueError as exc:
             return _json_error(str(exc), status_code=404)
 
+    async def sample_curation_detail(request: Request) -> JSONResponse:
+        try:
+            return JSONResponse(
+                _sample_curation_payload(root, request.path_params["sample_set_id"])
+            )
+        except ValueError as exc:
+            return _json_error(str(exc), status_code=404)
+
+    async def sample_curation_exclude(request: Request) -> JSONResponse:
+        sample_set_id = request.path_params["sample_set_id"]
+        try:
+            data = SampleCurationExcludeRequest.model_validate(await _request_json(request))
+            _, _, _, item_ids = _sample_curation_context(root, sample_set_id)
+            unknown = sorted(set(data.item_ids) - set(item_ids))
+            if unknown:
+                raise ValueError(
+                    "observation item(s) are not part of this sample: " + ", ".join(unknown)
+                )
+            set_exclusions(
+                root,
+                sample_set_id,
+                item_ids=data.item_ids,
+                reason_code=data.reason_code,
+                reason_note=data.reason_note,
+            )
+            append_dialogue(
+                root,
+                sample_set_id,
+                speaker="Human Reviewer",
+                stage="sample_curation",
+                message=f"I excluded {len(set(data.item_ids))} observation(s) from the dataset.",
+                rationale=(
+                    f"Reason: {data.reason_code.value}. "
+                    f"{data.reason_note or ''}"
+                ).strip(),
+            )
+            return JSONResponse(_sample_curation_payload(root, sample_set_id))
+        except (ValidationError, ValueError) as exc:
+            return _json_error(str(exc), status_code=400)
+
+    async def sample_curation_restore(request: Request) -> JSONResponse:
+        sample_set_id = request.path_params["sample_set_id"]
+        try:
+            data = SampleCurationRestoreRequest.model_validate(await _request_json(request))
+            restore_items(root, sample_set_id, item_ids=data.item_ids)
+            append_dialogue(
+                root,
+                sample_set_id,
+                speaker="Human Reviewer",
+                stage="sample_curation",
+                message=f"I restored {len(set(data.item_ids))} observation(s) to the dataset.",
+                rationale="The restored observations will be reconsidered at the next approval.",
+            )
+            return JSONResponse(_sample_curation_payload(root, sample_set_id))
+        except (ValidationError, ValueError) as exc:
+            return _json_error(str(exc), status_code=400)
+
+    async def sample_curation_approve(request: Request) -> JSONResponse:
+        sample_set_id = request.path_params["sample_set_id"]
+        try:
+            _, _, _, item_ids = _sample_curation_context(root, sample_set_id)
+            manifest = approve_curation(root, sample_set_id, item_ids=item_ids)
+            summary = curation_summary(manifest, item_ids)
+            append_dialogue(
+                root,
+                sample_set_id,
+                speaker="Human Reviewer",
+                stage="sample_curation",
+                message=(
+                    f"I approved the curated sample with {summary['included_count']} included "
+                    f"and {summary['excluded_count']} excluded observation(s)."
+                ),
+                rationale=(
+                    "No item-by-item feedback was required; only explicit exclusions affect "
+                    "coverage and gap-fill guidance."
+                ),
+            )
+            return JSONResponse(_sample_curation_payload(root, sample_set_id))
+        except ValueError as exc:
+            return _json_error(str(exc), status_code=400)
+
     async def sample_log(request: Request) -> PlainTextResponse:
         sample_set_id = request.path_params["sample_set_id"]
         return PlainTextResponse(_read_log_text(log_path_for_run(root, sample_set_id)))
@@ -2896,6 +3097,11 @@ def create_app(
 
     async def sample_coverage_run(request: Request) -> JSONResponse:
         sample_set_id = request.path_params["sample_set_id"]
+        try:
+            _, _, curation, item_ids = _sample_curation_context(root, sample_set_id)
+            ensure_current_approval(curation, item_ids)
+        except ValueError as exc:
+            return _json_error(str(exc), status_code=409)
         if registry.is_active(sample_set_id):
             return _json_error(
                 f"Sample set already has active work: {sample_set_id}",
@@ -2968,7 +3174,17 @@ def create_app(
                 if data.coverage_id
                 else _latest_coverage_path(root, sample_set_id)
             )
+            review = load_coverage_review(coverage_path)
+            _, _, curation, item_ids = _sample_curation_context(root, sample_set_id)
+            approval = ensure_current_approval(curation, item_ids)
+            if review.curation_snapshot_id != approval.snapshot_id:
+                raise ValueError(
+                    "coverage analysis is stale for the current human curation approval; "
+                    "rerun coverage"
+                )
         except (ValidationError, FileNotFoundError) as exc:
+            return _json_error(str(exc), status_code=409)
+        except ValueError as exc:
             return _json_error(str(exc), status_code=409)
         task = partial(
             run_gap_fill,
@@ -3759,6 +3975,22 @@ def create_app(
         Route("/api/samples", samples),
         Route("/api/samples/from-run", sample_create_from_run, methods=["POST"]),
         Route("/api/samples/{sample_set_id}", sample_detail),
+        Route("/api/samples/{sample_set_id}/curation", sample_curation_detail),
+        Route(
+            "/api/samples/{sample_set_id}/curation/exclude",
+            sample_curation_exclude,
+            methods=["POST"],
+        ),
+        Route(
+            "/api/samples/{sample_set_id}/curation/restore",
+            sample_curation_restore,
+            methods=["POST"],
+        ),
+        Route(
+            "/api/samples/{sample_set_id}/curation/approve",
+            sample_curation_approve,
+            methods=["POST"],
+        ),
         Route("/api/samples/{sample_set_id}/status", sample_status),
         Route("/api/samples/{sample_set_id}/workflow-status", sample_workflow_status),
         Route("/api/samples/{sample_set_id}/log", sample_log),

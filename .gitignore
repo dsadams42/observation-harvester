@@ -16,6 +16,7 @@ address_runs/
 agent_activity/
 agent_dialogue/
 coverage_runs/
+curation_runs/
 geocode_cache/
 geometry_reviews/
 geographer_runs/

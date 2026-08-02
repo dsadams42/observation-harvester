@@ -498,6 +498,23 @@ INDEX_HTML = r"""<!doctype html>
       padding: 20px;
       text-align: center;
     }
+    .curation-panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-soft);
+      padding: 12px;
+      margin: 12px 0;
+    }
+    .curation-controls {
+      display: grid;
+      grid-template-columns: auto auto minmax(180px, 1fr) minmax(220px, 2fr) auto auto;
+      gap: 8px;
+      align-items: end;
+    }
+    .curation-filter { display: flex; gap: 6px; }
+    .curation-filter button.active { background: var(--accent); color: var(--button-text); }
+    .data-table tr.excluded td { opacity: 0.7; background: var(--panel-soft); }
+    .data-table .selection-cell { text-align: center; }
     .geometry-queue-tabs {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -627,6 +644,7 @@ INDEX_HTML = r"""<!doctype html>
       .workflow-step { grid-template-columns: 24px minmax(0, 1fr); }
       .workflow-step button { grid-column: 2; justify-self: start; }
       .table-toolbar { grid-template-columns: 1fr; }
+      .curation-controls { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -747,7 +765,7 @@ INDEX_HTML = r"""<!doctype html>
       <div class="pipeline-callout">
         <strong id="fullPipelineHeading">Guided end-to-end workflow</strong>
         <span id="fullPipelineStatus">
-          Runs through coverage analysis, then pauses before gap fill for your review.
+          Runs through sample creation, then pauses for optional exclusions and approval.
         </span>
       </div>
       <div id="status" class="status">Ready.</div>
@@ -1011,6 +1029,59 @@ INDEX_HTML = r"""<!doctype html>
         <button id="tableCopyButton" class="secondary" type="button">Copy Visible Rows</button>
         <button id="tableCsvButton" class="secondary" type="button">Download CSV</button>
       </div>
+      <div id="curationPanel" class="curation-panel hidden">
+        <div class="workflow-header">
+          <div>
+            <h3>Human Curation</h3>
+            <div id="curationSummary" class="workflow-summary">
+              Approve all observations, or select only those that should be excluded.
+            </div>
+          </div>
+          <button id="approveCurationButton" type="button">
+            Approve Dataset &amp; Analyze Coverage
+          </button>
+        </div>
+        <div class="curation-controls">
+          <div>
+            <label>Show</label>
+            <div class="curation-filter">
+              <button id="curationIncludedFilter" class="secondary active" type="button">
+                Included
+              </button>
+              <button id="curationExcludedFilter" class="secondary" type="button">Excluded</button>
+              <button id="curationAllFilter" class="secondary" type="button">All</button>
+            </div>
+          </div>
+          <button id="selectVisibleButton" class="secondary" type="button">Select Visible</button>
+          <div>
+            <label for="exclusionReason">Exclusion reason</label>
+            <select id="exclusionReason">
+              <option value="wrong_facility">Wrong facility or observation type</option>
+              <option value="duplicate">Duplicate</option>
+              <option value="outside_geographic_scope">Outside geographic scope</option>
+              <option value="evidence_insufficient">Evidence insufficient</option>
+              <option value="incorrect_count_meaning">Count meaning is incorrect</option>
+              <option value="unrepresentative">Unrepresentative observation</option>
+              <option value="address_or_coordinate_unresolved">Location unresolved</option>
+              <option value="facility_type_not_relevant">Facility type not relevant</option>
+              <option value="other">Other (note required)</option>
+            </select>
+          </div>
+          <div>
+            <label for="exclusionNote">Reasoning (optional)</label>
+            <input id="exclusionNote" placeholder="Brief context for the coverage agent">
+          </div>
+          <button id="excludeSelectedButton" class="secondary" type="button">
+            Exclude Selected
+          </button>
+          <button id="restoreSelectedButton" class="secondary" type="button">
+            Restore Selected
+          </button>
+        </div>
+        <div id="curationStatus" class="status">
+          No individual review is required. Approval with no exclusions is valid.
+        </div>
+      </div>
       <div class="summary">
         <div class="metric"><span>Context</span><strong id="tableMetricContext">-</strong></div>
         <div class="metric"><span>Mode</span><strong id="tableMetricMode">Verified</strong></div>
@@ -1102,6 +1173,9 @@ INDEX_HTML = r"""<!doctype html>
       tableMode: 'verified',
       tableRows: [],
       tableVisibleRows: [],
+      curation: null,
+      curationFilter: 'included',
+      selectedCurationItemIds: new Set(),
       tableSortKey: 'facility_name',
       tableSortDirection: 'asc'
     };
@@ -1248,6 +1322,11 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function workflowAction(actionId) {
+      if (actionId === 'review_curation') {
+        setWorkspaceTab('table');
+        refreshDataTable().catch((error) => setTableStatus(error.message, 'error'));
+        return;
+      }
       const targets = {
         run_qaqc: 'runQaqcButton',
         run_address: 'runAddressButton',
@@ -1702,6 +1781,9 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     const tableColumns = [
+      ['select', 'Select'],
+      ['curation_status', 'Dataset Status'],
+      ['exclusion_reason_note', 'Exclusion Reason'],
       ['run_id', 'Run'],
       ['sample_set_id', 'Sample'],
       ['sample_round', 'Round'],
@@ -1748,6 +1830,9 @@ INDEX_HTML = r"""<!doctype html>
     function resetTable(message = 'Select a run or sample set to inspect collected observations.') {
       state.tableRows = [];
       state.tableVisibleRows = [];
+      state.curation = null;
+      state.selectedCurationItemIds.clear();
+      $('curationPanel').classList.add('hidden');
       $('tableContext').textContent = tableContextLabel();
       $('tableMetricContext').textContent = state.currentSampleSetId
         ? 'sample'
@@ -1780,6 +1865,34 @@ INDEX_HTML = r"""<!doctype html>
       return null;
     }
 
+    function setCurationFilter(filter) {
+      state.curationFilter = ['included', 'excluded', 'all'].includes(filter)
+        ? filter
+        : 'included';
+      $('curationIncludedFilter').classList.toggle('active', state.curationFilter === 'included');
+      $('curationExcludedFilter').classList.toggle('active', state.curationFilter === 'excluded');
+      $('curationAllFilter').classList.toggle('active', state.curationFilter === 'all');
+      renderDataTable();
+    }
+
+    function renderCurationSummary() {
+      const summary = state.curation;
+      $('curationPanel').classList.toggle('hidden', !summary);
+      if (!summary) return;
+      const approval = summary.approval_status === 'approved'
+        ? 'Approved'
+        : (summary.approval_status === 'stale' ? 'Approval needs renewal' : 'Awaiting approval');
+      $('curationSummary').textContent =
+        `${summary.included_count} included, ${summary.excluded_count} excluded. ${approval}. ` +
+        'You may approve without selecting or excluding any observations.';
+      $('curationStatus').textContent = state.selectedCurationItemIds.size
+        ? `${state.selectedCurationItemIds.size} observation(s) selected.`
+        : 'No observations selected. Approval with no exclusions is valid.';
+      $('approveCurationButton').textContent = summary.approval_status === 'approved'
+        ? 'Reapprove & Analyze Coverage'
+        : 'Approve Dataset & Analyze Coverage';
+    }
+
     async function refreshDataTable() {
       const endpoint = tableEndpoint();
       $('tableContext').textContent = tableContextLabel();
@@ -1797,6 +1910,9 @@ INDEX_HTML = r"""<!doctype html>
       try {
         const payload = await api(endpoint);
         state.tableRows = payload.rows || [];
+        state.curation = state.currentSampleSetId ? (payload.curation || null) : null;
+        state.selectedCurationItemIds.clear();
+        renderCurationSummary();
         $('tableMetricContext').textContent = payload.context_type || '-';
         $('tableMetricMode').textContent = payload.mode === 'all' ? 'All' : 'Verified';
         renderDataTable();
@@ -1821,6 +1937,8 @@ INDEX_HTML = r"""<!doctype html>
     function sortedFilteredTableRows() {
       const needle = $('tableSearch').value.trim().toLowerCase();
       const filtered = state.tableRows.filter((row) => {
+        if (state.curationFilter === 'included' && row.excluded_from_dataset) return false;
+        if (state.curationFilter === 'excluded' && !row.excluded_from_dataset) return false;
         if (!needle) return true;
         return Object.values(row).some((value) =>
           String(value ?? '').toLowerCase().includes(needle)
@@ -1860,6 +1978,7 @@ INDEX_HTML = r"""<!doctype html>
         $('tableEmpty').textContent = 'No rows match the current search.';
       }
       $('tableHead').innerHTML = `<tr>${tableColumns.map(([key, label]) => {
+        if (key === 'select') return `<th>${label}</th>`;
         if (key === 'actions') return `<th>${label}</th>`;
         const marker = state.tableSortKey === key
           ? (state.tableSortDirection === 'asc' ? ' ▲' : ' ▼')
@@ -1869,6 +1988,19 @@ INDEX_HTML = r"""<!doctype html>
       }).join('')}</tr>`;
       $('tableBody').innerHTML = state.tableVisibleRows.map((row) => {
         const cells = tableColumns.map(([key]) => {
+          if (key === 'select') {
+            const checked = state.selectedCurationItemIds.has(row.item_id) ? ' checked' : '';
+            return `<td class="selection-cell"><input type="checkbox" ` +
+              `data-curation-item="${escapeHtml(row.item_id || '')}"${checked}></td>`;
+          }
+          if (key === 'curation_status') {
+            return `<td>${row.excluded_from_dataset ? 'Excluded' : 'Included'}</td>`;
+          }
+          if (key === 'exclusion_reason_note') {
+            const reason = [row.exclusion_reason_code, row.exclusion_reason_note]
+              .filter(Boolean).join(': ');
+            return `<td>${escapeHtml(reason)}</td>`;
+          }
           if (key === 'actions') {
             return `<td><button class="row-action" type="button" ` +
               `data-table-open-geometry="${escapeHtml(row.item_id || '')}">Open</button></td>`;
@@ -1880,8 +2012,10 @@ INDEX_HTML = r"""<!doctype html>
           }
           return `<td>${escapeHtml(tableCellValue(row, key))}</td>`;
         }).join('');
-        return `<tr data-row-id="${escapeHtml(row.row_id || '')}">${cells}</tr>`;
+        const rowClass = row.excluded_from_dataset ? ' class="excluded"' : '';
+        return `<tr${rowClass} data-row-id="${escapeHtml(row.row_id || '')}">${cells}</tr>`;
       }).join('');
+      renderCurationSummary();
     }
 
     function csvEscape(value) {
@@ -1891,7 +2025,7 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function tableRowsToCsv(rows) {
-      const columns = tableColumns.filter(([key]) => key !== 'actions');
+      const columns = tableColumns.filter(([key]) => !['actions', 'select'].includes(key));
       const header = columns.map(([, label]) => csvEscape(label)).join(',');
       const lines = rows.map((row) =>
         columns.map(([key]) => csvEscape(row[key])).join(',')
@@ -1918,6 +2052,70 @@ INDEX_HTML = r"""<!doctype html>
         'text/csv'
       );
       setTableStatus(`Downloaded ${state.tableVisibleRows.length} visible row(s).`, 'ok');
+    }
+
+    function selectedCurationItems() {
+      return Array.from(state.selectedCurationItemIds);
+    }
+
+    async function excludeSelectedObservations() {
+      const itemIds = selectedCurationItems();
+      if (!itemIds.length) {
+        return setTableStatus('Select at least one observation to exclude.', 'error');
+      }
+      const reasonCode = $('exclusionReason').value;
+      const reasonNote = $('exclusionNote').value.trim();
+      if (reasonCode === 'other' && !reasonNote) {
+        return setTableStatus('A short note is required for the Other reason.', 'error');
+      }
+      await api(`/api/samples/${state.currentSampleSetId}/curation/exclude`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          item_ids: itemIds,
+          reason_code: reasonCode,
+          reason_note: reasonNote || null
+        })
+      });
+      $('exclusionNote').value = '';
+      setTableStatus(`Excluded ${itemIds.length} observation(s). Approval is now required.`, 'ok');
+      await refreshDataTable();
+      await loadWorkflowStatus();
+      await loadDialogue();
+    }
+
+    async function restoreSelectedObservations() {
+      const itemIds = selectedCurationItems();
+      if (!itemIds.length) {
+        return setTableStatus('Select at least one excluded observation to restore.', 'error');
+      }
+      await api(`/api/samples/${state.currentSampleSetId}/curation/restore`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ item_ids: itemIds })
+      });
+      setTableStatus(`Restored ${itemIds.length} observation(s). Approval is now required.`, 'ok');
+      await refreshDataTable();
+      await loadWorkflowStatus();
+      await loadDialogue();
+    }
+
+    async function approveCurationAndAnalyzeCoverage() {
+      if (!state.currentSampleSetId) {
+        return setTableStatus('Create or select a sample set first.', 'error');
+      }
+      const payload = await api(`/api/samples/${state.currentSampleSetId}/curation/approve`, {
+        method: 'POST'
+      });
+      state.curation = payload.curation;
+      renderCurationSummary();
+      setTableStatus(
+        `Approved ${payload.curation.included_count} included observation(s); starting coverage.`,
+        'ok'
+      );
+      await loadDialogue();
+      await analyzeCoverage();
+      await loadWorkflowStatus();
     }
 
     async function openTableRowInGeometry(itemId) {
@@ -2159,7 +2357,7 @@ INDEX_HTML = r"""<!doctype html>
       setWorkspaceTab('workbench');
       try {
         setPipelineStatus(
-          'Step 1 of 6 - Geographic review and harvest',
+          'Step 1 of 5 - Geographic review and harvest',
           'The Geographer Agent will adapt terminology before the harvest jobs begin.'
         );
         const harvestStart = await runHarvest({ managed: true });
@@ -2170,21 +2368,21 @@ INDEX_HTML = r"""<!doctype html>
         }
 
         setPipelineStatus(
-          'Step 2 of 6 - QAQC',
+          'Step 2 of 5 - QAQC',
           'Reviewing every harvested observation for evidence quality and geographic scope.'
         );
         await runQaqc({ managed: true });
         await waitForRunStage('qaqc');
 
         setPipelineStatus(
-          'Step 3 of 6 - Address enrichment',
+          'Step 3 of 5 - Address enrichment',
           'Improving facility addresses before coordinate assignment.'
         );
         await runAddressEnrichment({ managed: true });
         await waitForRunStage('address');
 
         setPipelineStatus(
-          'Step 4 of 6 - Automated geocoding',
+          'Step 4 of 5 - Automated geocoding',
           'Assigning spatially validated coordinates to accepted observations.'
         );
         const geocodeSummary = await geocodeAcceptedObservations();
@@ -2193,35 +2391,28 @@ INDEX_HTML = r"""<!doctype html>
         }
 
         setPipelineStatus(
-          'Step 5 of 6 - Sample creation',
+          'Step 5 of 5 - Sample creation',
           'Combining the reviewed observations into a sample set.'
         );
         await createSampleSet();
 
-        setPipelineStatus(
-          'Step 6 of 6 - Coverage analysis',
-          'Assessing geographic and facility coverage before any gap-fill work.'
-        );
-        await analyzeCoverage({ managed: true });
-        await waitForSampleStage('coverage');
-        const coverage = await api(
-          `/api/samples/${state.currentSampleSetId}/coverage-results`
-        );
-        $('sampleOutput').value = JSON.stringify(coverage, null, 2);
         const interventionCount = Number($('interventionCount').textContent || 0);
         const reviewNote = interventionCount
           ? ` ${interventionCount} coordinate assignment(s) also need review in Geometry Studio.`
           : '';
         setPipelineStatus(
-          'Coverage ready - human review required',
-          'The automated pipeline is paused before gap fill. Review the coverage findings, ' +
-            `then choose Run Gap Fill if the proposed work is appropriate.${reviewNote}`,
+          'Sample ready - human approval required',
+          'The automated pipeline is paused in Tabular Data. Exclude only unsuitable ' +
+            'observations, or approve immediately with no feedback. Approval starts coverage ' +
+            `analysis; gap fill remains a separate decision.${reviewNote}`,
           'ok'
         );
         setSampleStatus(
-          'Coverage analysis complete. Review the findings before running gap fill.',
+          'Review the sample in Tabular Data, then approve it to start coverage analysis.',
           'ok'
         );
+        setWorkspaceTab('table');
+        await refreshDataTable();
         await loadWorkflowStatus();
       } catch (error) {
         setPipelineStatus('Full pipeline stopped', error.message, 'error');
@@ -3499,6 +3690,33 @@ INDEX_HTML = r"""<!doctype html>
       $('downloadCsvButton').addEventListener('click', () => downloadExport('csv'));
       $('tableVerifiedMode').addEventListener('click', () => setTableMode('verified'));
       $('tableAllMode').addEventListener('click', () => setTableMode('all'));
+      $('curationIncludedFilter').addEventListener('click', () => setCurationFilter('included'));
+      $('curationExcludedFilter').addEventListener('click', () => setCurationFilter('excluded'));
+      $('curationAllFilter').addEventListener('click', () => setCurationFilter('all'));
+      $('selectVisibleButton').addEventListener('click', () => {
+        const visibleIds = new Set(
+          state.tableVisibleRows.map((row) => row.item_id).filter(Boolean)
+        );
+        const allSelected = Array.from(visibleIds).every((itemId) =>
+          state.selectedCurationItemIds.has(itemId)
+        );
+        for (const itemId of visibleIds) {
+          if (allSelected) state.selectedCurationItemIds.delete(itemId);
+          else state.selectedCurationItemIds.add(itemId);
+        }
+        renderDataTable();
+      });
+      $('excludeSelectedButton').addEventListener('click', () => {
+        excludeSelectedObservations().catch((error) => setTableStatus(error.message, 'error'));
+      });
+      $('restoreSelectedButton').addEventListener('click', () => {
+        restoreSelectedObservations().catch((error) => setTableStatus(error.message, 'error'));
+      });
+      $('approveCurationButton').addEventListener('click', () => {
+        approveCurationAndAnalyzeCoverage().catch(
+          (error) => setTableStatus(error.message, 'error')
+        );
+      });
       $('tableSearch').addEventListener('input', renderDataTable);
       $('tableClearSearchButton').addEventListener('click', () => {
         $('tableSearch').value = '';
@@ -3529,6 +3747,14 @@ INDEX_HTML = r"""<!doctype html>
         openTableRowInGeometry(button.dataset.tableOpenGeometry).catch(
           (error) => setTableStatus(error.message, 'error')
         );
+      });
+      $('tableBody').addEventListener('change', (event) => {
+        const checkbox = event.target.closest('[data-curation-item]');
+        if (!checkbox) return;
+        const itemId = checkbox.dataset.curationItem;
+        if (checkbox.checked) state.selectedCurationItemIds.add(itemId);
+        else state.selectedCurationItemIds.delete(itemId);
+        renderCurationSummary();
       });
       $('loadApprovedButton').addEventListener('click', () => {
         loadApprovedGeometry().catch((error) => setGeometryStatus(error.message, 'error'));

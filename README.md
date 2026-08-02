@@ -39,7 +39,8 @@ OASIS currently supports:
 - Address enrichment followed by Nominatim geocoding and spatial extent validation.
 - Human coordinate resolution using focused research, ranked candidates, Google Search
   and Google Maps links, map placement, or pasted coordinates/Google Maps URLs.
-- Coverage analysis and reviewer-approved gap-fill campaigns.
+- Optional human sample curation, followed by coverage analysis and reviewer-approved
+  gap-fill campaigns.
 - Footprint digitization, geometry storage, and planar building-area calculation.
 - A tabular review workspace for QAQC-approved records or raw lead debugging.
 - QAQC-gated JSON, CSV, and footprint GeoJSON exports.
@@ -255,6 +256,16 @@ raw harvested leads before QAQC. Visible rows can be searched, sorted, copied, e
 as CSV from the browser, or opened directly in Geometry Studio when a geometry item is
 available.
 
+For sample sets, Tabular Data is also the human curation checkpoint. A reviewer may
+approve the entire sample immediately without selecting individual rows or supplying
+feedback. If unsuitable observations are found, the reviewer selects only those items,
+assigns an exclusion reason, and may add a note. Exclusions are non-destructive: they
+remain visible and can be restored, but are omitted from curated exports, geometry,
+coverage calculations, and gap-fill input. The coverage and gap-fill agents receive
+the rejected observations as bounded negative examples; when there are no exclusions,
+no corrective prompt guidance is added. Changing an exclusion makes the prior approval
+stale and requires reapproval before coverage can run.
+
 ## Artifacts and Data
 
 OASIS stores work locally in the repository workspace:
@@ -271,6 +282,7 @@ OASIS stores work locally in the repository workspace:
 | `qaqc_runs/` | Evidence-verification results |
 | `address_runs/` | Address-enrichment results |
 | `sample_sets/` | Combined sample manifests and rounds |
+| `curation_runs/` | Durable human exclusions and sample-approval snapshots |
 | `coverage_runs/` | Coverage reviews and recommendations |
 | `geometry_reviews/` | Durable human spatial-review records |
 | `geocode_cache/` | Cached geocoder responses |
@@ -278,8 +290,8 @@ OASIS stores work locally in the repository workspace:
 | `runs/` | Promoted strict investigation records |
 
 **Clear All** removes generated working history but preserves promoted observations,
-exports, profiles, geometry reviews, and source code. Geometry review is considered
-durable human work.
+exports, profiles, geometry reviews, curation reviews, and source code. Geometry and
+curation review are considered durable human work.
 
 Every app-launched background job also writes a `job_runs/*.job.json` record before
 work starts. This lets the UI show queued or failed work even when a manifest has not
@@ -394,6 +406,7 @@ Implemented now:
 - Localized search guidance and multi-strategy harvesting.
 - Concurrent campaign and coverage-gap jobs.
 - Evidence QAQC, address research, and spatial validation.
+- Optional non-destructive sample curation that informs coverage and gap fill.
 - Human coordinate resolution and building-footprint area.
 - Local sample, transcript, and verified-export artifacts.
 

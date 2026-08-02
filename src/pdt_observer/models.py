@@ -178,6 +178,18 @@ class CoverageFlagType(StrEnum):
     UNDERCOVERED = "undercovered"
 
 
+class CurationReasonCode(StrEnum):
+    DUPLICATE = "duplicate"
+    WRONG_FACILITY = "wrong_facility"
+    OUTSIDE_GEOGRAPHIC_SCOPE = "outside_geographic_scope"
+    EVIDENCE_INSUFFICIENT = "evidence_insufficient"
+    INCORRECT_COUNT_MEANING = "incorrect_count_meaning"
+    UNREPRESENTATIVE = "unrepresentative"
+    ADDRESS_OR_COORDINATE_UNRESOLVED = "address_or_coordinate_unresolved"
+    FACILITY_TYPE_NOT_RELEVANT = "facility_type_not_relevant"
+    OTHER = "other"
+
+
 class DayPart(StrEnum):
     EARLY_MORNING = "early_morning"
     MORNING = "morning"
@@ -711,6 +723,29 @@ class SampleSetManifest(StrictModel):
     updated_at: str = Field(min_length=1)
 
 
+class CurationDecision(StrictModel):
+    item_id: str = Field(min_length=1)
+    reason_code: CurationReasonCode
+    reason_note: str | None = None
+    excluded_at: str = Field(min_length=1)
+
+
+class CurationApproval(StrictModel):
+    snapshot_id: str = Field(min_length=1)
+    fingerprint: str = Field(min_length=64, max_length=64)
+    approved_at: str = Field(min_length=1)
+    included_count: int = Field(ge=0)
+    excluded_count: int = Field(ge=0)
+
+
+class SampleCurationManifest(StrictModel):
+    schema_version: int = Field(default=1, ge=1)
+    sample_set_id: str = Field(min_length=1)
+    decisions: tuple[CurationDecision, ...] = ()
+    approval: CurationApproval | None = None
+    updated_at: str = Field(min_length=1)
+
+
 class RecommendedGapFillJob(StrictModel):
     country: str = Field(min_length=2)
     locality: str | None = None
@@ -737,6 +772,8 @@ class CoverageSteeringReview(StrictModel):
     duplicate_or_cluster_flags: tuple[CoverageFlag, ...] = ()
     narrative_notes: str = Field(min_length=1)
     recommended_child_jobs: tuple[RecommendedGapFillJob, ...] = ()
+    curation_snapshot_id: str | None = None
+    curation_feedback_count: int = Field(default=0, ge=0)
 
 
 class ReviewQueueItem(StrictModel):

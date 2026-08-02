@@ -4,7 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from pdt_observer.models import GeometryPoint, GeometryStatus
+from pdt_observer.models import CurationReasonCode, GeometryPoint, GeometryStatus
 
 
 class HarvestRunRequest(BaseModel):
@@ -90,3 +90,13 @@ class SampleSetCreateRequest(BaseModel):
 
 class SampleSetGapFillRequest(BaseModel):
     coverage_id: str | None = None
+
+
+class SampleCurationExcludeRequest(BaseModel):
+    item_ids: tuple[str, ...] = Field(min_length=1)
+    reason_code: CurationReasonCode
+    reason_note: str | None = None
+
+
+class SampleCurationRestoreRequest(BaseModel):
+    item_ids: tuple[str, ...] = Field(min_length=1)

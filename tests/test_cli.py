@@ -886,6 +886,10 @@ def test_cli_samples_create_prompt_validate_and_gap_fill(tmp_path, capsys) -> No
     assert "Sample Set Coverage Steering" in prompt
     assert "recommended_child_jobs" in prompt
 
+    from pdt_observer.curation import approve_curation
+
+    curation = approve_curation(tmp_path, "us-tn-sample", item_ids=())
+    assert curation.approval is not None
     coverage_file = tmp_path / "coverage_runs/us-tn-sample-coverage.json"
     coverage_file.parent.mkdir()
     coverage_file.write_text(
@@ -901,6 +905,7 @@ def test_cli_samples_create_prompt_validate_and_gap_fill(tmp_path, capsys) -> No
                 "duplicate_or_cluster_flags": [],
                 "narrative_notes": "No verified records yet.",
                 "recommended_child_jobs": [],
+                "curation_snapshot_id": curation.approval.snapshot_id,
             }
         ),
         encoding="utf-8",

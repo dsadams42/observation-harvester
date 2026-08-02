@@ -260,6 +260,7 @@ def run_harvest(
     runner: CodexRunner | None = None,
     geographer_plan: GeographerPlan | None = None,
     conversation_id: str | None = None,
+    curation_guidance: str = "",
 ) -> HarvestRunManifest:
     profile_set = get_profile_set(profile_set_name)
     deterministic_strategy_plan = build_strategy_plan(profile_set, profile_id=profile_id)
@@ -397,6 +398,7 @@ def run_harvest(
         strategy_scout_plan=strategy_scout_plan,
         run_id=resolved_run_id,
         activity_path=activity_path,
+        curation_guidance=curation_guidance,
     )
     prompt_path.write_text(prompt, encoding="utf-8")
     append_harvest_log(root, resolved_run_id, f"Prompt written to {prompt_path}.")

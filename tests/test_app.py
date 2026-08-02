@@ -265,8 +265,9 @@ def test_index_page_contains_local_app_controls(tmp_path: Path) -> None:
     assert 'data-workspace="table"' in html
     assert "setWorkspaceTab" in html
     assert "Run Full Pipeline" in html
-    assert "Coverage ready - human review required" in html
-    assert "paused before gap fill" in html
+    assert "Sample ready - human approval required" in html
+    assert "Approve Dataset &amp; Analyze Coverage" in html
+    assert "approval with no exclusions is valid" in html.lower()
     assert "Run Harvest" in html
     assert "Copy JSON" in html
     assert "Copy QAQC Prompt" in html
@@ -720,6 +721,7 @@ def test_sample_transcript_combines_pipeline_stages_and_downloads(tmp_path: Path
     client.post(f"/api/runs/{run_id}/address-run")
     sample = client.post("/api/samples/from-run", json={"run_id": run_id}).json()["sample_set"]
     sample_set_id = sample["sample_set_id"]
+    client.post(f"/api/samples/{sample_set_id}/curation/approve")
     client.post(f"/api/samples/{sample_set_id}/coverage-run")
 
     transcript = client.get(f"/api/samples/{sample_set_id}/dialogue")
@@ -1423,6 +1425,7 @@ def test_sample_set_coverage_and_gap_fill_api_flow(tmp_path: Path) -> None:
         json={"run_id": campaign_id, "sample_set_id": "tn-schools-sample"},
     )
     summary = client.get("/api/samples/tn-schools-sample/coverage-summary")
+    approval = client.post("/api/samples/tn-schools-sample/curation/approve")
     coverage = client.post("/api/samples/tn-schools-sample/coverage-run")
     coverage_results = client.get("/api/samples/tn-schools-sample/coverage-results")
     gap_fill = client.post("/api/samples/tn-schools-sample/gap-fill-run", json={})
@@ -1436,6 +1439,8 @@ def test_sample_set_coverage_and_gap_fill_api_flow(tmp_path: Path) -> None:
         "child_run_ids"
     ]
     assert summary.json()["summary"]["approved_count"] == 1
+    assert approval.json()["curation"]["approval_status"] == "approved"
+    assert approval.json()["curation"]["excluded_count"] == 0
     assert coverage.status_code == 200
     assert coverage.json()["coverage"]["review"]["dispersion_status"] == "clustered"
     assert coverage_results.json()["review"]["recommended_child_jobs"][0]["locality"] == (
@@ -1447,6 +1452,62 @@ def test_sample_set_coverage_and_gap_fill_api_flow(tmp_path: Path) -> None:
     assert missing_address.json()["address"]["child_run_ids"]
     assert geometry_items.json()["item_count"] == 2
     assert "sample_round" in exported.text
+
+
+def test_sample_curation_supports_zero_feedback_exclusion_and_restore(tmp_path: Path) -> None:
+    client = TestClient(create_app(workspace=tmp_path, runner=successful_runner, background=False))
+    created = client.post(
+        "/api/harvest/run",
+        json={
+            "country": "US",
+            "locality": "Tennessee",
+            "profiles": "commercial_business",
+            "profile": "factories_warehouses",
+            "target": 1,
+        },
+    ).json()
+    run_id = created["manifest"]["run_id"]
+    client.post(f"/api/runs/{run_id}/qaqc-run")
+    sample = client.post(
+        "/api/samples/from-run",
+        json={"run_id": run_id, "sample_set_id": "curation-sample"},
+    )
+    table = client.get("/api/samples/curation-sample/table?mode=verified").json()
+    item_id = table["rows"][0]["item_id"]
+
+    blocked = client.post("/api/samples/curation-sample/coverage-run")
+    approved = client.post("/api/samples/curation-sample/curation/approve")
+
+    assert sample.status_code == 200
+    assert blocked.status_code == 409
+    assert approved.json()["curation"]["approval_status"] == "approved"
+    assert approved.json()["curation"]["excluded_count"] == 0
+
+    excluded = client.post(
+        "/api/samples/curation-sample/curation/exclude",
+        json={
+            "item_ids": [item_id],
+            "reason_code": "wrong_facility",
+            "reason_note": "The source describes a warehouse rather than the target facility.",
+        },
+    )
+    curated_table = client.get("/api/samples/curation-sample/table?mode=verified").json()
+    curated_export = client.get("/api/samples/curation-sample/export.verified.csv")
+
+    assert excluded.json()["curation"]["approval_status"] == "stale"
+    assert curated_table["rows"][0]["excluded_from_dataset"] is True
+    assert curated_table["rows"][0]["exclusion_reason_code"] == "wrong_facility"
+    assert "Example Factory" not in curated_export.text
+    assert client.post("/api/samples/curation-sample/coverage-run").status_code == 409
+
+    restored = client.post(
+        "/api/samples/curation-sample/curation/restore",
+        json={"item_ids": [item_id]},
+    )
+    reapproved = client.post("/api/samples/curation-sample/curation/approve")
+
+    assert restored.json()["curation"]["excluded_count"] == 0
+    assert reapproved.json()["curation"]["approval_status"] == "approved"
 
 
 def test_sample_address_missing_skips_children_that_need_qaqc_first(tmp_path: Path) -> None:

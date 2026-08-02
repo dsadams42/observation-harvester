@@ -8,9 +8,17 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import TypeAdapter
 
 from pdt_observer.addresses import merge_address_results
+from pdt_observer.curation import (
+    curation_summary,
+    ensure_current_approval,
+    excluded_item_ids,
+    load_curation,
+    rejected_examples,
+    render_gap_fill_curation_guidance,
+)
 from pdt_observer.dialogue import append_dialogue
 from pdt_observer.geographer import run_geographer
 from pdt_observer.geometry import approved_records_for_child, merge_geometry_items
@@ -60,30 +68,6 @@ def save_sample_set(root: Path, sample_set: SampleSetManifest) -> SampleSetManif
 
 def load_coverage_review(path: Path) -> CoverageSteeringReview:
     return COVERAGE_REVIEW_ADAPTER.validate_json(path.read_text(encoding="utf-8"))
-
-
-def coverage_excluded_item_ids(root: Path, sample_set_id: str) -> frozenset[str]:
-    coverage_root = root / "coverage_runs"
-    if not coverage_root.is_dir():
-        return frozenset()
-    candidates = sorted(
-        coverage_root.glob(f"{sample_set_id}-coverage*.json"),
-        key=lambda path: (path.stat().st_mtime_ns, path.name),
-        reverse=True,
-    )
-    for path in candidates:
-        try:
-            review = load_coverage_review(path)
-        except (ValueError, ValidationError):
-            continue
-        if review.sample_set_id != sample_set_id:
-            continue
-        return frozenset(
-            flag.item_id
-            for flag in review.out_of_scope_flags
-            if flag.item_id is not None
-        )
-    return frozenset()
 
 
 def coverage_review_to_json(review: CoverageSteeringReview) -> str:
@@ -277,8 +261,14 @@ def create_sample_set_from_run(
     return save_sample_set(root, sample_set)
 
 
-def sample_records(root: Path, sample_set: SampleSetManifest) -> tuple[dict[str, Any], ...]:
-    excluded_item_ids = coverage_excluded_item_ids(root, sample_set.sample_set_id)
+def sample_records(
+    root: Path,
+    sample_set: SampleSetManifest,
+    *,
+    include_excluded: bool = False,
+) -> tuple[dict[str, Any], ...]:
+    curation = load_curation(root, sample_set.sample_set_id)
+    curated_exclusions = frozenset() if include_excluded else excluded_item_ids(curation)
     child_to_round: dict[str, int] = {}
     for round_item in sample_set.rounds:
         for child_run_id in round_item.child_run_ids:
@@ -294,7 +284,7 @@ def sample_records(root: Path, sample_set: SampleSetManifest) -> tuple[dict[str,
         except (FileNotFoundError, ValueError):
             continue
         for record in child_records:
-            if str(record["item_id"]) in excluded_item_ids:
+            if str(record["item_id"]) in curated_exclusions:
                 continue
             payload = dict(record)
             payload["sample_set_id"] = sample_set.sample_set_id
@@ -401,12 +391,17 @@ def render_coverage_steering_prompt(
     coverage_id: str,
     summary: dict[str, Any],
     records: tuple[dict[str, Any], ...],
+    curation_context: dict[str, Any] | None = None,
 ) -> str:
     payload = {
         "sample_set": sample_set.model_dump(mode="json"),
         "coverage_id": coverage_id,
         "deterministic_summary": summary,
         "records": list(records),
+        "human_curation": curation_context or {
+            "excluded_count": 0,
+            "rejected_examples": [],
+        },
     }
     return f"""# Sample Set Coverage Steering
 
@@ -414,9 +409,12 @@ You are a coverage steering agent for a geospatial observation harvest. Your job
 the verified sample, judge whether it is geographically dispersed enough for the requested scope,
 and recommend targeted gap-fill harvest jobs.
 
-Use the deterministic summary and records below. Treat this as steering guidance, not formal
-statistical representativeness. Do not remove observations. Recommend locality-adjusted jobs that
-would improve geographic spread.
+Use the deterministic summary and included records below. Treat this as steering guidance, not
+formal statistical representativeness. Human-excluded observations are supplied only as bounded
+negative examples: do not count them toward coverage or rediscover the same observation. Translate
+their stated reasons into targeted corrective search guidance. If there are no rejected examples,
+do not invent corrective guidance. Recommend locality-adjusted jobs that would improve geographic
+spread.
 
 Return strictly one valid JSON object. Do not wrap the JSON in markdown or prose. Use this schema:
 
@@ -466,13 +464,29 @@ def run_coverage_steering(
 ) -> dict[str, Any]:
     sample_set = refresh_sample_set(root, load_sample_set(root, sample_set_id))
     resolved_coverage_id = coverage_id or build_coverage_id(sample_set_id)
+    all_records = sample_records(root, sample_set, include_excluded=True)
+    curation = load_curation(root, sample_set_id)
+    approval = ensure_current_approval(
+        curation,
+        tuple(str(record["item_id"]) for record in all_records),
+    )
     records = sample_records(root, sample_set)
     summary = compute_coverage_summary(root, sample_set)
+    feedback = rejected_examples(curation, all_records)
+    summary["curation"] = curation_summary(
+        curation,
+        tuple(str(record["item_id"]) for record in all_records),
+    )
     prompt = render_coverage_steering_prompt(
         sample_set=sample_set,
         coverage_id=resolved_coverage_id,
         summary=summary,
         records=records,
+        curation_context={
+            "snapshot_id": approval.snapshot_id,
+            "excluded_count": len(feedback),
+            "rejected_examples": list(feedback),
+        },
     )
     prompt_path = coverage_prompt_path(root, resolved_coverage_id)
     output_path = coverage_output_path(root, resolved_coverage_id)
@@ -516,7 +530,13 @@ def run_coverage_steering(
             "summary": summary,
             "error_message": result.stderr.strip() or result.stdout.strip(),
         }
-    review = load_coverage_review(output_path)
+    review = load_coverage_review(output_path).model_copy(
+        update={
+            "curation_snapshot_id": approval.snapshot_id,
+            "curation_feedback_count": len(feedback),
+        }
+    )
+    write_model(output_path, review)
     append_harvest_log(root, sample_set_id, f"Coverage agent completed {resolved_coverage_id}.")
     append_dialogue(
         root,
@@ -570,6 +590,18 @@ def run_gap_fill(
         raise ValueError("max_concurrent_jobs must be at least 1")
     sample_set = load_sample_set(root, sample_set_id)
     review = load_coverage_review(coverage_path)
+    if review.sample_set_id != sample_set_id:
+        raise ValueError("coverage review belongs to a different sample set")
+    all_records = sample_records(root, sample_set, include_excluded=True)
+    curation = load_curation(root, sample_set_id)
+    approval = ensure_current_approval(
+        curation,
+        tuple(str(record["item_id"]) for record in all_records),
+    )
+    if review.curation_snapshot_id != approval.snapshot_id:
+        raise ValueError(
+            "coverage analysis is stale for the current human curation approval; rerun coverage"
+        )
     round_number = len(sample_set.rounds) + 1
     jobs = tuple(
         (
@@ -607,6 +639,14 @@ def run_gap_fill(
         job: RecommendedGapFillJob,
         run_id: str,
     ) -> tuple[HarvestRunManifest, str]:
+        curation_guidance = render_gap_fill_curation_guidance(
+            rejected_examples(
+                curation,
+                all_records,
+                facility_type=job.facility_type,
+                locality=job.locality,
+            )
+        )
         geographer_plan = run_geographer(
             root=root,
             plan_id=run_id,
@@ -630,6 +670,7 @@ def run_gap_fill(
             runner=active_runner,
             geographer_plan=geographer_plan,
             conversation_id=sample_set_id,
+            curation_guidance=curation_guidance,
         )
         return manifest, geographer_plan.artifact_path
 

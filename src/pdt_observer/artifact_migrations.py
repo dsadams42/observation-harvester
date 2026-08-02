@@ -9,6 +9,7 @@ VERSIONED_DIRECTORIES = {
     "harvest_runs": ("*.json",),
     "sample_sets": ("*.json",),
     "coverage_runs": ("*.json",),
+    "curation_runs": ("*.json",),
     "geometry_reviews": ("*.json",),
     "geographer_runs": ("*.json",),
     "strategy_runs": ("*.json",),

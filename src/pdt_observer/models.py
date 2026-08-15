@@ -48,6 +48,46 @@ class EvidenceStrategyType(StrEnum):
     LEGAL_INVESTIGATIVE_RECORDS = "legal_investigative_records"
     TEMPORARY_USE_OCCUPANCY = "temporary_use_occupancy"
     RESEARCH_MEASURED_OCCUPANCY = "research_measured_occupancy"
+    OFFICIAL_FACILITY_STATISTICS = "official_facility_statistics"
+    REGIONAL_DEMOGRAPHIC_STATISTICS = "regional_demographic_statistics"
+    OPERATIONAL_SCHEDULE_FACTORS = "operational_schedule_factors"
+    VISITOR_TRAFFIC_VOLUME = "visitor_traffic_volume"
+
+
+class CountMethod(StrEnum):
+    DIRECT_COUNT = "direct_count"
+    POPULATION_SUBCOMPONENT = "population_subcomponent"
+    HYBRID = "hybrid"
+
+
+class EvidenceRole(StrEnum):
+    DIRECT_OCCUPANCY = "direct_occupancy"
+    COMPONENT_INPUT = "component_input"
+
+
+class GeographyLevel(StrEnum):
+    FACILITY = "facility"
+    LOCALITY = "locality"
+    REGION = "region"
+    COUNTRY = "country"
+
+
+class TimeBasis(StrEnum):
+    INSTANT = "instant"
+    SHIFT = "shift"
+    DAILY = "daily"
+    ANNUAL = "annual"
+    SCHOOL_YEAR = "school_year"
+    CENSUS_YEAR = "census_year"
+    OPERATING_PERIOD = "operating_period"
+    UNKNOWN = "unknown"
+
+
+class ComponentBundleStatus(StrEnum):
+    COMPLETE = "complete"
+    MOSTLY_COMPLETE = "mostly_complete"
+    PARTIAL = "partial"
+    SEED_ONLY = "seed_only"
 
 
 class SourceType(StrEnum):
@@ -339,6 +379,15 @@ class LeadOccupancyDatum(StrictModel):
     group_type: str = Field(min_length=1)
 
 
+class PopulationComponentDatum(StrictModel):
+    component_type: str = Field(min_length=1)
+    value: float = Field(ge=0)
+    unit: str = Field(min_length=1)
+    time_basis: TimeBasis = TimeBasis.UNKNOWN
+    geography_level: GeographyLevel = GeographyLevel.FACILITY
+    period_label: str | None = None
+
+
 class LeadLocation(StrictModel):
     facility_name: str = Field(min_length=1)
     specific_address_or_landmark: str = Field(min_length=1)
@@ -347,6 +396,7 @@ class LeadLocation(StrictModel):
 
 
 class OccupancyLead(StrictModel):
+    evidence_role: EvidenceRole = EvidenceRole.DIRECT_OCCUPANCY
     is_valid_occupancy_report: bool
     source_url: str = Field(min_length=1)
     source_title: str = ""
@@ -364,6 +414,62 @@ class OccupancyLead(StrictModel):
     strategy_id: EvidenceStrategyType | None = None
     count_semantics: str | None = None
     representativeness: str | None = None
+
+
+class PopulationComponentLead(StrictModel):
+    evidence_role: EvidenceRole = EvidenceRole.COMPONENT_INPUT
+    is_valid_component_report: bool
+    source_url: str = Field(min_length=1)
+    source_title: str = ""
+    source_type: SourceType = SourceType.UNKNOWN
+    evidence_quote: str = Field(min_length=1)
+    component_data: tuple[PopulationComponentDatum, ...] = Field(min_length=1)
+    location: LeadLocation | None = None
+    geography_name: str = Field(min_length=1)
+    country: str = Field(min_length=2)
+    confidence: LeadConfidence = LeadConfidence.UNKNOWN
+    is_facility_level: bool | None = None
+    is_regional_aggregate: bool | None = None
+    review_flags: tuple[str, ...] = ()
+    review_notes: str | None = None
+    strategy_id: EvidenceStrategyType | None = None
+    count_semantics: str | None = None
+    representativeness: str | None = None
+
+
+class ComponentFacilityBundle(StrictModel):
+    evidence_role: EvidenceRole = EvidenceRole.COMPONENT_INPUT
+    geography_name: str = Field(min_length=1)
+    country: str = Field(min_length=2)
+    location: LeadLocation | None = None
+    target_component_fields: tuple[str, ...] = Field(min_length=1)
+    found_component_types: tuple[str, ...] = ()
+    missing_component_types: tuple[str, ...] = ()
+    source_lead_indexes: tuple[int, ...] = ()
+    follow_up_searches_attempted: tuple[str, ...] = ()
+    completion_status: ComponentBundleStatus
+    counts_toward_target: bool = False
+    confidence: LeadConfidence = LeadConfidence.UNKNOWN
+    completion_notes: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def countable_bundles_must_be_complete_enough(self) -> Self:
+        countable_statuses = {
+            ComponentBundleStatus.COMPLETE,
+            ComponentBundleStatus.MOSTLY_COMPLETE,
+        }
+        if self.counts_toward_target and self.completion_status not in countable_statuses:
+            raise ValueError(
+                "component bundle can count toward target only when complete or mostly_complete"
+            )
+        return self
+
+
+class HarvestEvidenceSet(StrictModel):
+    schema_version: int = Field(default=1, ge=1)
+    occupancy_leads: tuple[OccupancyLead, ...] = ()
+    component_leads: tuple[PopulationComponentLead, ...] = ()
+    component_bundles: tuple[ComponentFacilityBundle, ...] = ()
 
 
 class LeadQaqcCountCheck(StrictModel):
@@ -387,6 +493,41 @@ class LeadQaqcReview(StrictModel):
     supporting_quote: str | None = None
     recommended_action: LeadQaqcRecommendedAction
     review_notes: str = Field(min_length=1)
+
+
+class ComponentQaqcDatumCheck(StrictModel):
+    component_type: str = Field(min_length=1)
+    value: float = Field(ge=0)
+    unit: str = Field(min_length=1)
+    reported_value_found: bool
+    quote_found: bool
+    component_type_match: bool | None = None
+    time_basis_match: bool | None = None
+    geography_level_match: bool | None = None
+    supporting_quote: str | None = None
+    notes: str | None = None
+
+
+class ComponentQaqcReview(StrictModel):
+    lead_index: int = Field(ge=0)
+    source_url: str = Field(min_length=1)
+    verification_status: LeadQaqcVerificationStatus
+    source_reachable: bool
+    evidence_role_match: bool | None = None
+    component_type_match: bool | None = None
+    geography_level_match: bool | None = None
+    location_match: bool | None = None
+    strategy_match: bool | None = None
+    component_checks: tuple[ComponentQaqcDatumCheck, ...] = ()
+    supporting_quote: str | None = None
+    recommended_action: LeadQaqcRecommendedAction
+    review_notes: str = Field(min_length=1)
+
+
+class HarvestQaqcReviewSet(StrictModel):
+    schema_version: int = Field(default=1, ge=1)
+    occupancy_reviews: tuple[LeadQaqcReview, ...] = ()
+    component_reviews: tuple[ComponentQaqcReview, ...] = ()
 
 
 class AddressEnrichmentResult(StrictModel):
@@ -439,6 +580,10 @@ class BuildingTypeProfile(StrictModel):
     episodic_occurrence: tuple[str, ...] = ()
     occupancy_groups: tuple[str, ...] = ()
     contextual_count_fields: tuple[str, ...] = ()
+    count_method: CountMethod = CountMethod.DIRECT_COUNT
+    component_count_fields: tuple[str, ...] = ()
+    regional_stat_fields: tuple[str, ...] = ()
+    component_source_guidance: str | None = None
     preferred_strategy_ids: tuple[EvidenceStrategyType, ...] = ()
     source_search_prompt: str = Field(min_length=1)
     preferred_source_types: tuple[str, ...] = ()
@@ -646,6 +791,7 @@ class HarvestRunManifest(StrictModel):
     locality: str | None = None
     profile_set: str = Field(min_length=1)
     profile_id: str | None = None
+    count_method_override: CountMethod | None = None
     strategy_plan: StrategyPlan | None = None
     geographer_plan_path: str | None = None
     target: int = Field(ge=1)
@@ -670,6 +816,7 @@ class HarvestBatchRunManifest(StrictModel):
     country: str = Field(min_length=2)
     locality: str | None = None
     profile_set: str = Field(min_length=1)
+    count_method_override: CountMethod | None = None
     geographer_plan_path: str | None = None
     target: int = Field(ge=1)
     child_run_ids: tuple[str, ...]
@@ -688,6 +835,7 @@ class HarvestCampaignRunManifest(StrictModel):
     country: str = Field(min_length=2)
     localities: tuple[str, ...] = ()
     facility_types: tuple[str, ...] = Field(min_length=1)
+    count_method_override: CountMethod | None = None
     geographer_plan_path: str | None = None
     target: int = Field(ge=1)
     child_run_ids: tuple[str, ...]

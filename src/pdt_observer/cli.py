@@ -17,17 +17,19 @@ from pdt_observer.artifact_migrations import migrate_workspace
 from pdt_observer.config import MissingAPIKeyError
 from pdt_observer.harvest import run_harvest, run_harvest_batch, run_harvest_campaign
 from pdt_observer.leads import (
-    export_leads,
-    leads_to_json,
+    evidence_set_to_json,
+    export_evidence_set,
+    load_evidence_set,
     load_leads,
-    load_qaqc_reviews,
+    load_qaqc_review_set,
     promote_lead_to_run,
-    qaqc_reviews_to_json,
+    qaqc_review_set_to_json,
     render_lead_harvest_prompt,
     render_lead_qaqc_prompt,
-    summarize_leads,
+    summarize_evidence_set,
 )
 from pdt_observer.models import (
+    CountMethod,
     HarvestRunStatus,
     InvestigationRun,
     ResultStatus,
@@ -66,6 +68,9 @@ from pdt_observer.workflow import (
 
 def load_run(path: Path) -> InvestigationRun:
     return InvestigationRun.model_validate_json(path.read_text(encoding="utf-8"))
+
+
+COUNT_METHOD_CHOICES = tuple(item.value for item in CountMethod)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -212,6 +217,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     harvest_prepare.add_argument("--target", type=int, default=20)
     harvest_prepare.add_argument("--locality")
+    harvest_prepare.add_argument(
+        "--count-method",
+        choices=COUNT_METHOD_CHOICES,
+        help="Override the profile default count method for this prompt.",
+    )
     harvest_prepare.add_argument("--output", type=Path)
     harvest_run = harvest_subparsers.add_parser(
         "run",
@@ -233,6 +243,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     harvest_run.add_argument("--target", type=int, default=20)
     harvest_run.add_argument("--locality")
+    harvest_run.add_argument(
+        "--count-method",
+        choices=COUNT_METHOD_CHOICES,
+        help="Override the profile default count method for this run.",
+    )
     harvest_run.add_argument("--workspace", type=Path, default=Path("."))
     harvest_run.add_argument("--run-id")
     harvest_run.add_argument("--codex-bin", default="codex")
@@ -250,6 +265,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     harvest_batch_run.add_argument("--target", type=int, default=20)
     harvest_batch_run.add_argument("--locality")
+    harvest_batch_run.add_argument(
+        "--count-method",
+        choices=COUNT_METHOD_CHOICES,
+        help="Override the profile default count method for every child run.",
+    )
     harvest_batch_run.add_argument("--workspace", type=Path, default=Path("."))
     harvest_batch_run.add_argument("--batch-id")
     harvest_batch_run.add_argument("--codex-bin", default="codex")
@@ -267,6 +287,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Top-level facility type to harvest. Repeat for multiple facility types.",
     )
     harvest_campaign_run.add_argument("--target", type=int, default=20)
+    harvest_campaign_run.add_argument(
+        "--count-method",
+        choices=COUNT_METHOD_CHOICES,
+        help="Override the profile default count method for every campaign child run.",
+    )
     harvest_campaign_run.add_argument("--workspace", type=Path, default=Path("."))
     harvest_campaign_run.add_argument("--campaign-id")
     harvest_campaign_run.add_argument("--codex-bin", default="codex")
@@ -550,6 +575,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 target=args.target,
                 locality=args.locality,
                 profile_id=args.profile,
+                count_method_override=(
+                    None if args.count_method is None else CountMethod(args.count_method)
+                ),
             )
             if args.output is not None:
                 args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -564,6 +592,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 target=args.target,
                 locality=args.locality,
                 profile_id=args.profile,
+                count_method_override=(
+                    None if args.count_method is None else CountMethod(args.count_method)
+                ),
                 run_id=args.run_id,
                 codex_bin=args.codex_bin,
             )
@@ -576,6 +607,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 profile_set_name=args.profiles,
                 target=args.target,
                 locality=args.locality,
+                count_method_override=(
+                    None if args.count_method is None else CountMethod(args.count_method)
+                ),
                 batch_id=args.batch_id,
                 codex_bin=args.codex_bin,
             )
@@ -588,23 +622,47 @@ def main(argv: Sequence[str] | None = None) -> int:
                 localities=tuple(args.locality),
                 facility_types=tuple(args.facility_types),
                 target=args.target,
+                count_method_override=(
+                    None if args.count_method is None else CountMethod(args.count_method)
+                ),
                 campaign_id=args.campaign_id,
                 codex_bin=args.codex_bin,
             )
             print(campaign_manifest.model_dump_json(indent=2))
             return 0 if campaign_manifest.status == HarvestRunStatus.COMPLETED else 1
         if args.command == "leads" and args.leads_command == "validate":
-            lead_items = load_leads(args.lead_file)
+            legacy_array = isinstance(json.loads(args.lead_file.read_text(encoding="utf-8")), list)
+            evidence_set = load_evidence_set(args.lead_file)
             if args.pretty:
-                print(leads_to_json(lead_items))
+                print(evidence_set_to_json(evidence_set))
+            elif legacy_array:
+                print(
+                    json.dumps(
+                        {"valid": True, "lead_count": len(evidence_set.occupancy_leads)},
+                        indent=2,
+                    )
+                )
             else:
-                print(json.dumps({"valid": True, "lead_count": len(lead_items)}, indent=2))
+                print(
+                    json.dumps(
+                        {
+                            "valid": True,
+                            "lead_count": len(evidence_set.occupancy_leads),
+                            "component_lead_count": len(evidence_set.component_leads),
+                            "component_bundle_count": len(evidence_set.component_bundles),
+                        },
+                        indent=2,
+                    )
+                )
             return 0
         if args.command == "leads" and args.leads_command == "summarize":
-            print(json.dumps(summarize_leads(load_leads(args.lead_file)), indent=2))
+            print(json.dumps(summarize_evidence_set(load_evidence_set(args.lead_file)), indent=2))
             return 0
         if args.command == "leads" and args.leads_command == "export":
-            exported_payload = export_leads(load_leads(args.lead_file), output_format=args.format)
+            exported_payload = export_evidence_set(
+                load_evidence_set(args.lead_file),
+                output_format=args.format,
+            )
             if args.output is not None:
                 args.output.parent.mkdir(parents=True, exist_ok=True)
                 args.output.write_text(exported_payload, encoding="utf-8")
@@ -620,7 +678,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         if args.command == "leads" and args.leads_command == "qaqc-prompt":
             prompt = render_lead_qaqc_prompt(
-                load_leads(args.lead_file),
+                load_evidence_set(args.lead_file),
                 source_label=str(args.lead_file),
             )
             if args.output is not None:
@@ -629,11 +687,35 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(prompt, end="" if prompt.endswith("\n") else "\n")
             return 0
         if args.command == "leads" and args.leads_command == "qaqc-validate":
-            reviews = load_qaqc_reviews(args.qaqc_file)
+            legacy_array = isinstance(json.loads(args.qaqc_file.read_text(encoding="utf-8")), list)
+            review_set = load_qaqc_review_set(args.qaqc_file)
             if args.pretty:
-                print(qaqc_reviews_to_json(reviews))
+                print(qaqc_review_set_to_json(review_set))
+            elif legacy_array:
+                print(
+                    json.dumps(
+                        {
+                            "valid": True,
+                            "review_count": len(review_set.occupancy_reviews),
+                        },
+                        indent=2,
+                    )
+                )
             else:
-                print(json.dumps({"valid": True, "review_count": len(reviews)}, indent=2))
+                print(
+                    json.dumps(
+                        {
+                            "valid": True,
+                            "review_count": (
+                                len(review_set.occupancy_reviews)
+                                + len(review_set.component_reviews)
+                            ),
+                            "occupancy_review_count": len(review_set.occupancy_reviews),
+                            "component_review_count": len(review_set.component_reviews),
+                        },
+                        indent=2,
+                    )
+                )
             return 0
         if args.command == "leads" and args.leads_command == "address-prompt":
             records = approved_address_inputs_from_files(

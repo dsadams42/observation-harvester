@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
+import json
 import re
 import time
 import webbrowser
@@ -93,14 +96,17 @@ from pdt_observer.harvest import (
 )
 from pdt_observer.jobs import create_job, job_payload, list_jobs, load_job
 from pdt_observer.leads import (
-    export_leads,
+    export_evidence_set,
+    load_evidence_set,
     load_leads,
+    load_qaqc_review_set,
     load_qaqc_reviews,
     promote_lead_to_run,
     render_lead_qaqc_prompt,
 )
 from pdt_observer.models import (
     AddressEnrichmentStatus,
+    CountMethod,
     GeometryPoint,
     GeometryStatus,
     HarvestBatchRunManifest,
@@ -109,6 +115,8 @@ from pdt_observer.models import (
     HarvestRunStatus,
     JobStatus,
     JobType,
+    LeadQaqcRecommendedAction,
+    LeadQaqcVerificationStatus,
 )
 from pdt_observer.profiles import BUILTIN_PROFILE_SETS
 from pdt_observer.samples import (
@@ -353,6 +361,7 @@ def _finalize_failed_run_manifest(
     locality: str | None,
     profile_set: str,
     profile_id: str | None,
+    count_method_override: CountMethod | None,
     target: int,
     error_message: str,
 ) -> None:
@@ -366,6 +375,7 @@ def _finalize_failed_run_manifest(
             locality=locality,
             profile_set=profile_set,
             profile_id=profile_id,
+            count_method_override=count_method_override,
             target=target,
             prompt_path=str(root / "work" / f"{run_id}.md"),
             lead_path=str(root / "lead_runs" / f"{run_id}.json"),
@@ -393,6 +403,7 @@ def _finalize_failed_batch_manifest(
     country: str,
     locality: str | None,
     profile_set: str,
+    count_method_override: CountMethod | None,
     target: int,
     error_message: str,
 ) -> None:
@@ -405,6 +416,7 @@ def _finalize_failed_batch_manifest(
             country=country,
             locality=locality,
             profile_set=profile_set,
+            count_method_override=count_method_override,
             target=target,
             child_run_ids=(),
             child_manifest_paths=(),
@@ -430,6 +442,7 @@ def _finalize_failed_campaign_manifest(
     country: str,
     localities: tuple[str, ...],
     facility_types: tuple[str, ...],
+    count_method_override: CountMethod | None,
     target: int,
     error_message: str,
 ) -> None:
@@ -442,6 +455,7 @@ def _finalize_failed_campaign_manifest(
             country=country,
             localities=localities,
             facility_types=facility_types,
+            count_method_override=count_method_override,
             target=target,
             child_run_ids=(),
             child_manifest_paths=(),
@@ -493,6 +507,10 @@ def _profiles_payload() -> dict[str, Any]:
                         "episodic_occurrence": profile.episodic_occurrence,
                         "occupancy_groups": profile.occupancy_groups,
                         "contextual_count_fields": profile.contextual_count_fields,
+                        "count_method": profile.count_method.value,
+                        "component_count_fields": profile.component_count_fields,
+                        "regional_stat_fields": profile.regional_stat_fields,
+                        "component_source_guidance": profile.component_source_guidance,
                         "preferred_strategy_ids": tuple(
                             strategy_id.value for strategy_id in profile.preferred_strategy_ids
                         ),
@@ -593,9 +611,9 @@ def _run_qaqc_for_child(
     output_path = _qaqc_output_path(root, run_id)
     manifest = _load_run_manifest(root, run_id)
     append_harvest_log(root, parent_id, f"Rendering QAQC prompt for {run_id}.")
-    leads = load_leads(Path(manifest.lead_path))
+    evidence_set = load_evidence_set(Path(manifest.lead_path))
     prompt = render_lead_qaqc_prompt(
-        leads,
+        evidence_set,
         source_label=manifest.lead_path,
         expected_country=manifest.country,
         expected_locality=manifest.locality,
@@ -650,7 +668,8 @@ def _run_qaqc_for_child(
             "error_message": result.stderr.strip() or result.stdout.strip(),
         }
     try:
-        reviews = load_qaqc_reviews(output_path)
+        review_set = load_qaqc_review_set(output_path)
+        review_count = len(review_set.occupancy_reviews) + len(review_set.component_reviews)
     except Exception as exc:
         append_harvest_log(root, parent_id, f"QAQC validation failed for {run_id}: {exc}.")
         return {
@@ -665,7 +684,7 @@ def _run_qaqc_for_child(
     append_harvest_log(
         root,
         parent_id,
-        f"QAQC validation completed for {run_id}: {len(reviews)} reviews.",
+        f"QAQC validation completed for {run_id}: {review_count} reviews.",
     )
     return {
         "run_id": run_id,
@@ -673,7 +692,7 @@ def _run_qaqc_for_child(
         "status": "completed",
         "prompt_path": str(prompt_path),
         "qaqc_path": str(output_path),
-        "review_count": len(reviews),
+        "review_count": review_count,
         "error_message": None,
     }
 
@@ -945,25 +964,34 @@ def _run_address_for_manifest(
 def _qaqc_reviews_payload(root: Path, child_run_ids: Sequence[str]) -> dict[str, Any]:
     child_reviews: list[dict[str, Any]] = []
     all_reviews: list[dict[str, Any]] = []
+    all_component_reviews: list[dict[str, Any]] = []
     for child_run_id in child_run_ids:
         output_path = _qaqc_output_path(root, child_run_id)
         if not output_path.is_file():
             continue
-        reviews = load_qaqc_reviews(output_path)
+        review_set = load_qaqc_review_set(output_path)
+        reviews = review_set.occupancy_reviews
+        component_reviews = review_set.component_reviews
         review_payload = [review.model_dump(mode="json") for review in reviews]
+        component_review_payload = [
+            review.model_dump(mode="json") for review in component_reviews
+        ]
         child_reviews.append(
             {
                 "run_id": child_run_id,
                 "qaqc_path": str(output_path),
-                "review_count": len(reviews),
+                "review_count": len(reviews) + len(component_reviews),
                 "reviews": review_payload,
+                "component_reviews": component_review_payload,
             }
         )
         all_reviews.extend(review_payload)
+        all_component_reviews.extend(component_review_payload)
     return {
-        "review_count": len(all_reviews),
+        "review_count": len(all_reviews) + len(all_component_reviews),
         "child_reviews": child_reviews,
         "reviews": all_reviews,
+        "component_reviews": all_component_reviews,
     }
 
 
@@ -973,6 +1001,106 @@ def _approved_records_for_manifest(root: Path, manifest: Any) -> tuple[dict[str,
         child_manifest = _load_run_manifest(root, child_run_id)
         records.extend(approved_records_for_child(root, child_manifest))
     return tuple(records)
+
+
+def _approved_component_records_for_child(
+    root: Path,
+    manifest: HarvestRunManifest,
+) -> tuple[dict[str, Any], ...]:
+    qaqc_path = _qaqc_output_path(root, manifest.run_id)
+    if not qaqc_path.is_file():
+        raise FileNotFoundError(f"QAQC review not found for run: {manifest.run_id}")
+    evidence_set = load_evidence_set(Path(manifest.lead_path))
+    review_set = load_qaqc_review_set(qaqc_path)
+    records: list[dict[str, Any]] = []
+    for review in review_set.component_reviews:
+        if review.lead_index >= len(evidence_set.component_leads):
+            continue
+        if review.verification_status != LeadQaqcVerificationStatus.VERIFIED:
+            continue
+        if review.recommended_action != LeadQaqcRecommendedAction.KEEP:
+            continue
+        lead = evidence_set.component_leads[review.lead_index]
+        records.append(
+            {
+                "item_id": f"{manifest.run_id}-component-{review.lead_index}",
+                "child_run_id": manifest.run_id,
+                "lead_index": review.lead_index,
+                "facility_type": manifest.profile_set,
+                "component_lead": lead.model_dump(mode="json"),
+                "component_qaqc_review": review.model_dump(mode="json"),
+            }
+        )
+    return tuple(records)
+
+
+def _approved_component_records_for_manifest(
+    root: Path,
+    manifest: Any,
+) -> tuple[dict[str, Any], ...]:
+    records: list[dict[str, Any]] = []
+    for child_run_id in _manifest_child_run_ids(manifest):
+        child_manifest = _load_run_manifest(root, child_run_id)
+        records.extend(_approved_component_records_for_child(root, child_manifest))
+    return tuple(records)
+
+
+def _component_records_json(records: Sequence[dict[str, Any]]) -> str:
+    return json.dumps(list(records), indent=2)
+
+
+def _component_records_csv(records: Sequence[dict[str, Any]]) -> str:
+    output = io.StringIO()
+    fieldnames = (
+        "item_id",
+        "child_run_id",
+        "lead_index",
+        "facility_type",
+        "source_url",
+        "source_title",
+        "component_type",
+        "value",
+        "unit",
+        "time_basis",
+        "geography_level",
+        "period_label",
+        "facility_name",
+        "geography_name",
+        "country",
+        "qaqc_status",
+        "recommended_action",
+        "review_notes",
+    )
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+    for record in records:
+        lead = record["component_lead"]
+        review = record["component_qaqc_review"]
+        location = lead.get("location") or {}
+        for datum in lead["component_data"]:
+            writer.writerow(
+                {
+                    "item_id": record["item_id"],
+                    "child_run_id": record["child_run_id"],
+                    "lead_index": record["lead_index"],
+                    "facility_type": record.get("facility_type", ""),
+                    "source_url": lead["source_url"],
+                    "source_title": lead.get("source_title", ""),
+                    "component_type": datum["component_type"],
+                    "value": datum["value"],
+                    "unit": datum["unit"],
+                    "time_basis": datum["time_basis"],
+                    "geography_level": datum["geography_level"],
+                    "period_label": datum.get("period_label") or "",
+                    "facility_name": location.get("facility_name", ""),
+                    "geography_name": lead["geography_name"],
+                    "country": lead["country"],
+                    "qaqc_status": review["verification_status"],
+                    "recommended_action": review["recommended_action"],
+                    "review_notes": review.get("review_notes", ""),
+                }
+            )
+    return output.getvalue()
 
 
 def _geometry_items_payload(root: Path, manifest: Any) -> dict[str, Any]:
@@ -1541,15 +1669,20 @@ def _workflow_status_payload(
         child.status == HarvestRunStatus.COMPLETED for child in initial_manifests
     )
     failed_jobs = finished_jobs - successful_jobs
-    lead_count = 0
+    observation_count = 0
     for child in initial_manifests:
+        if child.summary is not None:
+            budget_count = child.summary.get("budget_observation_count")
+            if isinstance(budget_count, int):
+                observation_count += budget_count
+                continue
         if child.validation_valid and Path(child.lead_path).is_file():
-            lead_count += len(load_leads(Path(child.lead_path)))
+            observation_count += len(load_leads(Path(child.lead_path)))
     lead_quota = planned_jobs * target_per_job
     harvest_running = active and finished_jobs < planned_jobs
     if harvest_running:
         harvest_status = "running"
-    elif failed_jobs or (finished_jobs >= planned_jobs and lead_count < lead_quota):
+    elif failed_jobs or (finished_jobs >= planned_jobs and observation_count < lead_quota):
         harvest_status = "attention"
     elif finished_jobs >= planned_jobs:
         harvest_status = "complete"
@@ -1749,18 +1882,19 @@ def _workflow_status_payload(
             stage_id="harvest",
             label="Harvest Observations",
             status=harvest_status,
-            current=lead_count,
+            current=observation_count,
             total=lead_quota,
             detail=(
                 f"{successful_jobs}/{planned_jobs} jobs completed successfully; "
-                f"{failed_jobs} failed or cancelled; {lead_count}/{lead_quota} target leads."
+                f"{failed_jobs} failed or cancelled; "
+                f"{observation_count}/{lead_quota} target observations."
             ),
             metrics={
                 "planned_jobs": planned_jobs,
                 "finished_jobs": finished_jobs,
                 "successful_jobs": successful_jobs,
                 "failed_jobs": failed_jobs,
-                "lead_count": lead_count,
+                "lead_count": observation_count,
                 "lead_quota": lead_quota,
             },
             indeterminate=harvest_running,
@@ -1966,6 +2100,49 @@ def _sample_verified_export_response(
     )
 
 
+def _sample_component_export_response(
+    root: Path,
+    sample_set_id: str,
+    *,
+    output_format: str,
+) -> Response:
+    try:
+        sample_set = refresh_sample_set(root, load_sample_set(root, sample_set_id))
+        records: list[dict[str, Any]] = []
+        round_by_child: dict[str, int] = {}
+        for sample_round in sample_set.rounds:
+            for child_run_id in sample_round.child_run_ids:
+                round_by_child[child_run_id] = sample_round.round_number
+        for child_run_id in sample_set.combined_child_run_ids:
+            manifest = _load_run_manifest(root, child_run_id)
+            for record in _approved_component_records_for_child(root, manifest):
+                payload = dict(record)
+                payload["sample_set_id"] = sample_set.sample_set_id
+                payload["sample_round"] = round_by_child.get(child_run_id, "")
+                records.append(payload)
+    except FileNotFoundError as exc:
+        return _json_error(str(exc), status_code=409)
+    except ValueError as exc:
+        return _json_error(str(exc), status_code=404)
+
+    if output_format == "json":
+        response_payload = _component_records_json(records)
+        media_type = "application/json"
+        filename = f"{sample_set_id}.components.json"
+    elif output_format == "csv":
+        response_payload = _component_records_csv(records)
+        media_type = "text/csv"
+        filename = f"{sample_set_id}.components.csv"
+    else:
+        return _json_error(f"unsupported component export format: {output_format}")
+
+    return PlainTextResponse(
+        response_payload,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 def _run_qaqc_missing_for_sample(
     *,
     root: Path,
@@ -2085,6 +2262,33 @@ def _verified_export_response(root: Path, run_id: str, *, output_format: str) ->
     )
 
 
+def _component_export_response(root: Path, run_id: str, *, output_format: str) -> Response:
+    try:
+        manifest = _load_any_manifest(root, run_id)
+        records = _approved_component_records_for_manifest(root, manifest)
+    except FileNotFoundError as exc:
+        return _json_error(str(exc), status_code=409)
+    except ValueError as exc:
+        return _json_error(str(exc), status_code=404)
+
+    if output_format == "json":
+        payload = _component_records_json(records)
+        media_type = "application/json"
+        filename = f"{run_id}.components.json"
+    elif output_format == "csv":
+        payload = _component_records_csv(records)
+        media_type = "text/csv"
+        filename = f"{run_id}.components.csv"
+    else:
+        return _json_error(f"unsupported component export format: {output_format}")
+
+    return PlainTextResponse(
+        payload,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 def _table_rows_from_records(records: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for record in records:
@@ -2102,11 +2306,17 @@ def _table_rows_from_records(records: Sequence[dict[str, Any]]) -> list[dict[str
                     "sample_set_id": record.get("sample_set_id", ""),
                     "sample_round": record.get("sample_round", ""),
                     "facility_type": record.get("facility_type", ""),
+                    "evidence_role": "direct_occupancy",
                     "lead_index": record["lead_index"],
                     "count_index": count_index,
                     "facility_name": location["facility_name"],
                     "count": datum["count"],
                     "group_type": datum["group_type"],
+                    "component_type": "",
+                    "value": "",
+                    "unit": "",
+                    "time_basis": "",
+                    "geography_level": "",
                     "incident_date": lead["incident_date"],
                     "incident_time": lead["incident_time"],
                     "strategy_id": lead.get("strategy_id") or "",
@@ -2139,8 +2349,8 @@ def _all_lead_table_rows(root: Path, manifest: Any) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for child_run_id in _manifest_child_run_ids(manifest):
         child_manifest = _load_run_manifest(root, child_run_id)
-        leads = load_leads(Path(child_manifest.lead_path))
-        for lead_index, lead in enumerate(leads):
+        evidence_set = load_evidence_set(Path(child_manifest.lead_path))
+        for lead_index, lead in enumerate(evidence_set.occupancy_leads):
             lead_payload = lead.model_dump(mode="json")
             location = lead_payload["location"]
             item_id = f"{child_run_id}-{lead_index}"
@@ -2153,11 +2363,17 @@ def _all_lead_table_rows(root: Path, manifest: Any) -> list[dict[str, Any]]:
                         "sample_set_id": "",
                         "sample_round": "",
                         "facility_type": child_manifest.profile_set,
+                        "evidence_role": "direct_occupancy",
                         "lead_index": lead_index,
                         "count_index": count_index,
                         "facility_name": location["facility_name"],
                         "count": datum["count"],
                         "group_type": datum["group_type"],
+                        "component_type": "",
+                        "value": "",
+                        "unit": "",
+                        "time_basis": "",
+                        "geography_level": "",
                         "incident_date": lead_payload["incident_date"],
                         "incident_time": lead_payload["incident_time"],
                         "strategy_id": lead_payload.get("strategy_id") or "",
@@ -2178,6 +2394,107 @@ def _all_lead_table_rows(root: Path, manifest: Any) -> list[dict[str, Any]]:
                         "exclusion_reason_note": "",
                     }
                 )
+        for lead_index, component_lead in enumerate(evidence_set.component_leads):
+            lead_payload = component_lead.model_dump(mode="json")
+            location = lead_payload.get("location") or {}
+            item_id = f"{child_run_id}-component-{lead_index}"
+            for count_index, datum in enumerate(lead_payload["component_data"]):
+                rows.append(
+                    {
+                        "row_id": f"{item_id}-{count_index}",
+                        "item_id": item_id,
+                        "run_id": child_run_id,
+                        "sample_set_id": "",
+                        "sample_round": "",
+                        "facility_type": child_manifest.profile_set,
+                        "evidence_role": "component_input",
+                        "lead_index": lead_index,
+                        "count_index": count_index,
+                        "facility_name": location.get(
+                            "facility_name", lead_payload["geography_name"]
+                        ),
+                        "count": "",
+                        "group_type": "",
+                        "component_type": datum["component_type"],
+                        "value": datum["value"],
+                        "unit": datum["unit"],
+                        "time_basis": datum["time_basis"],
+                        "geography_level": datum["geography_level"],
+                        "incident_date": datum.get("period_label") or "",
+                        "incident_time": "",
+                        "strategy_id": lead_payload.get("strategy_id") or "",
+                        "representativeness": lead_payload.get("representativeness") or "",
+                        "confidence": lead_payload.get("confidence") or "",
+                        "city_or_region": (
+                            location.get("city_or_region")
+                            or lead_payload.get("geography_name")
+                            or ""
+                        ),
+                        "country": lead_payload["country"],
+                        "source_url": lead_payload["source_url"],
+                        "qaqc_status": "",
+                        "recommended_action": "",
+                        "address_status": "not_applicable",
+                        "enriched_address": "",
+                        "geometry_status": "not_applicable",
+                        "area_m2": "",
+                        "review_notes": lead_payload.get("review_notes") or "",
+                        "excluded_from_dataset": False,
+                        "exclusion_reason_code": "",
+                        "exclusion_reason_note": "",
+                    }
+                )
+    return rows
+
+
+def _table_rows_from_component_records(records: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for record in records:
+        lead = record["component_lead"]
+        review = record.get("component_qaqc_review") or {}
+        location = lead.get("location") or {}
+        for count_index, datum in enumerate(lead["component_data"]):
+            rows.append(
+                {
+                    "row_id": f"{record['item_id']}-{count_index}",
+                    "item_id": record["item_id"],
+                    "run_id": record["child_run_id"],
+                    "sample_set_id": record.get("sample_set_id", ""),
+                    "sample_round": record.get("sample_round", ""),
+                    "facility_type": record.get("facility_type", ""),
+                    "evidence_role": "component_input",
+                    "lead_index": record["lead_index"],
+                    "count_index": count_index,
+                    "facility_name": location.get("facility_name", lead["geography_name"]),
+                    "count": "",
+                    "group_type": "",
+                    "component_type": datum["component_type"],
+                    "value": datum["value"],
+                    "unit": datum["unit"],
+                    "time_basis": datum["time_basis"],
+                    "geography_level": datum["geography_level"],
+                    "incident_date": datum.get("period_label") or "",
+                    "incident_time": "",
+                    "strategy_id": lead.get("strategy_id") or "",
+                    "representativeness": lead.get("representativeness") or "",
+                    "confidence": lead.get("confidence") or "",
+                    "city_or_region": (
+                        location.get("city_or_region") or lead.get("geography_name") or ""
+                    ),
+                    "country": lead["country"],
+                    "source_url": lead["source_url"],
+                    "qaqc_status": review.get("verification_status", ""),
+                    "recommended_action": review.get("recommended_action", ""),
+                    "address_status": "not_applicable",
+                    "enriched_address": "",
+                    "geometry_status": "not_applicable",
+                    "area_m2": "",
+                    "review_notes": review.get("review_notes") or lead.get("review_notes") or "",
+                    "excluded_from_dataset": False,
+                    "exclusion_reason_code": "",
+                    "exclusion_reason_note": "",
+                }
+            )
     return rows
 
 
@@ -2188,6 +2505,8 @@ def _run_table_payload(root: Path, run_id: str, *, mode: str) -> dict[str, Any]:
     elif mode == "verified":
         records = merge_address_results(root, _approved_records_for_manifest(root, manifest))
         rows = _table_rows_from_records(tuple(merge_geometry_items(root, records)))
+        component_records = _approved_component_records_for_manifest(root, manifest)
+        rows.extend(_table_rows_from_component_records(component_records))
     else:
         raise ValueError(f"unsupported table mode: {mode}")
     return {
@@ -2204,9 +2523,22 @@ def _sample_table_payload(root: Path, sample_set_id: str, *, mode: str) -> dict[
         raise ValueError("sample table only supports verified mode")
     sample_set = refresh_sample_set(root, load_sample_set(root, sample_set_id))
     records = sample_records(root, sample_set, include_excluded=True)
+    component_records: list[dict[str, Any]] = []
+    round_by_child: dict[str, int] = {}
+    for sample_round in sample_set.rounds:
+        for child_run_id in sample_round.child_run_ids:
+            round_by_child[child_run_id] = sample_round.round_number
+    for child_run_id in sample_set.combined_child_run_ids:
+        manifest = _load_run_manifest(root, child_run_id)
+        for record in _approved_component_records_for_child(root, manifest):
+            payload = dict(record)
+            payload["sample_set_id"] = sample_set.sample_set_id
+            payload["sample_round"] = round_by_child.get(child_run_id, "")
+            component_records.append(payload)
     curation = load_curation(root, sample_set_id)
     decisions = {decision.item_id: decision for decision in curation.decisions}
     rows = _table_rows_from_records(records)
+    rows.extend(_table_rows_from_component_records(component_records))
     for row in rows:
         decision = decisions.get(str(row["item_id"]))
         if decision is None:
@@ -2385,6 +2717,7 @@ def create_app(
                 locality=data.locality,
                 profile_set_name=data.profiles,
                 profile_id=data.profile,
+                count_method_override=data.count_method_override,
                 target=data.target,
                 run_id=run_id,
                 codex_bin=codex_bin,
@@ -2420,6 +2753,7 @@ def create_app(
                         locality=data.locality,
                         profile_set=data.profiles,
                         profile_id=data.profile,
+                        count_method_override=data.count_method_override,
                         target=data.target,
                         error_message=str(exc),
                     ),
@@ -2469,6 +2803,7 @@ def create_app(
                 locality=data.locality,
                 profile_set_name=data.profiles,
                 target=data.target,
+                count_method_override=data.count_method_override,
                 batch_id=batch_id,
                 codex_bin=codex_bin,
                 runner=app_runner,
@@ -2502,6 +2837,7 @@ def create_app(
                         country=data.country,
                         locality=data.locality,
                         profile_set=data.profiles,
+                        count_method_override=data.count_method_override,
                         target=data.target,
                         error_message=str(exc),
                     ),
@@ -2542,6 +2878,7 @@ def create_app(
                 localities=data.localities,
                 facility_types=data.facility_types,
                 target=data.target,
+                count_method_override=data.count_method_override,
                 campaign_id=campaign_id,
                 codex_bin=codex_bin,
                 runner=app_runner,
@@ -2577,6 +2914,7 @@ def create_app(
                         country=data.country,
                         localities=data.localities,
                         facility_types=data.facility_types,
+                        count_method_override=data.count_method_override,
                         target=data.target,
                         error_message=str(exc),
                     ),
@@ -2759,9 +3097,9 @@ def create_app(
                     "this batch/campaign, then try again.",
                     status_code=400,
                 )
-            leads = load_leads(Path(manifest.lead_path))
+            evidence_set = load_evidence_set(Path(manifest.lead_path))
             prompt = render_lead_qaqc_prompt(
-                leads,
+                evidence_set,
                 source_label=manifest.lead_path,
                 expected_country=manifest.country,
                 expected_locality=manifest.locality,
@@ -3377,6 +3715,20 @@ def create_app(
             output_format="geojson",
         )
 
+    async def sample_export_components_json(request: Request) -> Response:
+        return _sample_component_export_response(
+            root,
+            request.path_params["sample_set_id"],
+            output_format="json",
+        )
+
+    async def sample_export_components_csv(request: Request) -> Response:
+        return _sample_component_export_response(
+            root,
+            request.path_params["sample_set_id"],
+            output_format="csv",
+        )
+
     async def verified_leads(request: Request) -> JSONResponse:
         run_id = request.path_params["run_id"]
         try:
@@ -3916,6 +4268,20 @@ def create_app(
             output_format="geojson",
         )
 
+    async def export_components_json(request: Request) -> Response:
+        return _component_export_response(
+            root,
+            request.path_params["run_id"],
+            output_format="json",
+        )
+
+    async def export_components_csv(request: Request) -> Response:
+        return _component_export_response(
+            root,
+            request.path_params["run_id"],
+            output_format="csv",
+        )
+
     async def promote(request: Request) -> JSONResponse:
         try:
             run_id = request.path_params["run_id"]
@@ -3970,6 +4336,8 @@ def create_app(
         Route("/api/runs/{run_id}/export.verified.json", export_verified_json),
         Route("/api/runs/{run_id}/export.verified.csv", export_verified_csv),
         Route("/api/runs/{run_id}/export.footprints.geojson", export_footprints_geojson),
+        Route("/api/runs/{run_id}/export.components.json", export_components_json),
+        Route("/api/runs/{run_id}/export.components.csv", export_components_csv),
         Route("/api/runs/{run_id}/cancel", cancel_run, methods=["POST"]),
         Route("/api/runs/{run_id}/promote", promote, methods=["POST"]),
         Route("/api/samples", samples),
@@ -4013,6 +4381,8 @@ def create_app(
         Route("/api/samples/{sample_set_id}/table", sample_table),
         Route("/api/samples/{sample_set_id}/export.verified.json", sample_export_verified_json),
         Route("/api/samples/{sample_set_id}/export.verified.csv", sample_export_verified_csv),
+        Route("/api/samples/{sample_set_id}/export.components.json", sample_export_components_json),
+        Route("/api/samples/{sample_set_id}/export.components.csv", sample_export_components_csv),
         Route(
             "/api/samples/{sample_set_id}/export.footprints.geojson",
             sample_export_footprints_geojson,
@@ -4025,8 +4395,8 @@ def create_app(
 def _export_response(root: Path, run_id: str, *, output_format: str) -> Response:
     try:
         manifest = _load_run_manifest(root, run_id)
-        leads = load_leads(Path(manifest.lead_path))
-        payload = export_leads(leads, output_format=output_format)
+        evidence_set = load_evidence_set(Path(manifest.lead_path))
+        payload = export_evidence_set(evidence_set, output_format=output_format)
     except ValueError as exc:
         return _json_error(str(exc), status_code=404)
     media_type = "text/csv" if output_format == "csv" else "application/x-ndjson"

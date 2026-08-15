@@ -79,7 +79,15 @@
         "packaging plant",
         "workshop"
       ],
-      "priority": 10
+      "priority": 10,
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Employees",
+        "percent employee day/night",
+        "shifts"
+      ],
+      "regional_stat_fields": [],
+      "component_source_guidance": "Harvest these values as source-backed component inputs, not final occupancy estimates. Preserve the source quote, unit, time basis, and geography level for each value."
     },
     {
       "profile_id": "heavy_manufacturing",
@@ -160,7 +168,15 @@
         "foundry",
         "industrial plant"
       ],
-      "priority": 20
+      "priority": 20,
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Employees",
+        "percent employee day/night",
+        "shifts"
+      ],
+      "regional_stat_fields": [],
+      "component_source_guidance": "Harvest these values as source-backed component inputs, not final occupancy estimates. Preserve the source quote, unit, time basis, and geography level for each value."
     },
     {
       "profile_id": "chemical_refining_cement",
@@ -235,7 +251,15 @@
         "processing plant",
         "industrial plant"
       ],
-      "priority": 30
+      "priority": 30,
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Employees",
+        "percent employee day/night",
+        "shifts"
+      ],
+      "regional_stat_fields": [],
+      "component_source_guidance": "Harvest these values as source-backed component inputs, not final occupancy estimates. Preserve the source quote, unit, time basis, and geography level for each value."
     },
     {
       "profile_id": "heat_processing",
@@ -302,7 +326,15 @@
         "rubber plant",
         "plastic plant"
       ],
-      "priority": 40
+      "priority": 40,
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Employees",
+        "percent employee day/night",
+        "shifts"
+      ],
+      "regional_stat_fields": [],
+      "component_source_guidance": "Harvest these values as source-backed component inputs, not final occupancy estimates. Preserve the source quote, unit, time basis, and geography level for each value."
     },
     {
       "profile_id": "power_plants",
@@ -373,7 +405,15 @@
         "hydropower plant",
         "coal plant"
       ],
-      "priority": 50
+      "priority": 50,
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Employees",
+        "percent employee day/night",
+        "shifts"
+      ],
+      "regional_stat_fields": [],
+      "component_source_guidance": "Harvest these values as source-backed component inputs, not final occupancy estimates. Preserve the source quote, unit, time basis, and geography level for each value."
     },
     {
       "profile_id": "warehouses",
@@ -444,7 +484,11 @@
         "fulfillment center",
         "distribution center"
       ],
-      "priority": 60
+      "priority": 60,
+      "count_method": "direct_count",
+      "component_count_fields": [],
+      "regional_stat_fields": [],
+      "component_source_guidance": null
     }
   ]
 }

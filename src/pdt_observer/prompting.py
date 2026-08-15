@@ -5,6 +5,7 @@ from typing import TypedDict
 from pdt_observer.models import (
     BuildingProfileSet,
     BuildingTypeProfile,
+    CountMethod,
     StrategyPlan,
     WorkItem,
     WorkStatusReport,
@@ -126,8 +127,22 @@ def _profile_occurrence_text(profile: BuildingTypeProfile) -> str:
         values.append(f"Night/closed pattern: {profile.night_occurrence}")
     if profile.episodic_occurrence:
         values.append(f"Episodic patterns: {', '.join(profile.episodic_occurrence)}")
+    values.append(f"Count method: {profile.count_method.value}")
+    if profile.component_count_fields:
+        values.append("Component input fields: " + ", ".join(profile.component_count_fields))
+    if profile.regional_stat_fields:
+        values.append(
+            "Regional/country component fields: " + ", ".join(profile.regional_stat_fields)
+        )
+    if profile.component_source_guidance:
+        values.append("Component-source guidance: " + profile.component_source_guidance)
     if profile.contextual_count_fields:
-        values.append("Context-only counts: " + ", ".join(profile.contextual_count_fields))
+        label = (
+            "Context-only counts"
+            if profile.count_method == CountMethod.DIRECT_COUNT
+            else "Legacy context fields; harvest as components only when listed above"
+        )
+        values.append(label + ": " + ", ".join(profile.contextual_count_fields))
     return _bullet_list(tuple(values))
 
 
@@ -172,7 +187,41 @@ def render_work_prompt(
     locality_examples = _bullet_list(country_context["locality_examples"])
     source_terms = _bullet_list(country_context["source_terms"])
 
-    return f"""# Profile-Driven Occupancy Harvest Prompt
+    is_component = profile.count_method == CountMethod.POPULATION_SUBCOMPONENT
+    is_hybrid = profile.count_method == CountMethod.HYBRID
+    objective = (
+        "Find source-backed population component inputs for facilities or regional/country "
+        "scopes matching this subtype. Do not calculate final occupancy estimates in this phase."
+        if is_component
+        else (
+            "Find both direct people-present observations and source-backed population component "
+            "inputs for this subtype. Keep the two evidence roles separate and do not calculate "
+            "final occupancy estimates."
+            if is_hybrid
+            else (
+                "Find explicit historical headcounts of people physically present in, at, "
+                "evacuated from, trapped in, rescued from, transferred from, checked in to, "
+                "attending, on duty at, sheltered in, or measured within facilities matching "
+                "this assigned subtype during a bounded date, time, event, shift, inspection, "
+                "incident, operating period, or study window."
+            )
+        )
+    )
+    direct_rule = (
+        "For this direct-count profile, treat component values such as capacity, enrollment, "
+        "bed counts, workforce size, annual visitors, or scheduled staffing as context only "
+        "unless the source explicitly ties the number to people present during a bounded event, "
+        "shift, incident, inspection, or measured period."
+        if not is_component
+        else (
+            "For this component-input profile, capacity, enrollment, beds, rooms, workforce, "
+            "visitor volumes, rates, schedules, and regional statistics may be valid component "
+            "evidence when they match the configured component fields. Do not label them as "
+            "direct occupancy and do not derive a final occupancy estimate."
+        )
+    )
+
+    return f"""# Profile-Driven Occupancy Harvest Prompt / Count-Role Harvest Prompt
 
 You are a Codex-operated geospatial occupancy evidence harvester. Use Codex web capabilities and
 the local Python validation harness in this repository. Do not use external API keys.
@@ -193,11 +242,8 @@ the local Python validation harness in this repository. Do not use external API 
 
 ## Objective
 
-Find explicit historical headcounts of people physically present in, at, evacuated from, trapped
-in, rescued from, transferred from, checked in to, attending, on duty at, sheltered in, or measured
-within facilities matching this assigned subtype during a bounded date, time, event, shift,
-inspection, incident, operating period, or study window. Incidents are one high-value evidence
-pathway, not the only acceptable pathway.
+{objective} Incidents are one high-value direct-count evidence pathway, not the only acceptable
+pathway.
 
 Profile guidance:
 {profile.source_search_prompt}
@@ -205,10 +251,12 @@ Profile guidance:
 PDT occurrence hints:
 {occurrence_hints}
 
-Use these hints to search for likely subgroups and time patterns. Do not treat contextual counts
-such as capacity, enrollment, bed counts, workforce size, annual visitors, or scheduled staffing
-as direct observed occupancy unless the source explicitly ties the number to people present during
-a bounded date, time, incident, event, shift, inspection, or measured period.
+Use these hints to search for likely subgroups, component variables, and time patterns.
+{direct_rule}
+
+Counts must be judged against their intended evidence role. A value can be invalid as
+`direct_occupancy` but valid as `component_input`. Never convert a component input into a final
+occupancy estimate in this workflow.
 
 ## Orchestrator Strategy Plan
 
@@ -272,10 +320,15 @@ performance and prevent unlike observations from being treated as equivalent.
 
 - Inspect one source at a time.
 - Use only counts explicitly stated in inspected source text.
+- Return a `HarvestEvidenceSet` JSON object with `occupancy_leads` and `component_leads`.
+- Put direct people-present evidence in `occupancy_leads`; put component inputs in
+  `component_leads`.
 - Capture subgroup labels when the source provides them, such as customers, patrons, employees,
   workers, call center agents, guests, shoppers, occupants, or residents.
 - Do not convert addresses, dates, casualty counts, construction costs, capacity, seating counts,
   workforce size, hiring targets, or estimates into `people_present` observations.
+- For component inputs, preserve `component_type`, numeric `value`, `unit`, `time_basis`,
+  `geography_level`, and `period_label` when available.
 - Preserve an exact supporting quote containing the count.
 - Preserve source time phrases in `observed_time_text` when present; normalize only supported
   clock times into `time_context`.

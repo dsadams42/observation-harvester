@@ -33,6 +33,7 @@ def _profile_context(profile_set: BuildingProfileSet) -> str:
         if not profile.enabled:
             continue
         details: list[str] = [f"profile_id={profile.profile_id}", f"label={profile.label}"]
+        details.append(f"count_method={profile.count_method.value}")
         if profile.pdt_subtype:
             details.append(f"PDT subtype={profile.pdt_subtype}")
         if profile.occupancy_groups:
@@ -45,6 +46,10 @@ def _profile_context(profile_set: BuildingProfileSet) -> str:
             details.append(f"episodic={', '.join(profile.episodic_occurrence)}")
         if profile.contextual_count_fields:
             details.append(f"context-only={', '.join(profile.contextual_count_fields)}")
+        if profile.component_count_fields:
+            details.append(f"component_inputs={', '.join(profile.component_count_fields)}")
+        if profile.regional_stat_fields:
+            details.append(f"regional_inputs={', '.join(profile.regional_stat_fields)}")
         if profile.venue_aliases:
             details.append(f"aliases={', '.join(profile.venue_aliases[:8])}")
         lines.append("- " + "; ".join(details))
@@ -77,9 +82,11 @@ def render_strategy_scout_prompt(
     strategy_ids = tuple(item.strategy_id.value for item in strategy_plan.recommendations)
     return f"""# Strategy Scout
 
-You are the Strategy Scout for an OASIS bounded-occupancy harvest. Your job is to review the
-selected facility scope, country/geography, PDT occurrence hints, and deterministic evidence
+You are the Strategy Scout for an OASIS count-role harvest. Your job is to review the selected
+facility scope, country/geography, PDT occurrence hints, count method, and deterministic evidence
 strategy plan, then recommend which existing strategies the Harvester Agent should try first.
+When component-input strategies are present, evaluate likely source families for source-backed
+component values rather than direct people-present observations.
 
 Do not harvest observations. Do not create lead JSON. Do not invent evidence standards or new
 strategy IDs. You may reorder, emphasize, or de-emphasize only these allowed strategies:

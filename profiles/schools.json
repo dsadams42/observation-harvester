@@ -81,7 +81,25 @@
         "daycare",
         "childcare center"
       ],
-      "priority": 10
+      "priority": 10,
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Students",
+        "staff",
+        "faculty",
+        "school attendace rate",
+        "percent employee day/night",
+        "shift schooling"
+      ],
+      "regional_stat_fields": [
+        "Students",
+        "staff",
+        "faculty",
+        "school attendace rate",
+        "percent employee day/night",
+        "shift schooling"
+      ],
+      "component_source_guidance": "Harvest these values as source-backed component inputs, not final occupancy estimates. Preserve the source quote, unit, time basis, and geography level for each value."
     },
     {
       "profile_id": "university_college",
@@ -162,7 +180,23 @@
         "laboratory",
         "academic building"
       ],
-      "priority": 20
+      "priority": 20,
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Students",
+        "staff",
+        "faculty",
+        "percent employee day/night",
+        "percent students day/night"
+      ],
+      "regional_stat_fields": [
+        "Students",
+        "staff",
+        "faculty",
+        "percent employee day/night",
+        "percent students day/night"
+      ],
+      "component_source_guidance": "Harvest these values as source-backed component inputs, not final occupancy estimates. Preserve the source quote, unit, time basis, and geography level for each value."
     },
     {
       "profile_id": "university_library",
@@ -231,7 +265,18 @@
         "college library",
         "study hall"
       ],
-      "priority": 30
+      "priority": 30,
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Annual visitors",
+        "library staff",
+        "average hours open",
+        "days open",
+        "visit time in hours",
+        "percent employee day/night"
+      ],
+      "regional_stat_fields": [],
+      "component_source_guidance": "Harvest these values as source-backed component inputs, not final occupancy estimates. Preserve the source quote, unit, time basis, and geography level for each value."
     }
   ]
 }

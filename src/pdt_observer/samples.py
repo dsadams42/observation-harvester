@@ -407,14 +407,18 @@ def render_coverage_steering_prompt(
 
 You are a coverage steering agent for a geospatial observation harvest. Your job is to inspect
 the verified sample, judge whether it is geographically dispersed enough for the requested scope,
-and recommend targeted gap-fill harvest jobs.
+consider whether direct observations or population component fields are missing, and recommend
+targeted gap-fill harvest jobs.
 
 Use the deterministic summary and included records below. Treat this as steering guidance, not
 formal statistical representativeness. Human-excluded observations are supplied only as bounded
 negative examples: do not count them toward coverage or rediscover the same observation. Translate
 their stated reasons into targeted corrective search guidance. If there are no rejected examples,
 do not invent corrective guidance. Recommend locality-adjusted jobs that would improve geographic
-spread.
+spread. When component evidence is present or expected, note missing component fields such as
+students, staff, beds, rooms, annual visitors, household size, operating schedules, or regional
+statistics. Gap-fill jobs may target missing component inputs; do not ask the harvester to derive
+final occupancy estimates.
 
 Return strictly one valid JSON object. Do not wrap the JSON in markdown or prose. Use this schema:
 

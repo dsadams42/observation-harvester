@@ -4,7 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from pdt_observer.models import CurationReasonCode, GeometryPoint, GeometryStatus
+from pdt_observer.models import CountMethod, CurationReasonCode, GeometryPoint, GeometryStatus
 
 
 class HarvestRunRequest(BaseModel):
@@ -13,6 +13,7 @@ class HarvestRunRequest(BaseModel):
     profiles: str = "schools"
     profile: str | None = None
     target: int = Field(default=20, ge=1)
+    count_method_override: CountMethod | None = None
     run_id: str | None = None
     geographer_plan_path: str | None = None
 
@@ -22,6 +23,7 @@ class HarvestBatchRunRequest(BaseModel):
     locality: str | None = None
     profiles: str = "schools"
     target: int = Field(default=20, ge=1)
+    count_method_override: CountMethod | None = None
     batch_id: str | None = None
     geographer_plan_path: str | None = None
 
@@ -41,6 +43,7 @@ class HarvestCampaignRunRequest(BaseModel):
     localities: tuple[str, ...] = ()
     facility_types: tuple[str, ...] = Field(min_length=1)
     target: int = Field(default=20, ge=1)
+    count_method_override: CountMethod | None = None
     campaign_id: str | None = None
     geographer_plan_path: str | None = None
 

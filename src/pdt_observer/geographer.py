@@ -80,6 +80,8 @@ Review only:
 - Local administrative terms that may replace generic words such as city, district, or province.
 - Names or abbreviations used for police, fire, emergency, labor, or regulatory authorities.
 - Local facility vernacular not already represented by the aliases.
+- Local terms for census, enrollment, attendance, bed occupancy, staffing, hotel occupancy,
+  visitor traffic, passenger traffic, and other component-statistic sources when relevant.
 - Locality-specific differences within the campaign scope, when relevant.
 - Short query adjustments that a later harvester can combine with its assigned evidence strategy.
 

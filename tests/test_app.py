@@ -488,6 +488,28 @@ def test_harvest_run_endpoint_returns_manifest_and_leads(tmp_path: Path) -> None
     assert Path(payload["manifest"]["lead_path"]).is_file()
 
 
+def test_harvest_run_endpoint_accepts_count_method_override(tmp_path: Path) -> None:
+    client = TestClient(create_app(workspace=tmp_path, runner=successful_runner, background=False))
+
+    response = client.post(
+        "/api/harvest/run",
+        json={
+            "country": "US",
+            "locality": "Tennessee",
+            "profiles": "recreation_entertainment",
+            "profile": "theaters",
+            "target": 5,
+            "count_method_override": "population_subcomponent",
+        },
+    )
+
+    assert response.status_code == 200
+    manifest = response.json()["manifest"]
+    assert manifest["count_method_override"] == "population_subcomponent"
+    prompt = Path(manifest["prompt_path"]).read_text(encoding="utf-8")
+    assert "Count method: population_subcomponent" in prompt
+
+
 def test_workflow_status_recommends_next_artifact_backed_stage(tmp_path: Path) -> None:
     client = TestClient(create_app(workspace=tmp_path, runner=successful_runner, background=False))
     harvested = client.post(
@@ -562,6 +584,7 @@ def test_harvest_campaign_run_endpoint_returns_child_runs(tmp_path: Path) -> Non
         "completed_count": 2,
         "failed_count": 0,
         "lead_count": 2,
+        "budget_observation_count": 2,
     }
     assert len(manifest["child_run_ids"]) == 2
     assert any(item["manifest_type"] == "campaign" for item in runs.json()["runs"])
@@ -1285,6 +1308,107 @@ def test_run_table_verified_includes_review_address_and_geometry_fields(
     assert row["geometry_status"] == "point_confirmed"
     assert row["source_url"] == "https://example.test/story"
     assert row["review_notes"] == "Count, facility, and location are supported."
+
+
+def test_run_table_and_exports_include_verified_component_rows(tmp_path: Path) -> None:
+    client = TestClient(create_app(workspace=tmp_path, runner=successful_runner, background=False))
+    created = client.post(
+        "/api/harvest/run",
+        json={
+            "country": "US",
+            "locality": "Tennessee",
+            "profiles": "schools",
+            "profile": "primary_secondary_education",
+            "target": 1,
+        },
+    ).json()
+    run_id = created["manifest"]["run_id"]
+    lead_path = tmp_path / f"lead_runs/{run_id}.json"
+    qaqc_path = tmp_path / f"qaqc_runs/{run_id}-qaqc.json"
+    lead_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "occupancy_leads": [],
+                "component_leads": [
+                    {
+                        "is_valid_component_report": True,
+                        "source_url": "https://example.test/school",
+                        "source_title": "School profile",
+                        "source_type": "official",
+                        "evidence_quote": "Enrollment was 512 students in SY 2025.",
+                        "component_data": [
+                            {
+                                "component_type": "Students",
+                                "value": 512,
+                                "unit": "people",
+                                "time_basis": "school_year",
+                                "geography_level": "facility",
+                                "period_label": "SY 2025",
+                            }
+                        ],
+                        "location": {
+                            "facility_name": "Example School",
+                            "specific_address_or_landmark": "10 Main Street",
+                            "city_or_region": "Tennessee",
+                            "country": "US",
+                        },
+                        "geography_name": "Example School",
+                        "country": "US",
+                        "strategy_id": "official_facility_statistics",
+                        "count_semantics": "component_input",
+                        "representativeness": "component_input",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    qaqc_path.parent.mkdir(exist_ok=True)
+    qaqc_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "occupancy_reviews": [],
+                "component_reviews": [
+                    {
+                        "lead_index": 0,
+                        "source_url": "https://example.test/school",
+                        "verification_status": "verified",
+                        "source_reachable": True,
+                        "evidence_role_match": True,
+                        "component_type_match": True,
+                        "geography_level_match": True,
+                        "component_checks": [
+                            {
+                                "component_type": "Students",
+                                "value": 512,
+                                "unit": "people",
+                                "reported_value_found": True,
+                                "quote_found": True,
+                            }
+                        ],
+                        "recommended_action": "keep",
+                        "review_notes": "Component input is supported.",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    table = client.get(f"/api/runs/{run_id}/table?mode=verified")
+    component_json = client.get(f"/api/runs/{run_id}/export.components.json")
+    component_csv = client.get(f"/api/runs/{run_id}/export.components.csv")
+
+    assert table.status_code == 200
+    row = table.json()["rows"][0]
+    assert row["evidence_role"] == "component_input"
+    assert row["component_type"] == "Students"
+    assert row["geometry_status"] == "not_applicable"
+    assert component_json.status_code == 200
+    assert component_json.json()[0]["component_lead"]["geography_name"] == "Example School"
+    assert "Students" in component_csv.text
 
 
 def test_sample_table_endpoint_aggregates_verified_rows_across_rounds(

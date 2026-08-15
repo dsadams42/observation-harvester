@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pdt_observer.models import EvidenceStrategyType
+from pdt_observer.models import CountMethod, EvidenceStrategyType
 from pdt_observer.profiles import get_profile_set
 from pdt_observer.strategies import (
     build_strategy_plan,
@@ -17,12 +17,10 @@ def _ids(profile_set_name: str, profile_id: str | None = None) -> tuple[str, ...
     return tuple(item.strategy_id.value for item in plan.recommendations)
 
 
-def test_manufacturing_plan_prioritizes_incidents_shifts_and_investigations() -> None:
+def test_manufacturing_plan_prioritizes_component_input_strategies() -> None:
     assert _ids("manufacturing", "light_manufacturing") == (
-        "incident_evacuation",
-        "shift_operational_presence",
-        "legal_investigative_records",
-        "enforcement_inspection",
+        "official_facility_statistics",
+        "operational_schedule_factors",
     )
 
 
@@ -32,6 +30,25 @@ def test_temporary_use_is_recommended_only_for_profiles_with_intermittent_venues
     assert "temporary_use_occupancy" not in _ids(
         "public_venues",
         "restaurants_bars",
+    )
+
+
+def test_count_method_override_switches_strategy_family() -> None:
+    direct_plan = build_strategy_plan(
+        get_profile_set("manufacturing"),
+        profile_id="light_manufacturing",
+        count_method_override=CountMethod.DIRECT_COUNT,
+    )
+    component_plan = build_strategy_plan(
+        get_profile_set("recreation_entertainment"),
+        profile_id="theaters",
+        count_method_override=CountMethod.POPULATION_SUBCOMPONENT,
+    )
+
+    assert direct_plan.recommendations[0].strategy_id == EvidenceStrategyType.INCIDENT_EVACUATION
+    assert (
+        component_plan.recommendations[0].strategy_id
+        == EvidenceStrategyType.OFFICIAL_FACILITY_STATISTICS
     )
 
 
@@ -61,8 +78,8 @@ def test_profile_level_strategy_preferences_override_family_defaults() -> None:
         "temporary_use_occupancy",
     )
     assert power_plants[:2] == (
-        "shift_operational_presence",
-        "legal_investigative_records",
+        "official_facility_statistics",
+        "operational_schedule_factors",
     )
     assert theaters[:2] == (
         "official_event_attendance",
@@ -70,7 +87,7 @@ def test_profile_level_strategy_preferences_override_family_defaults() -> None:
     )
 
 
-def test_strategy_queries_mix_recommended_evidence_pathways() -> None:
+def test_strategy_queries_mix_component_evidence_pathways() -> None:
     plan = build_strategy_plan(
         get_profile_set("manufacturing"),
         profile_id="heavy_manufacturing",
@@ -83,9 +100,9 @@ def test_strategy_queries_mix_recommended_evidence_pathways() -> None:
         positive_phrases=("workers were evacuated",),
     )
 
-    assert '"Pittsburgh" United States "workers were evacuated" steel mill' in queries
-    assert any('"workers on shift"' in query for query in queries)
-    assert any("filetype:pdf" in query for query in queries)
+    assert '"Pittsburgh" United States steel mill official statistics' in queries
+    assert any("shifts employees" in query for query in queries)
+    assert any("operating hours staff" in query for query in queries)
 
 
 def test_strategy_registry_preserves_semantics_and_representativeness() -> None:

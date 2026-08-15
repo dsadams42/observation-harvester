@@ -12,21 +12,27 @@ from pdt_observer.geographer import geographer_prompt_guidance
 from pdt_observer.models import (
     BuildingProfileSet,
     CandidateObservation,
+    ComponentBundleStatus,
+    ComponentQaqcReview,
+    CountMethod,
     Evidence,
     GeographerPlan,
+    HarvestEvidenceSet,
+    HarvestQaqcReviewSet,
     InvestigationResult,
     InvestigationRun,
     InvestigationTask,
     LeadQaqcReview,
     ObservationType,
     OccupancyLead,
+    PopulationComponentLead,
     ResultStatus,
     SourceBundle,
     SourceDocument,
     StrategyPlan,
     StrategyScoutPlan,
 )
-from pdt_observer.profiles import get_profile_set, narrow_profile_set
+from pdt_observer.profiles import resolve_profile_set
 from pdt_observer.prompting import country_search_context
 from pdt_observer.strategies import (
     build_strategy_plan,
@@ -38,17 +44,59 @@ from pdt_observer.workflow import slugify
 LEAD_LIST_ADAPTER: TypeAdapter[tuple[OccupancyLead, ...]] = TypeAdapter(
     tuple[OccupancyLead, ...]
 )
+COMPONENT_LEAD_LIST_ADAPTER: TypeAdapter[tuple[PopulationComponentLead, ...]] = TypeAdapter(
+    tuple[PopulationComponentLead, ...]
+)
+EVIDENCE_SET_ADAPTER: TypeAdapter[HarvestEvidenceSet] = TypeAdapter(HarvestEvidenceSet)
 QAQC_REVIEW_LIST_ADAPTER: TypeAdapter[tuple[LeadQaqcReview, ...]] = TypeAdapter(
     tuple[LeadQaqcReview, ...]
 )
+COMPONENT_QAQC_REVIEW_LIST_ADAPTER: TypeAdapter[tuple[ComponentQaqcReview, ...]] = TypeAdapter(
+    tuple[ComponentQaqcReview, ...]
+)
+QAQC_REVIEW_SET_ADAPTER: TypeAdapter[HarvestQaqcReviewSet] = TypeAdapter(HarvestQaqcReviewSet)
+
+
+def load_evidence_set(path: Path) -> HarvestEvidenceSet:
+    text = path.read_text(encoding="utf-8")
+    payload = json.loads(text)
+    if isinstance(payload, list):
+        return HarvestEvidenceSet(
+            occupancy_leads=LEAD_LIST_ADAPTER.validate_python(payload),
+            component_leads=(),
+        )
+    return EVIDENCE_SET_ADAPTER.validate_python(payload)
 
 
 def load_leads(path: Path) -> tuple[OccupancyLead, ...]:
-    return LEAD_LIST_ADAPTER.validate_json(path.read_text(encoding="utf-8"))
+    return load_evidence_set(path).occupancy_leads
+
+
+def load_component_leads(path: Path) -> tuple[PopulationComponentLead, ...]:
+    return load_evidence_set(path).component_leads
+
+
+def load_qaqc_review_set(path: Path) -> HarvestQaqcReviewSet:
+    text = path.read_text(encoding="utf-8")
+    payload = json.loads(text)
+    if isinstance(payload, list):
+        if payload and "verification_status" not in payload[0]:
+            raise ValueError(
+                "QAQC review file looks like a harvest lead file; expected review objects"
+            )
+        return HarvestQaqcReviewSet(
+            occupancy_reviews=QAQC_REVIEW_LIST_ADAPTER.validate_python(payload),
+            component_reviews=(),
+        )
+    return QAQC_REVIEW_SET_ADAPTER.validate_python(payload)
 
 
 def load_qaqc_reviews(path: Path) -> tuple[LeadQaqcReview, ...]:
-    return QAQC_REVIEW_LIST_ADAPTER.validate_json(path.read_text(encoding="utf-8"))
+    return load_qaqc_review_set(path).occupancy_reviews
+
+
+def load_component_qaqc_reviews(path: Path) -> tuple[ComponentQaqcReview, ...]:
+    return load_qaqc_review_set(path).component_reviews
 
 
 def leads_to_json(leads: tuple[OccupancyLead, ...]) -> str:
@@ -56,32 +104,98 @@ def leads_to_json(leads: tuple[OccupancyLead, ...]) -> str:
     return json.dumps(payload, indent=2)
 
 
+def evidence_set_to_json(evidence_set: HarvestEvidenceSet) -> str:
+    return json.dumps(evidence_set.model_dump(mode="json"), indent=2)
+
+
 def qaqc_reviews_to_json(reviews: tuple[LeadQaqcReview, ...]) -> str:
     payload = [review.model_dump(mode="json") for review in reviews]
     return json.dumps(payload, indent=2)
 
 
-def summarize_leads(leads: tuple[OccupancyLead, ...]) -> dict[str, object]:
+def qaqc_review_set_to_json(review_set: HarvestQaqcReviewSet) -> str:
+    return json.dumps(review_set.model_dump(mode="json"), indent=2)
+
+
+def summarize_evidence_set(evidence_set: HarvestEvidenceSet) -> dict[str, object]:
+    leads = evidence_set.occupancy_leads
     valid = [lead for lead in leads if lead.is_valid_occupancy_report]
     counts = sum(len(lead.occupancy_data) for lead in valid)
+    component_leads = evidence_set.component_leads
+    valid_components = [lead for lead in component_leads if lead.is_valid_component_report]
+    component_values = sum(len(lead.component_data) for lead in valid_components)
+    component_bundles = evidence_set.component_bundles
+    countable_component_bundles = [
+        bundle
+        for bundle in component_bundles
+        if bundle.counts_toward_target
+        and bundle.completion_status
+        in {ComponentBundleStatus.COMPLETE, ComponentBundleStatus.MOSTLY_COMPLETE}
+    ]
     countries = sorted({lead.location.country for lead in valid})
     cities = sorted({lead.location.city_or_region for lead in valid})
+    component_countries = sorted({lead.country for lead in valid_components})
+    component_geographies = sorted({lead.geography_name for lead in valid_components})
     facility_level_count = sum(1 for lead in valid if lead.is_facility_level is True)
     aggregate_count = sum(1 for lead in valid if lead.is_regional_aggregate is True)
     counts_by_strategy: dict[str, int] = {}
     for lead in valid:
         strategy_id = lead.strategy_id.value if lead.strategy_id is not None else "unattributed"
         counts_by_strategy[strategy_id] = counts_by_strategy.get(strategy_id, 0) + 1
+    component_counts_by_strategy: dict[str, int] = {}
+    component_counts_by_type: dict[str, int] = {}
+    component_counts_by_geography_level: dict[str, int] = {}
+    component_bundles_by_status: dict[str, int] = {}
+    for bundle in component_bundles:
+        status = bundle.completion_status.value
+        component_bundles_by_status[status] = component_bundles_by_status.get(status, 0) + 1
+    for component_lead in valid_components:
+        strategy_id = (
+            component_lead.strategy_id.value
+            if component_lead.strategy_id is not None
+            else "unattributed"
+        )
+        component_counts_by_strategy[strategy_id] = component_counts_by_strategy.get(
+            strategy_id, 0
+        ) + 1
+        for datum in component_lead.component_data:
+            component_counts_by_type[datum.component_type] = (
+                component_counts_by_type.get(datum.component_type, 0) + 1
+            )
+            level = datum.geography_level.value
+            component_counts_by_geography_level[level] = (
+                component_counts_by_geography_level.get(level, 0) + 1
+            )
     return {
         "lead_count": len(leads),
         "valid_occupancy_reports": len(valid),
         "occupancy_count_rows": counts,
+        "component_lead_count": len(component_leads),
+        "valid_component_reports": len(valid_components),
+        "component_value_rows": component_values,
+        "component_bundle_count": len(component_bundles),
+        "countable_component_observations": len(countable_component_bundles),
+        "budget_observation_count": len(valid) + len(countable_component_bundles),
         "countries": countries,
         "cities_or_regions": cities,
+        "component_countries": component_countries,
+        "component_geographies": component_geographies,
         "facility_level_count": facility_level_count,
         "regional_aggregate_count": aggregate_count,
+        "counts_by_role": {
+            "direct_occupancy": len(valid),
+            "component_input": len(valid_components),
+        },
         "counts_by_strategy": counts_by_strategy,
+        "component_counts_by_strategy": component_counts_by_strategy,
+        "component_counts_by_type": component_counts_by_type,
+        "component_counts_by_geography_level": component_counts_by_geography_level,
+        "component_bundles_by_status": component_bundles_by_status,
     }
+
+
+def summarize_leads(leads: tuple[OccupancyLead, ...]) -> dict[str, object]:
+    return summarize_evidence_set(HarvestEvidenceSet(occupancy_leads=leads))
 
 
 def leads_to_jsonl(leads: tuple[OccupancyLead, ...]) -> str:
@@ -158,6 +272,98 @@ def export_leads(leads: tuple[OccupancyLead, ...], *, output_format: str) -> str
     raise ValueError("lead export format must be csv or jsonl")
 
 
+def evidence_set_to_jsonl(evidence_set: HarvestEvidenceSet) -> str:
+    payloads: list[dict[str, object]] = []
+    payloads.extend(lead.model_dump(mode="json") for lead in evidence_set.occupancy_leads)
+    payloads.extend(lead.model_dump(mode="json") for lead in evidence_set.component_leads)
+    for bundle in evidence_set.component_bundles:
+        payload = bundle.model_dump(mode="json")
+        payload["record_type"] = "component_bundle"
+        payloads.append(payload)
+    lines = [json.dumps(payload, sort_keys=True) for payload in payloads]
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
+def component_leads_to_csv(component_leads: tuple[PopulationComponentLead, ...]) -> str:
+    fieldnames = (
+        "lead_index",
+        "source_url",
+        "source_title",
+        "source_type",
+        "evidence_quote",
+        "component_type",
+        "value",
+        "unit",
+        "time_basis",
+        "geography_level",
+        "period_label",
+        "facility_name",
+        "specific_address_or_landmark",
+        "geography_name",
+        "country",
+        "confidence",
+        "is_facility_level",
+        "is_regional_aggregate",
+        "review_flags",
+        "review_notes",
+        "strategy_id",
+        "count_semantics",
+        "representativeness",
+    )
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+    for lead_index, lead in enumerate(component_leads):
+        for datum in lead.component_data:
+            location = lead.location
+            writer.writerow(
+                {
+                    "lead_index": lead_index,
+                    "source_url": lead.source_url,
+                    "source_title": lead.source_title,
+                    "source_type": lead.source_type.value,
+                    "evidence_quote": lead.evidence_quote,
+                    "component_type": datum.component_type,
+                    "value": datum.value,
+                    "unit": datum.unit,
+                    "time_basis": datum.time_basis.value,
+                    "geography_level": datum.geography_level.value,
+                    "period_label": datum.period_label or "",
+                    "facility_name": location.facility_name if location is not None else "",
+                    "specific_address_or_landmark": (
+                        location.specific_address_or_landmark if location is not None else ""
+                    ),
+                    "geography_name": lead.geography_name,
+                    "country": lead.country,
+                    "confidence": lead.confidence.value,
+                    "is_facility_level": (
+                        "" if lead.is_facility_level is None else lead.is_facility_level
+                    ),
+                    "is_regional_aggregate": (
+                        "" if lead.is_regional_aggregate is None else lead.is_regional_aggregate
+                    ),
+                    "review_flags": ";".join(lead.review_flags),
+                    "review_notes": lead.review_notes or "",
+                    "strategy_id": lead.strategy_id.value if lead.strategy_id is not None else "",
+                    "count_semantics": lead.count_semantics or "",
+                    "representativeness": lead.representativeness or "",
+                }
+            )
+    return output.getvalue()
+
+
+def export_evidence_set(evidence_set: HarvestEvidenceSet, *, output_format: str) -> str:
+    if output_format == "jsonl":
+        return evidence_set_to_jsonl(evidence_set)
+    if output_format == "csv":
+        occupancy_csv = leads_to_csv(evidence_set.occupancy_leads)
+        component_csv = component_leads_to_csv(evidence_set.component_leads)
+        if not evidence_set.component_leads:
+            return occupancy_csv
+        return occupancy_csv + "\n# Component evidence\n" + component_csv
+    raise ValueError("evidence export format must be csv or jsonl")
+
+
 def promote_lead_to_run(
     lead: OccupancyLead,
     *,
@@ -225,29 +431,34 @@ def promote_lead_to_run(
 
 
 def render_lead_qaqc_prompt(
-    leads: tuple[OccupancyLead, ...],
+    evidence: HarvestEvidenceSet | tuple[OccupancyLead, ...],
     *,
     source_label: str = "lead JSON",
     expected_country: str | None = None,
     expected_locality: str | None = None,
 ) -> str:
-    lead_payload = json.dumps([lead.model_dump(mode="json") for lead in leads], indent=2)
+    evidence_set = (
+        evidence
+        if isinstance(evidence, HarvestEvidenceSet)
+        else HarvestEvidenceSet(occupancy_leads=evidence)
+    )
+    lead_payload = json.dumps(evidence_set.model_dump(mode="json"), indent=2)
     scope_text = (
         f"\nRequested geographic scope: country `{expected_country or 'unspecified'}`; "
         f"locality `{expected_locality or 'unspecified'}`.\n"
     )
-    return f"""# Occupancy Lead QAQC Verification
+    return f"""# Occupancy Lead QAQC Verification / Harvest Evidence QAQC Verification
 
-You are a careful QAQC verification agent for harvested occupancy leads. Your job is to inspect
-the source URL for each lead, verify whether the source supports the reported occupancy values,
-and return review JSON only.
+You are a careful QAQC verification agent for harvested OASIS evidence. Your job is to inspect
+the source URL for each lead, verify whether the source supports the reported values under the
+lead's intended evidence role, and return review JSON only.
 
 Input source: {source_label}
 {scope_text}
 
 ## Verification Tasks
 
-For each lead in the input array:
+For each direct occupancy lead in `occupancy_leads`:
 - Open the `source_url` when it is a usable URL. If the URL is missing, broken, paywalled, or
   unavailable, use `source_unreachable` and recommend `retry` or `review`.
 - Search within the page/source text for each reported `occupancy_data[].count`.
@@ -269,6 +480,28 @@ For each lead in the input array:
 - Do not invent support. If the source does not clearly support the lead, mark it for review or
   rejection.
 
+For each component lead in `component_leads`:
+- Verify each `component_data[]` value against the source quote and page text.
+- Confirm that the value is valid as a component input, not as a direct occupancy observation.
+- Verify `component_type`, `value`, `unit`, `time_basis`, and `geography_level` when the source
+  provides enough evidence.
+- Facility-level component evidence should match the named facility. Locality, region, and
+  country-level component evidence may be valid when its `geography_level` and `geography_name`
+  accurately describe the source scope.
+- Do not reject a component input merely because it is not a direct people-present count.
+- Do reject or review a component lead when it silently converts a component input into a final
+  occupancy estimate.
+
+For each facility bundle in `component_bundles`:
+- Verify that `source_lead_indexes` point to component leads for the same facility or stated
+  geography.
+- Check whether `found_component_types` and `missing_component_types` honestly summarize the
+  source-backed component data and configured targets.
+- `counts_toward_target` is acceptable only when `completion_status` is `complete` or
+  `mostly_complete`.
+- Partial and seed-only bundles may remain in the artifact as useful notes, but they should not
+  be counted as completed observations.
+
 ## Status And Action Rules
 
 Set `verification_status` to one of:
@@ -287,35 +520,68 @@ Set `recommended_action` to one of:
 
 ## Output Format
 
-Return strictly a single valid JSON array. Do not wrap the JSON in markdown or prose. Use this
+Return strictly a single valid JSON object. Do not wrap the JSON in markdown or prose. Use this
 exact schema:
 
-[
-  {{
-    "lead_index": 0,
-    "source_url": "String",
-    "verification_status": "verified",
-    "source_reachable": true,
-    "facility_match": true,
-    "location_match": true,
-    "strategy_match": true,
-    "count_checks": [
-      {{
-        "count": 0,
-        "group_type": "String",
-        "reported_count_found": true,
-        "quote_found": true,
-        "supporting_quote": "Exact quote or null",
-        "notes": "String or null"
-      }}
-    ],
-    "supporting_quote": "Best exact quote supporting the lead, or null",
-    "recommended_action": "keep",
-    "review_notes": "Short explanation of the verification decision"
-  }}
-]
+{{
+  "schema_version": 1,
+  "occupancy_reviews": [
+    {{
+      "lead_index": 0,
+      "source_url": "String",
+      "verification_status": "verified",
+      "source_reachable": true,
+      "facility_match": true,
+      "location_match": true,
+      "strategy_match": true,
+      "count_checks": [
+        {{
+          "count": 0,
+          "group_type": "String",
+          "reported_count_found": true,
+          "quote_found": true,
+          "supporting_quote": "Exact quote or null",
+          "notes": "String or null"
+        }}
+      ],
+      "supporting_quote": "Best exact quote supporting the lead, or null",
+      "recommended_action": "keep",
+      "review_notes": "Short explanation of the verification decision"
+    }}
+  ],
+  "component_reviews": [
+    {{
+      "lead_index": 0,
+      "source_url": "String",
+      "verification_status": "verified",
+      "source_reachable": true,
+      "evidence_role_match": true,
+      "component_type_match": true,
+      "geography_level_match": true,
+      "location_match": true,
+      "strategy_match": true,
+      "component_checks": [
+        {{
+          "component_type": "String",
+          "value": 0,
+          "unit": "String",
+          "reported_value_found": true,
+          "quote_found": true,
+          "component_type_match": true,
+          "time_basis_match": true,
+          "geography_level_match": true,
+          "supporting_quote": "Exact quote or null",
+          "notes": "String or null"
+        }}
+      ],
+      "supporting_quote": "Best exact quote supporting the component values, or null",
+      "recommended_action": "keep",
+      "review_notes": "Short explanation of the verification decision"
+    }}
+  ]
+}}
 
-## Leads To Verify
+## Evidence To Verify
 
 {lead_payload}
 """
@@ -393,9 +659,21 @@ def _profile_occurrence_guidance(profile_set: BuildingProfileSet) -> str:
             details.append(f"Night/closed pattern: {profile.night_occurrence}")
         if profile.episodic_occurrence:
             details.append(f"Episodic patterns: {', '.join(profile.episodic_occurrence)}")
+        details.append(f"Count method: {profile.count_method.value}")
+        if profile.component_count_fields:
+            details.append(f"Component inputs: {', '.join(profile.component_count_fields)}")
+        if profile.regional_stat_fields:
+            details.append(f"Regional/country inputs: {', '.join(profile.regional_stat_fields)}")
+        if profile.component_source_guidance:
+            details.append(f"Component guidance: {profile.component_source_guidance}")
         if profile.contextual_count_fields:
+            label = (
+                "Context-only counts"
+                if profile.count_method == CountMethod.DIRECT_COUNT
+                else "Legacy context fields"
+            )
             details.append(
-                "Context-only counts: " + ", ".join(profile.contextual_count_fields)
+                label + ": " + ", ".join(profile.contextual_count_fields)
             )
         if details:
             lines.append(f"- {profile.label}: {'; '.join(details)}.")
@@ -444,6 +722,7 @@ def render_lead_harvest_prompt(
     target: int,
     locality: str | None = None,
     profile_id: str | None = None,
+    count_method_override: CountMethod | None = None,
     geographer_plan: GeographerPlan | None = None,
     strategy_plan: StrategyPlan | None = None,
     strategy_scout_plan: StrategyScoutPlan | None = None,
@@ -451,10 +730,12 @@ def render_lead_harvest_prompt(
     activity_path: Path | None = None,
     curation_guidance: str = "",
 ) -> str:
-    profile_set = get_profile_set(profile_set_name)
-    if profile_id is not None:
-        profile_set = narrow_profile_set(profile_set, profile_id)
-    strategy_plan = strategy_plan or build_strategy_plan(profile_set, profile_id=profile_id)
+    profile_set = resolve_profile_set(
+        profile_set_name,
+        profile_id=profile_id,
+        count_method_override=count_method_override,
+    )
+    strategy_plan = strategy_plan or build_strategy_plan(profile_set)
     country_context = country_search_context(country)
     country_name = country_context["name"]
     locality_scope = (
@@ -499,15 +780,107 @@ def render_lead_harvest_prompt(
         if run_id is not None and activity_path is not None
         else ""
     )
+    methods = {profile.count_method for profile in profile_set.profiles if profile.enabled}
+    component_only = methods == {CountMethod.POPULATION_SUBCOMPONENT}
+    hybrid = CountMethod.HYBRID in methods or (
+        CountMethod.POPULATION_SUBCOMPONENT in methods and CountMethod.DIRECT_COUNT in methods
+    )
+    component_targets = tuple(
+        dict.fromkeys(
+            _unique_profile_values(profile_set, "component_count_fields")
+            + _unique_profile_values(profile_set, "regional_stat_fields")
+        )
+    )
+    target_rule = (
+        f"Target: {target} completed or mostly complete facility component observation bundles. "
+        "Raw component source hits and same-facility deepening searches do not count toward this "
+        "target until they are consolidated into a `component_bundles[]` item with "
+        "`counts_toward_target: true`."
+        if component_only
+        else (
+            f"Target: {target} completed observations. Direct occupancy leads count as "
+            "observations; component source hits count only after consolidation into complete or "
+            "mostly complete facility bundles."
+            if hybrid
+            else f"Target: {target} lead records."
+        )
+    )
+    harvest_objective = (
+        "extract source-backed population component inputs for the selected facility scope. "
+        "Do not calculate final occupancy estimates in this phase."
+        if component_only
+        else (
+            "extract both source-backed direct occupancy observations and population component "
+            "inputs for the selected facility scope. Keep the evidence roles separate and do "
+            "not calculate final occupancy estimates."
+            if hybrid
+            else (
+                "extract source-backed facility-level lead records for counts of people "
+                "physically present during a bounded time, incident, event, shift, inspection, "
+                "transfer, shelter activation, operating state, or measured period."
+            )
+        )
+    )
+    context_rule = (
+        "For component-input profiles, capacity, enrollment, bed counts, workforce size, rooms, "
+        "annual visitors, schedules, rates, and regional statistics may be valid component "
+        "evidence when they match configured component fields. Preserve them as component inputs, "
+        "not direct occupancy observations or derived totals."
+        if component_only
+        else (
+            "For hybrid profiles, collect direct people-present observations and component inputs "
+            "in their separate arrays. A component value can be valid evidence without being a "
+            "direct occupancy observation."
+            if hybrid
+            else (
+                "For direct-count profiles, do not treat capacity, enrollment, bed counts, "
+                "workforce size, annual visitors, or other contextual counts as direct observed "
+                "occupancy unless the source explicitly ties the count to people present during "
+                "a bounded date, time, incident, event, shift, inspection, or measured period."
+            )
+        )
+    )
+    component_deepening_guidance = (
+        f"""
+## Component Facility Deepening Loop
+
+For component-input work, do not treat the first source hit for a facility as a completed
+observation unless it already covers most configured component targets.
+
+Configured component targets:
+{_bullet_list(component_targets)}
+
+When you find a facility-level component hit:
+- Treat the facility as a seed and normalize its name, locality, country, and address if available.
+- Compare found component types with the configured component targets.
+- Run additional same-facility searches for missing fields using the exact facility name plus terms
+  such as annual report, statistics, staff, FTE, hours, days open, attendance, visitors, rooms,
+  beds, enrollment, occupancy rate, schedule, or the missing component field names.
+- These follow-up searches are part of deepening the same candidate and do not count against the
+  target budget by themselves.
+- Add each source-backed value as a `component_leads[]` item, preserving its own URL and quote.
+- Add one `component_bundles[]` item per seeded facility or geography, listing source lead indexes,
+  found fields, missing fields, and follow-up searches attempted.
+- Set `completion_status` to `complete` only when all or nearly all target fields are found.
+- Set `completion_status` to `mostly_complete` when the bundle contains enough high-value fields
+  to be useful despite one or more missing low-priority fields.
+- Set `completion_status` to `partial` or `seed_only` for incomplete seeds. These must have
+  `counts_toward_target: false`.
+- Only `complete` and `mostly_complete` bundles may use `counts_toward_target: true`.
+
+Do not calculate final occupancy estimates from the bundle. The bundle is a source-backed input
+package, not a derived population total.
+"""
+        if component_only or hybrid
+        else ""
+    )
 
     return f"""# Broad Occupancy Lead Harvest
 
 You are a specialized geospatial data extraction engine. Your objective is to search online public
-sources, inspect unstructured source text, and extract source-backed facility-level lead records
-for counts of people physically present during a bounded time, incident, event, shift, inspection,
-transfer, shelter activation, operating state, or measured period.
+sources, inspect unstructured source text, and {harvest_objective}
 
-Target: {target} lead records.
+{target_rule}
 Country: {country_name} (`{country}`).
 Scope: {locality_scope}
 Facility type: {profile_set.label} (`{profile_set.profile_set_id}`).
@@ -546,10 +919,14 @@ workers, guests, shoppers, or people based on context. Evacuated residents, trap
 displaced families, rescued guests, and similar incident-tied groups are acceptable occupancy
 proxies.
 
-Use conventional occurrence hints to search and interpret likely subgroups, but do not treat
-capacity, enrollment, bed counts, workforce size, annual visitors, or other contextual counts as
-direct observed occupancy unless the source explicitly ties the count to people present during a
-bounded date, time, incident, event, shift, inspection, or measured period.
+Use conventional occurrence hints to search and interpret likely subgroups and component variables.
+{context_rule}
+
+Counts must be judged against their intended evidence role. A value can be invalid as
+`direct_occupancy` but valid as `component_input`. Never convert component inputs into final
+occupancy estimates in this workflow.
+
+{component_deepening_guidance}
 
 ## Orchestrator Strategy Plan
 
@@ -600,8 +977,8 @@ source URL.
 
 ## Output Format
 
-Return strictly a single valid JSON array. Do not wrap the JSON in markdown or prose. Use this
-exact schema. Use raw URLs, not Markdown links, in `source_url`.
+Return strictly a single valid `HarvestEvidenceSet` JSON object. Do not wrap the JSON in markdown
+or prose. Use this exact schema. Use raw URLs, not Markdown links, in `source_url`.
 
 Set `source_type` to one of: news, official, wire, encyclopedia, social, directory, unknown.
 Set `confidence` to one of: high, medium, low, unknown.
@@ -614,35 +991,96 @@ residential place. Set `is_regional_aggregate` to true for broad city/province/r
 disaster totals. Add short machine-readable `review_flags` such as "missing_quote",
 "context_only_source", "regional_aggregate", "needs_source_upgrade", or "duplicate_incident".
 
-[
-  {{
-    "is_valid_occupancy_report": true,
-    "source_url": "String or 'Not provided'",
-    "source_title": "String or ''",
-    "source_type": "news | official | wire | encyclopedia | social | directory | unknown",
-    "evidence_quote": "Exact source quote containing the count, or null",
-    "incident_date": "YYYY-MM-DD or 'Unknown'",
-    "incident_time": "HH:MM AM/PM or 'Unknown'",
-    "occupancy_data": [
-      {{
-        "count": 0,
-        "group_type": "String"
-      }}
-    ],
-    "location": {{
-      "facility_name": "String",
-      "specific_address_or_landmark": "String or 'Unknown'",
-      "city_or_region": "String",
-      "country": "{country}"
-    }},
-    "confidence": "high | medium | low | unknown",
-    "is_facility_level": true,
-    "is_regional_aggregate": false,
-    "review_flags": ["String"],
-    "review_notes": "String or null",
-    "strategy_id": "One orchestrator-recommended strategy ID",
-    "count_semantics": "String or null",
-    "representativeness": "String or null"
-  }}
-]
+{{
+  "schema_version": 1,
+  "occupancy_leads": [
+    {{
+      "evidence_role": "direct_occupancy",
+      "is_valid_occupancy_report": true,
+      "source_url": "String or 'Not provided'",
+      "source_title": "String or ''",
+      "source_type": "news | official | wire | encyclopedia | social | directory | unknown",
+      "evidence_quote": "Exact source quote containing the count, or null",
+      "incident_date": "YYYY-MM-DD or 'Unknown'",
+      "incident_time": "HH:MM AM/PM or 'Unknown'",
+      "occupancy_data": [
+        {{"count": 0, "group_type": "String"}}
+      ],
+      "location": {{
+        "facility_name": "String",
+        "specific_address_or_landmark": "String or 'Unknown'",
+        "city_or_region": "String",
+        "country": "{country}"
+      }},
+      "confidence": "high | medium | low | unknown",
+      "is_facility_level": true,
+      "is_regional_aggregate": false,
+      "review_flags": ["String"],
+      "review_notes": "String or null",
+      "strategy_id": "One orchestrator-recommended strategy ID",
+      "count_semantics": "String or null",
+      "representativeness": "String or null"
+    }}
+  ],
+  "component_leads": [
+    {{
+      "evidence_role": "component_input",
+      "is_valid_component_report": true,
+      "source_url": "String or 'Not provided'",
+      "source_title": "String or ''",
+      "source_type": "news | official | wire | encyclopedia | social | directory | unknown",
+      "evidence_quote": "Exact source quote containing the component value",
+      "component_data": [
+        {{
+          "component_type": "String such as students, staff, beds, annual visitors",
+          "value": 0,
+          "unit": "String such as people, beds, rooms, percent, visits/year",
+          "time_basis": "One allowed TimeBasis value",
+          "geography_level": "facility | locality | region | country",
+          "period_label": "String or null"
+        }}
+      ],
+      "location": {{
+        "facility_name": "String",
+        "specific_address_or_landmark": "String or 'Unknown'",
+        "city_or_region": "String",
+        "country": "{country}"
+      }},
+      "geography_name": "Facility, locality, region, or country name",
+      "country": "{country}",
+      "confidence": "high | medium | low | unknown",
+      "is_facility_level": true,
+      "is_regional_aggregate": false,
+      "review_flags": ["String"],
+      "review_notes": "String or null",
+      "strategy_id": "One orchestrator-recommended strategy ID",
+      "count_semantics": "component_input",
+      "representativeness": "component_input"
+    }}
+  ],
+  "component_bundles": [
+    {{
+      "evidence_role": "component_input",
+      "geography_name": "Facility, locality, region, or country name",
+      "country": "{country}",
+      "location": {{
+        "facility_name": "String",
+        "specific_address_or_landmark": "String or 'Unknown'",
+        "city_or_region": "String",
+        "country": "{country}"
+      }},
+      "target_component_fields": ["Configured component field names searched for this bundle"],
+      "found_component_types": ["Component types found across referenced source leads"],
+      "missing_component_types": ["Configured component fields not found after follow-up search"],
+      "source_lead_indexes": [0],
+      "follow_up_searches_attempted": [
+        "Exact same-facility query used to deepen a seed, such as facility name plus missing field"
+      ],
+      "completion_status": "complete | mostly_complete | partial | seed_only",
+      "counts_toward_target": true,
+      "confidence": "high | medium | low | unknown",
+      "completion_notes": "Bundle completion rationale"
+    }}
+  ]
+}}
 """

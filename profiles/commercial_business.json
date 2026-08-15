@@ -58,7 +58,11 @@
         "retail"
       ],
       "priority": 10,
-      "enabled": true
+      "enabled": true,
+      "count_method": "direct_count",
+      "component_count_fields": [],
+      "regional_stat_fields": [],
+      "component_source_guidance": null
     },
     {
       "profile_id": "offices_bpo_call_centers",
@@ -115,7 +119,11 @@
         "corporate building"
       ],
       "priority": 20,
-      "enabled": true
+      "enabled": true,
+      "count_method": "direct_count",
+      "component_count_fields": [],
+      "regional_stat_fields": [],
+      "component_source_guidance": null
     },
     {
       "profile_id": "factories_warehouses",
@@ -172,7 +180,11 @@
         "processing plant"
       ],
       "priority": 30,
-      "enabled": true
+      "enabled": true,
+      "count_method": "direct_count",
+      "component_count_fields": [],
+      "regional_stat_fields": [],
+      "component_source_guidance": null
     },
     {
       "profile_id": "hotels_restaurants",
@@ -231,7 +243,11 @@
         "inn"
       ],
       "priority": 40,
-      "enabled": true
+      "enabled": true,
+      "count_method": "direct_count",
+      "component_count_fields": [],
+      "regional_stat_fields": [],
+      "component_source_guidance": null
     }
   ]
 }

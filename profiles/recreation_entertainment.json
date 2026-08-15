@@ -9,17 +9,70 @@
       "area_defined": "All indoor recreation buildings.",
       "day_occurrence": "Open during sports, classes, clubs, community programs, and staff work periods.",
       "night_occurrence": "Usually closed, with possible staff, maintenance, janitorial, or security presence.",
-      "episodic_occurrence": ["activities", "classes", "sports events", "evacuations", "community gatherings"],
-      "occupancy_groups": ["visitors", "participants", "attendees", "employees", "staff"],
-      "contextual_count_fields": ["capacity", "membership", "registered participants"],
-      "preferred_strategy_ids": ["official_event_attendance", "incident_evacuation", "temporary_use_occupancy", "routine_dated_attendance"],
+      "episodic_occurrence": [
+        "activities",
+        "classes",
+        "sports events",
+        "evacuations",
+        "community gatherings"
+      ],
+      "occupancy_groups": [
+        "visitors",
+        "participants",
+        "attendees",
+        "employees",
+        "staff"
+      ],
+      "contextual_count_fields": [
+        "capacity",
+        "membership",
+        "registered participants"
+      ],
+      "preferred_strategy_ids": [
+        "official_event_attendance",
+        "incident_evacuation",
+        "temporary_use_occupancy",
+        "routine_dated_attendance"
+      ],
       "source_search_prompt": "Find count-bearing reports for community centers, gyms, exercise facilities, indoor recreation centers, and club facilities. Good evidence includes visitors, participants, attendees, employees, or staff present, evacuated, checked in, or attending a bounded class, activity, event, or incident. Treat capacity, membership, and registered participants as context only.",
-      "preferred_source_types": ["official recreation center announcement", "official event report", "local or national news article", "official emergency report"],
-      "context_only_source_types": ["facility directory", "membership page", "capacity page", "program listing without attendance"],
-      "positive_evidence_patterns": ["people attended", "participants attended", "visitors were inside", "people were evacuated", "checked in", "inside the gym when"],
-      "negative_evidence_patterns": ["capacity", "membership", "registered participants", "program capacity"],
-      "venue_aliases": ["community center", "gym", "exercise facility", "recreation center", "sports center"],
-      "priority": 10
+      "preferred_source_types": [
+        "official recreation center announcement",
+        "official event report",
+        "local or national news article",
+        "official emergency report"
+      ],
+      "context_only_source_types": [
+        "facility directory",
+        "membership page",
+        "capacity page",
+        "program listing without attendance"
+      ],
+      "positive_evidence_patterns": [
+        "people attended",
+        "participants attended",
+        "visitors were inside",
+        "people were evacuated",
+        "checked in",
+        "inside the gym when"
+      ],
+      "negative_evidence_patterns": [
+        "capacity",
+        "membership",
+        "registered participants",
+        "program capacity"
+      ],
+      "venue_aliases": [
+        "community center",
+        "gym",
+        "exercise facility",
+        "recreation center",
+        "sports center"
+      ],
+      "priority": 10,
+      "count_method": "direct_count",
+      "component_count_fields": [],
+      "regional_stat_fields": [],
+      "component_source_guidance": null
     },
     {
       "profile_id": "theaters",
@@ -28,17 +81,71 @@
       "area_defined": "Seating and spectator area only; exclude stage and other non-spectator areas unless the source ties people to those areas.",
       "day_occurrence": "Open during films, performances, concerts, rehearsals, and staff work periods.",
       "night_occurrence": "Usually closed, with possible staff, maintenance, janitorial, or security presence.",
-      "episodic_occurrence": ["films", "shows", "concerts", "performances", "evacuations"],
-      "occupancy_groups": ["attendees", "audience members", "patrons", "visitors", "employees", "staff"],
-      "contextual_count_fields": ["seating capacity", "tickets sold", "venue capacity"],
-      "preferred_strategy_ids": ["official_event_attendance", "temporary_use_occupancy", "incident_evacuation", "enforcement_inspection"],
+      "episodic_occurrence": [
+        "films",
+        "shows",
+        "concerts",
+        "performances",
+        "evacuations"
+      ],
+      "occupancy_groups": [
+        "attendees",
+        "audience members",
+        "patrons",
+        "visitors",
+        "employees",
+        "staff"
+      ],
+      "contextual_count_fields": [
+        "seating capacity",
+        "tickets sold",
+        "venue capacity"
+      ],
+      "preferred_strategy_ids": [
+        "official_event_attendance",
+        "temporary_use_occupancy",
+        "incident_evacuation",
+        "enforcement_inspection"
+      ],
       "source_search_prompt": "Find count-bearing reports for theaters, opera houses, movie theaters, concert venues, and performance halls. Good evidence includes attendees, audience members, patrons, visitors, employees, or staff attending, checked in, inside, evacuated, or counted during a bounded show or incident. Treat seating capacity and tickets sold as context only unless attendance/check-in is confirmed.",
-      "preferred_source_types": ["official venue or organizer announcement", "ticket-scan or attendance report", "local or national news article", "official emergency report"],
-      "context_only_source_types": ["seating chart", "capacity page", "ticketing page without attendance", "venue directory"],
-      "positive_evidence_patterns": ["people attended", "attendees were inside", "audience members were evacuated", "patrons were evacuated", "people were evacuated", "checked in"],
-      "negative_evidence_patterns": ["seating capacity", "tickets sold", "venue capacity", "box office gross"],
-      "venue_aliases": ["theater", "movie theater", "opera house", "concert venue", "performance hall"],
-      "priority": 20
+      "preferred_source_types": [
+        "official venue or organizer announcement",
+        "ticket-scan or attendance report",
+        "local or national news article",
+        "official emergency report"
+      ],
+      "context_only_source_types": [
+        "seating chart",
+        "capacity page",
+        "ticketing page without attendance",
+        "venue directory"
+      ],
+      "positive_evidence_patterns": [
+        "people attended",
+        "attendees were inside",
+        "audience members were evacuated",
+        "patrons were evacuated",
+        "people were evacuated",
+        "checked in"
+      ],
+      "negative_evidence_patterns": [
+        "seating capacity",
+        "tickets sold",
+        "venue capacity",
+        "box office gross"
+      ],
+      "venue_aliases": [
+        "theater",
+        "movie theater",
+        "opera house",
+        "concert venue",
+        "performance hall"
+      ],
+      "priority": 20,
+      "count_method": "direct_count",
+      "component_count_fields": [],
+      "regional_stat_fields": [],
+      "component_source_guidance": null
     },
     {
       "profile_id": "stadiums",
@@ -47,17 +154,70 @@
       "area_defined": "Spectator and seating area only; exclude the field unless the source ties the count to occupied spectator/venue areas.",
       "day_occurrence": "Open during sporting events, concerts, tours, and staff work periods.",
       "night_occurrence": "Usually closed, with possible staff, maintenance, janitorial, or security presence.",
-      "episodic_occurrence": ["sporting events", "concerts", "evacuations", "crowd incidents"],
-      "occupancy_groups": ["attendees", "spectators", "fans", "visitors", "employees", "staff"],
-      "contextual_count_fields": ["seating capacity", "tickets sold", "stadium capacity"],
-      "preferred_strategy_ids": ["official_event_attendance", "temporary_use_occupancy", "incident_evacuation", "enforcement_inspection"],
+      "episodic_occurrence": [
+        "sporting events",
+        "concerts",
+        "evacuations",
+        "crowd incidents"
+      ],
+      "occupancy_groups": [
+        "attendees",
+        "spectators",
+        "fans",
+        "visitors",
+        "employees",
+        "staff"
+      ],
+      "contextual_count_fields": [
+        "seating capacity",
+        "tickets sold",
+        "stadium capacity"
+      ],
+      "preferred_strategy_ids": [
+        "official_event_attendance",
+        "temporary_use_occupancy",
+        "incident_evacuation",
+        "enforcement_inspection"
+      ],
       "source_search_prompt": "Find count-bearing reports for sports stadiums and large formal-seating venues. Good evidence includes spectators, fans, attendees, visitors, employees, or staff attending, checked in, inside, evacuated, or counted during a bounded event or incident. Treat stadium capacity and tickets sold as context only unless attendance/check-in is confirmed.",
-      "preferred_source_types": ["official venue or organizer announcement", "official attendance report", "local or national news article", "official emergency report"],
-      "context_only_source_types": ["capacity page", "seating chart", "ticketing page without attendance", "venue directory"],
-      "positive_evidence_patterns": ["attendance was", "people attended", "fans attended", "spectators were evacuated", "attendees were inside", "checked in"],
-      "negative_evidence_patterns": ["stadium capacity", "seating capacity", "tickets sold", "sellout"],
-      "venue_aliases": ["stadium", "sports stadium", "arena", "ballpark", "formal seating venue"],
-      "priority": 30
+      "preferred_source_types": [
+        "official venue or organizer announcement",
+        "official attendance report",
+        "local or national news article",
+        "official emergency report"
+      ],
+      "context_only_source_types": [
+        "capacity page",
+        "seating chart",
+        "ticketing page without attendance",
+        "venue directory"
+      ],
+      "positive_evidence_patterns": [
+        "attendance was",
+        "people attended",
+        "fans attended",
+        "spectators were evacuated",
+        "attendees were inside",
+        "checked in"
+      ],
+      "negative_evidence_patterns": [
+        "stadium capacity",
+        "seating capacity",
+        "tickets sold",
+        "sellout"
+      ],
+      "venue_aliases": [
+        "stadium",
+        "sports stadium",
+        "arena",
+        "ballpark",
+        "formal seating venue"
+      ],
+      "priority": 30,
+      "count_method": "direct_count",
+      "component_count_fields": [],
+      "regional_stat_fields": [],
+      "component_source_guidance": null
     },
     {
       "profile_id": "outdoor_recreation_fields",
@@ -66,17 +226,66 @@
       "area_defined": "Outdoor areas accessible by visitors; for zoos, exclude areas where animals are kept.",
       "day_occurrence": "Open during visitor, recreation, event, and staff periods.",
       "night_occurrence": "Usually closed, with reduced staff and visitors.",
-      "episodic_occurrence": ["visits", "sports events", "park events", "evacuations"],
-      "occupancy_groups": ["visitors", "participants", "attendees", "employees", "staff"],
-      "contextual_count_fields": ["annual visitors", "park capacity", "registered participants"],
-      "preferred_strategy_ids": ["official_event_attendance", "incident_evacuation", "temporary_use_occupancy"],
+      "episodic_occurrence": [
+        "visits",
+        "sports events",
+        "park events",
+        "evacuations"
+      ],
+      "occupancy_groups": [
+        "visitors",
+        "participants",
+        "attendees",
+        "employees",
+        "staff"
+      ],
+      "contextual_count_fields": [
+        "annual visitors",
+        "park capacity",
+        "registered participants"
+      ],
+      "preferred_strategy_ids": [
+        "official_event_attendance",
+        "incident_evacuation",
+        "temporary_use_occupancy"
+      ],
       "source_search_prompt": "Find count-bearing reports for public parks, sports fields without formal seating, playgrounds, zoos, and outdoor recreation fields. Good evidence includes visitors, participants, attendees, employees, or staff present, evacuated, or attending a bounded event. Treat annual visitors and park capacity as context only.",
-      "preferred_source_types": ["official parks or event report", "local or national news article", "official emergency report"],
-      "context_only_source_types": ["park directory", "annual visitor page", "capacity page", "map listing"],
-      "positive_evidence_patterns": ["visitors were evacuated", "people attended", "participants attended", "people were at the park", "attendees were present"],
-      "negative_evidence_patterns": ["annual visitors", "park capacity", "registered participants", "acreage"],
-      "venue_aliases": ["park", "sports field", "playground", "zoo", "outdoor recreation field"],
-      "priority": 40
+      "preferred_source_types": [
+        "official parks or event report",
+        "local or national news article",
+        "official emergency report"
+      ],
+      "context_only_source_types": [
+        "park directory",
+        "annual visitor page",
+        "capacity page",
+        "map listing"
+      ],
+      "positive_evidence_patterns": [
+        "visitors were evacuated",
+        "people attended",
+        "participants attended",
+        "people were at the park",
+        "attendees were present"
+      ],
+      "negative_evidence_patterns": [
+        "annual visitors",
+        "park capacity",
+        "registered participants",
+        "acreage"
+      ],
+      "venue_aliases": [
+        "park",
+        "sports field",
+        "playground",
+        "zoo",
+        "outdoor recreation field"
+      ],
+      "priority": 40,
+      "count_method": "direct_count",
+      "component_count_fields": [],
+      "regional_stat_fields": [],
+      "component_source_guidance": null
     }
   ]
 }

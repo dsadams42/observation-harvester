@@ -11,8 +11,13 @@ from pdt_observer.activity import (
     load_harvester_activity_report,
 )
 from pdt_observer.dialogue import append_dialogue
-from pdt_observer.leads import load_leads, render_lead_harvest_prompt, summarize_leads
+from pdt_observer.leads import (
+    load_evidence_set,
+    render_lead_harvest_prompt,
+    summarize_evidence_set,
+)
 from pdt_observer.models import (
+    CountMethod,
     GeographerPlan,
     HarvestBatchRunManifest,
     HarvestCampaignRunManifest,
@@ -21,7 +26,7 @@ from pdt_observer.models import (
     StrategyPlan,
     StrategyScoutPlan,
 )
-from pdt_observer.profiles import get_profile_set, narrow_profile_set
+from pdt_observer.profiles import get_profile_set, resolve_profile_set
 from pdt_observer.strategies import build_strategy_plan
 from pdt_observer.strategy_scout import (
     effective_strategy_plan,
@@ -133,6 +138,7 @@ def _failed_child_manifest(
     locality: str | None,
     profile_set_name: str,
     profile_id: str | None,
+    count_method_override: CountMethod | None,
     target: int,
     started_at: str,
     error_message: str,
@@ -149,6 +155,7 @@ def _failed_child_manifest(
             locality=locality,
             profile_set=profile_set_name,
             profile_id=profile_id,
+            count_method_override=count_method_override,
             target=target,
             prompt_path=str(root / "work" / f"{run_id}.md"),
             lead_path=str(root / "lead_runs" / f"{run_id}.json"),
@@ -178,14 +185,17 @@ def _run_strategy_scout(
     locality: str | None,
     profile_set_name: str,
     profile_id: str | None,
+    count_method_override: CountMethod | None,
     deterministic_plan: StrategyPlan,
     geographer_plan: GeographerPlan | None,
     codex_bin: str,
     runner: CodexRunner,
 ) -> tuple[StrategyPlan, StrategyScoutPlan | None, int | None, str | None]:
-    profile_set = get_profile_set(profile_set_name)
-    if profile_id is not None:
-        profile_set = narrow_profile_set(profile_set, profile_id)
+    profile_set = resolve_profile_set(
+        profile_set_name,
+        profile_id=profile_id,
+        count_method_override=count_method_override,
+    )
     output_path = strategy_scout_path(root, run_id)
     prompt_path = root / "work" / f"{run_id}-strategy.md"
     prompt = render_strategy_scout_prompt(
@@ -255,6 +265,7 @@ def run_harvest(
     target: int,
     locality: str | None = None,
     profile_id: str | None = None,
+    count_method_override: CountMethod | None = None,
     run_id: str | None = None,
     codex_bin: str = "codex",
     runner: CodexRunner | None = None,
@@ -262,8 +273,12 @@ def run_harvest(
     conversation_id: str | None = None,
     curation_guidance: str = "",
 ) -> HarvestRunManifest:
-    profile_set = get_profile_set(profile_set_name)
-    deterministic_strategy_plan = build_strategy_plan(profile_set, profile_id=profile_id)
+    profile_set = resolve_profile_set(
+        profile_set_name,
+        profile_id=profile_id,
+        count_method_override=count_method_override,
+    )
+    deterministic_strategy_plan = build_strategy_plan(profile_set)
     resolved_run_id = run_id or build_harvest_run_id(
         country=country,
         locality=locality,
@@ -297,6 +312,7 @@ def run_harvest(
         locality=locality,
         profile_set=profile_set_name,
         profile_id=profile_id,
+        count_method_override=count_method_override,
         strategy_plan=deterministic_strategy_plan,
         geographer_plan_path=(
             geographer_plan.artifact_path if geographer_plan is not None else None
@@ -329,6 +345,7 @@ def run_harvest(
         locality=locality,
         profile_set_name=profile_set_name,
         profile_id=profile_id,
+        count_method_override=count_method_override,
         deterministic_plan=deterministic_strategy_plan,
         geographer_plan=geographer_plan,
         codex_bin=codex_bin,
@@ -393,6 +410,7 @@ def run_harvest(
         target=target,
         locality=locality,
         profile_id=profile_id,
+        count_method_override=count_method_override,
         geographer_plan=geographer_plan,
         strategy_plan=strategy_plan,
         strategy_scout_plan=strategy_scout_plan,
@@ -477,8 +495,8 @@ def run_harvest(
 
     try:
         append_harvest_log(root, resolved_run_id, "Validating lead output.")
-        leads = load_leads(lead_path)
-        summary = summarize_leads(leads)
+        evidence_set = load_evidence_set(lead_path)
+        summary = summarize_evidence_set(evidence_set)
         append_harvest_log(root, resolved_run_id, f"Validation completed: {summary}.")
     except Exception as exc:
         append_harvest_log(root, resolved_run_id, f"Validation failed: {exc}.")
@@ -505,6 +523,7 @@ def run_harvest(
 
     append_harvest_log(root, resolved_run_id, "Harvest completed.")
     lead_count = summary.get("lead_count", 0)
+    budget_observation_count = summary.get("budget_observation_count", lead_count)
     counts_by_strategy = summary.get("counts_by_strategy", {})
     if activity_path.is_file():
         try:
@@ -536,7 +555,11 @@ def run_harvest(
         resolved_conversation_id,
         speaker="Harvester Agent",
         stage="lead_harvest",
-        message=f"I completed the search and returned {lead_count} lead(s) for review.",
+        message=(
+            "I completed the search and returned "
+            f"{budget_observation_count} budget-countable observation(s) from "
+            f"{lead_count} direct lead(s) plus any component evidence."
+        ),
         rationale=(
             f"The attributed lead counts by strategy were {counts_by_strategy}. "
             "These are candidates; QAQC still decides whether their sources support them."
@@ -563,6 +586,7 @@ def run_harvest_batch(
     profile_set_name: str,
     target: int,
     locality: str | None = None,
+    count_method_override: CountMethod | None = None,
     batch_id: str | None = None,
     codex_bin: str = "codex",
     runner: CodexRunner | None = None,
@@ -585,6 +609,7 @@ def run_harvest_batch(
             country=country,
             locality=locality,
             profile_set=profile_set_name,
+            count_method_override=count_method_override,
             geographer_plan_path=(
                 geographer_plan.artifact_path if geographer_plan is not None else None
             ),
@@ -608,6 +633,7 @@ def run_harvest_batch(
                 target=target,
                 locality=locality,
                 profile_id=profile.profile_id,
+                count_method_override=count_method_override,
                 run_id=child_run_id,
                 codex_bin=codex_bin,
                 runner=runner,
@@ -631,17 +657,22 @@ def run_harvest_batch(
         manifest for manifest in child_manifests if manifest.status == HarvestRunStatus.CANCELLED
     ]
     total_leads = 0
+    total_budget_observations = 0
     for child_manifest in child_manifests:
         if child_manifest.summary is None:
             continue
         lead_count = child_manifest.summary.get("lead_count", 0)
         if isinstance(lead_count, int):
             total_leads += lead_count
+        budget_count = child_manifest.summary.get("budget_observation_count", lead_count)
+        if isinstance(budget_count, int):
+            total_budget_observations += budget_count
     summary: dict[str, object] = {
         "run_count": len(child_manifests),
         "completed_count": len(child_manifests) - len(failed),
         "failed_count": len(failed),
         "lead_count": total_leads,
+        "budget_observation_count": total_budget_observations,
     }
     manifest = HarvestBatchRunManifest(
         batch_id=resolved_batch_id,
@@ -653,6 +684,7 @@ def run_harvest_batch(
         country=country,
         locality=locality,
         profile_set=profile_set_name,
+        count_method_override=count_method_override,
         geographer_plan_path=(
             geographer_plan.artifact_path if geographer_plan is not None else None
         ),
@@ -690,6 +722,7 @@ def run_harvest_campaign(
     facility_types: Sequence[str],
     target: int,
     localities: Sequence[str] = (),
+    count_method_override: CountMethod | None = None,
     campaign_id: str | None = None,
     codex_bin: str = "codex",
     runner: CodexRunner | None = None,
@@ -724,6 +757,7 @@ def run_harvest_campaign(
             country=country,
             localities=resolved_localities,
             facility_types=resolved_facility_types,
+            count_method_override=count_method_override,
             geographer_plan_path=(
                 geographer_plan.artifact_path if geographer_plan is not None else None
             ),
@@ -781,6 +815,7 @@ def run_harvest_campaign(
             target=target,
             locality=locality,
             profile_id=None,
+            count_method_override=count_method_override,
             run_id=child_run_id,
             codex_bin=codex_bin,
             runner=runner,
@@ -814,6 +849,7 @@ def run_harvest_campaign(
                     locality=locality,
                     profile_set_name=facility_type,
                     profile_id=None,
+                    count_method_override=count_method_override,
                     target=target,
                     started_at=started_at,
                     error_message=str(exc) or exc.__class__.__name__,
@@ -879,18 +915,23 @@ def run_harvest_campaign(
         manifest for manifest in child_manifests if manifest.status == HarvestRunStatus.CANCELLED
     ]
     total_leads = 0
+    total_budget_observations = 0
     for child_manifest in child_manifests:
         if child_manifest.summary is None:
             continue
         lead_count = child_manifest.summary.get("lead_count", 0)
         if isinstance(lead_count, int):
             total_leads += lead_count
+        budget_count = child_manifest.summary.get("budget_observation_count", lead_count)
+        if isinstance(budget_count, int):
+            total_budget_observations += budget_count
 
     summary: dict[str, object] = {
         "planned_run_count": len(locality_targets) * len(resolved_facility_types),
         "completed_count": len(child_manifests) - len(failed),
         "failed_count": len(failed),
         "lead_count": total_leads,
+        "budget_observation_count": total_budget_observations,
     }
     manifest = HarvestCampaignRunManifest(
         campaign_id=resolved_campaign_id,
@@ -902,6 +943,7 @@ def run_harvest_campaign(
         country=country,
         localities=resolved_localities,
         facility_types=resolved_facility_types,
+        count_method_override=count_method_override,
         geographer_plan_path=(
             geographer_plan.artifact_path if geographer_plan is not None else None
         ),

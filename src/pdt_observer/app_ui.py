@@ -741,6 +741,16 @@ INDEX_HTML = r"""<!doctype html>
         <select id="profile"></select>
       </div>
 
+      <div>
+        <label for="countMethod">Count Mode</label>
+        <select id="countMethod">
+          <option value="">Profile default</option>
+          <option value="direct_count">Direct count</option>
+          <option value="population_subcomponent">Subcomponent count</option>
+          <option value="hybrid">Hybrid</option>
+        </select>
+      </div>
+
       <div class="row">
         <div>
           <label for="target">Target</label>
@@ -1447,13 +1457,16 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function requestBody() {
+      const countMethod = $('countMethod').value;
       if (state.mode === 'campaign') {
-        return {
+        const body = {
           country: $('country').value.trim(),
           localities: splitLocalities(),
           facility_types: selectedCampaignFacilityTypes(),
           target: Number($('target').value || 20)
         };
+        if (countMethod) body.count_method_override = countMethod;
+        return body;
       }
       const body = {
         country: $('country').value.trim(),
@@ -1462,6 +1475,7 @@ INDEX_HTML = r"""<!doctype html>
         target: Number($('target').value || 20)
       };
       if (state.mode === 'single' && $('profile').value) body.profile = $('profile').value;
+      if (countMethod) body.count_method_override = countMethod;
       return body;
     }
 
@@ -1471,7 +1485,8 @@ INDEX_HTML = r"""<!doctype html>
       const summary = manifest.summary || {};
       const grouped = Boolean(manifest.batch_id || manifest.campaign_id);
       $('metricStatus').textContent = manifest.status || '-';
-      $('metricLeads').textContent = summary.lead_count || leads.length || 0;
+      $('metricLeads').textContent = summary.budget_observation_count ??
+        summary.lead_count ?? leads.length ?? 0;
       $('metricFacilityLabel').textContent = grouped ? 'Completed' : 'Facility';
       $('metricAggregateLabel').textContent = grouped ? 'Failed' : 'Aggregate';
       $('metricFacility').textContent = grouped
@@ -1788,11 +1803,17 @@ INDEX_HTML = r"""<!doctype html>
       ['sample_set_id', 'Sample'],
       ['sample_round', 'Round'],
       ['facility_type', 'Facility Type'],
+      ['evidence_role', 'Evidence Role'],
       ['lead_index', 'Lead'],
       ['count_index', 'Count Row'],
       ['facility_name', 'Facility'],
       ['count', 'Count'],
       ['group_type', 'Group'],
+      ['component_type', 'Component'],
+      ['value', 'Value'],
+      ['unit', 'Unit'],
+      ['time_basis', 'Time Basis'],
+      ['geography_level', 'Geography Level'],
       ['incident_date', 'Date'],
       ['incident_time', 'Time'],
       ['strategy_id', 'Strategy'],
@@ -2002,6 +2023,7 @@ INDEX_HTML = r"""<!doctype html>
             return `<td>${escapeHtml(reason)}</td>`;
           }
           if (key === 'actions') {
+            if (row.evidence_role === 'component_input') return '<td></td>';
             return `<td><button class="row-action" type="button" ` +
               `data-table-open-geometry="${escapeHtml(row.item_id || '')}">Open</button></td>`;
           }

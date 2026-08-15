@@ -6,12 +6,18 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from pdt_observer.leads import summarize_evidence_set
 from pdt_observer.models import (
     AddressConfidence,
     AddressEnrichmentResult,
     AddressEnrichmentStatus,
     BuildingTypeProfile,
+    ComponentBundleStatus,
+    CountMethod,
     CoverageSteeringReview,
+    GeographyLevel,
+    HarvestEvidenceSet,
+    HarvestQaqcReviewSet,
     HarvestRunManifest,
     HarvestRunStatus,
     InvestigationResult,
@@ -21,12 +27,14 @@ from pdt_observer.models import (
     LeadQaqcReview,
     LeadQaqcVerificationStatus,
     OccupancyLead,
+    PopulationComponentLead,
     RecommendedGapFillJob,
     ResultStatus,
     SampleSetManifest,
     SampleSetRound,
     SampleSetRoundRole,
     SourceType,
+    TimeBasis,
     WorkItem,
 )
 
@@ -111,6 +119,201 @@ def test_occupancy_lead_model_accepts_quality_fields() -> None:
     assert lead.strategy_id is not None
     assert lead.strategy_id.value == "incident_evacuation"
     assert lead.count_semantics == "evacuated"
+
+
+def test_harvest_evidence_set_accepts_component_leads() -> None:
+    evidence_set = HarvestEvidenceSet.model_validate(
+        {
+            "schema_version": 1,
+            "occupancy_leads": [],
+            "component_leads": [
+                {
+                    "is_valid_component_report": True,
+                    "source_url": "https://example.test/school",
+                    "source_title": "School facts",
+                    "source_type": "official",
+                    "evidence_quote": "Enrollment was 512 students for school year 2025.",
+                    "component_data": [
+                        {
+                            "component_type": "students",
+                            "value": 512,
+                            "unit": "people",
+                            "time_basis": "school_year",
+                            "geography_level": "facility",
+                            "period_label": "SY 2025",
+                        }
+                    ],
+                    "location": {
+                        "facility_name": "Example School",
+                        "specific_address_or_landmark": "10 Main Street",
+                        "city_or_region": "Tennessee",
+                        "country": "US",
+                    },
+                    "geography_name": "Example School",
+                    "country": "US",
+                }
+            ],
+        }
+    )
+
+    component = evidence_set.component_leads[0]
+    assert isinstance(component, PopulationComponentLead)
+    assert component.component_data[0].time_basis == TimeBasis.SCHOOL_YEAR
+    assert component.component_data[0].geography_level == GeographyLevel.FACILITY
+
+
+def test_harvest_evidence_set_accepts_countable_component_bundles() -> None:
+    evidence_set = HarvestEvidenceSet.model_validate(
+        {
+            "schema_version": 1,
+            "component_leads": [
+                {
+                    "is_valid_component_report": True,
+                    "source_url": "https://example.test/library",
+                    "source_title": "Library facts",
+                    "source_type": "official",
+                    "evidence_quote": "The library recorded 120000 visits and 14 staff.",
+                    "component_data": [
+                        {
+                            "component_type": "Annual visitors",
+                            "value": 120000,
+                            "unit": "visits",
+                            "time_basis": "annual",
+                            "geography_level": "facility",
+                            "period_label": "2025",
+                        }
+                    ],
+                    "geography_name": "Example Public Library",
+                    "country": "US",
+                }
+            ],
+            "component_bundles": [
+                {
+                    "geography_name": "Example Public Library",
+                    "country": "US",
+                    "target_component_fields": ["Annual visitors", "library staff"],
+                    "found_component_types": ["Annual visitors"],
+                    "missing_component_types": ["library staff"],
+                    "source_lead_indexes": [0],
+                    "follow_up_searches_attempted": [
+                        '"Example Public Library" "library staff"'
+                    ],
+                    "completion_status": "mostly_complete",
+                    "counts_toward_target": True,
+                    "confidence": "medium",
+                    "completion_notes": "Annual visitors found; staffing remained missing.",
+                }
+            ],
+        }
+    )
+
+    bundle = evidence_set.component_bundles[0]
+    assert bundle.completion_status == ComponentBundleStatus.MOSTLY_COMPLETE
+    assert bundle.counts_toward_target is True
+
+
+def test_partial_component_bundle_cannot_count_toward_target() -> None:
+    with pytest.raises(ValidationError, match="complete or mostly_complete"):
+        HarvestEvidenceSet.model_validate(
+            {
+                "schema_version": 1,
+                "component_bundles": [
+                    {
+                        "geography_name": "Example Public Library",
+                        "country": "US",
+                        "target_component_fields": ["Annual visitors", "library staff"],
+                        "found_component_types": ["Annual visitors"],
+                        "missing_component_types": ["library staff"],
+                        "completion_status": "partial",
+                        "counts_toward_target": True,
+                        "completion_notes": "Only one seed value was found.",
+                    }
+                ],
+            }
+        )
+
+
+def test_evidence_summary_counts_only_complete_component_bundles_for_budget() -> None:
+    evidence_set = HarvestEvidenceSet.model_validate(
+        {
+            "schema_version": 1,
+            "component_bundles": [
+                {
+                    "geography_name": "Complete Library",
+                    "country": "US",
+                    "target_component_fields": ["Annual visitors", "library staff"],
+                    "found_component_types": ["Annual visitors", "library staff"],
+                    "missing_component_types": [],
+                    "completion_status": "complete",
+                    "counts_toward_target": True,
+                    "completion_notes": "All target fields were found.",
+                },
+                {
+                    "geography_name": "Partial Library",
+                    "country": "US",
+                    "target_component_fields": ["Annual visitors", "library staff"],
+                    "found_component_types": ["Annual visitors"],
+                    "missing_component_types": ["library staff"],
+                    "completion_status": "partial",
+                    "counts_toward_target": False,
+                    "completion_notes": "Only a seed field was found.",
+                },
+            ],
+        }
+    )
+
+    summary = summarize_evidence_set(evidence_set)
+
+    assert summary["component_bundle_count"] == 2
+    assert summary["countable_component_observations"] == 1
+    assert summary["budget_observation_count"] == 1
+    assert summary["component_bundles_by_status"] == {"complete": 1, "partial": 1}
+
+
+def test_harvest_qaqc_review_set_accepts_component_reviews() -> None:
+    review_set = HarvestQaqcReviewSet.model_validate(
+        {
+            "schema_version": 1,
+            "occupancy_reviews": [],
+            "component_reviews": [
+                {
+                    "lead_index": 0,
+                    "source_url": "https://example.test/school",
+                    "verification_status": "verified",
+                    "source_reachable": True,
+                    "evidence_role_match": True,
+                    "component_type_match": True,
+                    "geography_level_match": True,
+                    "component_checks": [
+                        {
+                            "component_type": "students",
+                            "value": 512,
+                            "unit": "people",
+                            "reported_value_found": True,
+                            "quote_found": True,
+                        }
+                    ],
+                    "recommended_action": "keep",
+                    "review_notes": "Component input is source-backed.",
+                }
+            ],
+        }
+    )
+
+    assert review_set.component_reviews[0].component_checks[0].value == 512
+
+
+def test_building_type_profile_count_method_defaults_are_backward_compatible() -> None:
+    profile = BuildingTypeProfile.model_validate(
+        {
+            "profile_id": "legacy",
+            "label": "Legacy profile",
+            "source_search_prompt": "Find direct counts.",
+        }
+    )
+
+    assert profile.count_method == CountMethod.DIRECT_COUNT
+    assert profile.component_count_fields == ()
 
 
 def test_lead_qaqc_review_model_accepts_verification_fields() -> None:

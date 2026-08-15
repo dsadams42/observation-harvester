@@ -69,7 +69,11 @@
         "tenement"
       ],
       "priority": 10,
-      "enabled": true
+      "enabled": true,
+      "count_method": "direct_count",
+      "component_count_fields": [],
+      "regional_stat_fields": [],
+      "component_source_guidance": null
     },
     {
       "profile_id": "houses_informal_settlements",
@@ -137,7 +141,11 @@
         "residential area"
       ],
       "priority": 20,
-      "enabled": true
+      "enabled": true,
+      "count_method": "direct_count",
+      "component_count_fields": [],
+      "regional_stat_fields": [],
+      "component_source_guidance": null
     }
   ]
 }

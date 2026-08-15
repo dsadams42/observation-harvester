@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from pdt_observer.harvest import run_harvest, run_harvest_batch, run_harvest_campaign
-from pdt_observer.models import HarvestRunStatus
+from pdt_observer.models import CountMethod, HarvestRunStatus
 
 LEAD_PAYLOAD = [
     {
@@ -209,6 +209,37 @@ def test_run_harvest_writes_prompt_leads_and_completed_manifest(tmp_path: Path) 
     assert saved["strategy_plan"]["planner"] == "deterministic_strategy_planner_v1"
 
 
+def test_run_harvest_applies_count_method_override_to_prompt_and_manifest(
+    tmp_path: Path,
+) -> None:
+    manifest = run_harvest(
+        root=tmp_path,
+        country="US",
+        locality="Tennessee",
+        profile_set_name="recreation_entertainment",
+        profile_id="theaters",
+        count_method_override=CountMethod.POPULATION_SUBCOMPONENT,
+        target=5,
+        run_id="us-tn-theaters-components",
+        codex_bin="codex-test",
+        runner=successful_runner,
+    )
+
+    assert manifest.count_method_override == CountMethod.POPULATION_SUBCOMPONENT
+    assert manifest.strategy_plan is not None
+    assert manifest.strategy_plan.recommendations[0].strategy_id.value == (
+        "official_facility_statistics"
+    )
+    prompt = Path(manifest.prompt_path).read_text(encoding="utf-8")
+    assert "Count method: population_subcomponent" in prompt
+    assert "seating capacity" in prompt
+    assert "Component Facility Deepening Loop" in prompt
+    assert "completed or mostly complete facility component observation bundles" in prompt
+    assert '"component_bundles"' in prompt
+    saved = json.loads((tmp_path / "harvest_runs/us-tn-theaters-components.json").read_text())
+    assert saved["count_method_override"] == "population_subcomponent"
+
+
 def test_run_harvest_uses_strategy_scout_and_activity_dialogue(tmp_path: Path) -> None:
     manifest = run_harvest(
         root=tmp_path,
@@ -321,6 +352,7 @@ def test_run_harvest_batch_runs_each_enabled_profile(tmp_path: Path) -> None:
         "completed_count": 4,
         "failed_count": 0,
         "lead_count": 4,
+        "budget_observation_count": 4,
     }
     assert manifest.child_run_ids == (
         "us-tn-commercial-malls_retail_markets",
@@ -351,6 +383,7 @@ def test_run_harvest_campaign_runs_countrywide_facility_types(tmp_path: Path) ->
         "completed_count": 3,
         "failed_count": 0,
         "lead_count": 3,
+        "budget_observation_count": 3,
     }
     assert manifest.child_run_ids == (
         "us-countrywide-campaign-countrywide-schools",
@@ -436,4 +469,5 @@ def test_run_harvest_campaign_marks_failed_if_one_child_fails(tmp_path: Path) ->
         "completed_count": 2,
         "failed_count": 1,
         "lead_count": 2,
+        "budget_observation_count": 2,
     }

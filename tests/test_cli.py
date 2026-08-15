@@ -440,6 +440,7 @@ output.write_text(json.dumps([
         "completed_count": 4,
         "failed_count": 0,
         "lead_count": 4,
+        "budget_observation_count": 4,
     }
     assert manifest["child_run_ids"] == [
         "us-south-campaign-tennessee-schools",

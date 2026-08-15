@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from pdt_observer.models import BuildingProfileSet, BuildingTypeProfile
+from pdt_observer.models import BuildingProfileSet, BuildingTypeProfile, CountMethod
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -229,6 +229,84 @@ def narrow_profile_set(profile_set: BuildingProfileSet, profile_id: str) -> Buil
             f"profile {profile_id!r} not found in profile set {profile_set.profile_set_id!r}"
         )
     return profile_set.model_copy(update={"profiles": matching_profiles})
+
+
+def _unique_values(*groups: tuple[str, ...]) -> tuple[str, ...]:
+    values: list[str] = []
+    for group in groups:
+        for value in group:
+            if value not in values:
+                values.append(value)
+    return tuple(values)
+
+
+def _profile_with_count_method_override(
+    profile: BuildingTypeProfile,
+    count_method: CountMethod,
+) -> BuildingTypeProfile:
+    if count_method == profile.count_method:
+        return profile
+
+    if count_method == CountMethod.DIRECT_COUNT:
+        return profile.model_copy(
+            update={
+                "count_method": count_method,
+                "contextual_count_fields": _unique_values(
+                    profile.contextual_count_fields,
+                    profile.component_count_fields,
+                    profile.regional_stat_fields,
+                ),
+                "component_count_fields": (),
+                "regional_stat_fields": (),
+                "component_source_guidance": None,
+            }
+        )
+
+    component_fields = profile.component_count_fields
+    if not component_fields:
+        component_fields = profile.contextual_count_fields
+    guidance = profile.component_source_guidance
+    if guidance is None and profile.contextual_count_fields:
+        guidance = (
+            "Analyst override: treat configured context-only count fields as candidate "
+            "population component inputs for this run; keep them role-labeled and do not "
+            "derive final occupancy estimates."
+        )
+    return profile.model_copy(
+        update={
+            "count_method": count_method,
+            "component_count_fields": component_fields,
+            "component_source_guidance": guidance,
+        }
+    )
+
+
+def apply_count_method_override(
+    profile_set: BuildingProfileSet,
+    count_method: CountMethod | None,
+) -> BuildingProfileSet:
+    if count_method is None:
+        return profile_set
+    return profile_set.model_copy(
+        update={
+            "profiles": tuple(
+                _profile_with_count_method_override(profile, count_method)
+                for profile in profile_set.profiles
+            )
+        }
+    )
+
+
+def resolve_profile_set(
+    name: str,
+    *,
+    profile_id: str | None = None,
+    count_method_override: CountMethod | None = None,
+) -> BuildingProfileSet:
+    profile_set = get_profile_set(name)
+    if profile_id is not None:
+        profile_set = narrow_profile_set(profile_set, profile_id)
+    return apply_count_method_override(profile_set, count_method_override)
 
 
 def get_builtin_profile(profile_id: str) -> BuildingTypeProfile:

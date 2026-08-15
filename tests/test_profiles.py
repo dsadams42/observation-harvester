@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pdt_observer.models import BuildingProfileSet
-from pdt_observer.profiles import get_profile_set, narrow_profile_set
+from pdt_observer.models import BuildingProfileSet, CountMethod
+from pdt_observer.profiles import get_profile_set, narrow_profile_set, resolve_profile_set
 
 
 def test_public_venue_profile_set_loads_from_builtin() -> None:
@@ -250,6 +250,61 @@ def test_pdt_facility_type_profiles_include_occurrence_guidance() -> None:
     ]
     assert "workers" in agriculture.profiles[0].occupancy_groups
     assert "average household size" in residential.profiles[0].contextual_count_fields
+
+
+def test_csv_mapped_profiles_expose_count_methods_and_component_fields() -> None:
+    schools = get_profile_set("schools")
+    manufacturing = get_profile_set("manufacturing")
+    institutional = get_profile_set("public_institutional")
+    recreation = get_profile_set("recreation_entertainment")
+    residential = get_profile_set("pdt_residential")
+
+    school = schools.profiles[0]
+    factory = manufacturing.profiles[0]
+    hospital = next(
+        profile
+        for profile in institutional.profiles
+        if profile.profile_id == "hospitals_with_beds"
+    )
+    theater = next(profile for profile in recreation.profiles if profile.profile_id == "theaters")
+
+    assert school.count_method == CountMethod.POPULATION_SUBCOMPONENT
+    assert "Students" in school.component_count_fields
+    assert "school attendace rate" in school.component_count_fields
+    assert "Students" in school.regional_stat_fields
+    assert factory.count_method == CountMethod.POPULATION_SUBCOMPONENT
+    assert "Employees" in factory.component_count_fields
+    assert hospital.count_method == CountMethod.POPULATION_SUBCOMPONENT
+    assert "bed occupancy rate" in hospital.component_count_fields
+    assert theater.count_method == CountMethod.DIRECT_COUNT
+    assert theater.component_count_fields == ()
+    assert residential.profiles[0].regional_stat_fields
+
+
+def test_count_method_override_reclassifies_component_fields_without_mutating_defaults() -> None:
+    default_set = get_profile_set("public_institutional")
+    direct_hospital = resolve_profile_set(
+        "public_institutional",
+        profile_id="hospitals_with_beds",
+        count_method_override=CountMethod.DIRECT_COUNT,
+    ).profiles[0]
+    component_theater = resolve_profile_set(
+        "recreation_entertainment",
+        profile_id="theaters",
+        count_method_override=CountMethod.POPULATION_SUBCOMPONENT,
+    ).profiles[0]
+
+    default_hospital = next(
+        profile
+        for profile in default_set.profiles
+        if profile.profile_id == "hospitals_with_beds"
+    )
+    assert default_hospital.count_method == CountMethod.POPULATION_SUBCOMPONENT
+    assert direct_hospital.count_method == CountMethod.DIRECT_COUNT
+    assert direct_hospital.component_count_fields == ()
+    assert "bed occupancy rate" in direct_hospital.contextual_count_fields
+    assert component_theater.count_method == CountMethod.POPULATION_SUBCOMPONENT
+    assert "seating capacity" in component_theater.component_count_fields
 
 
 def test_public_venue_profiles_include_evidence_first_phrases() -> None:

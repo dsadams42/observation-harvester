@@ -5,11 +5,13 @@ from collections.abc import Iterable
 from pdt_observer.models import (
     BuildingProfileSet,
     BuildingTypeProfile,
+    CountMethod,
     EvidenceStrategy,
     EvidenceStrategyType,
     StrategyPlan,
     StrategyRecommendation,
 )
+from pdt_observer.profiles import apply_count_method_override
 
 STRATEGIES: dict[EvidenceStrategyType, EvidenceStrategy] = {
     EvidenceStrategyType.INCIDENT_EVACUATION: EvidenceStrategy(
@@ -220,6 +222,111 @@ STRATEGIES: dict[EvidenceStrategyType, EvidenceStrategy] = {
         ),
         default_representativeness="study_specific",
     ),
+    EvidenceStrategyType.OFFICIAL_FACILITY_STATISTICS: EvidenceStrategy(
+        strategy_id=EvidenceStrategyType.OFFICIAL_FACILITY_STATISTICS,
+        label="Official facility statistics",
+        objective=(
+            "Find source-backed facility-level component inputs such as enrollment, staff, "
+            "beds, rooms, capacity, occupied beds, employees, units, or other facility facts."
+        ),
+        query_templates=(
+            '"{locality}" {alias} official statistics',
+            '"{locality}" {alias} enrollment staff beds rooms',
+            '"{locality}" {alias} annual report statistics',
+        ),
+        preferred_source_types=(
+            "official facility page",
+            "government registry",
+            "institutional annual report",
+            "regulatory facility statistics",
+        ),
+        accepted_count_semantics=("component_input", "facility_statistic", "source_backed_input"),
+        negative_traps=(
+            "component value converted into final occupancy",
+            "undated value without period label",
+            "multi-facility total mislabeled as one facility",
+        ),
+        default_representativeness="component_input",
+    ),
+    EvidenceStrategyType.REGIONAL_DEMOGRAPHIC_STATISTICS: EvidenceStrategy(
+        strategy_id=EvidenceStrategyType.REGIONAL_DEMOGRAPHIC_STATISTICS,
+        label="Regional demographic statistics",
+        objective=(
+            "Find locality, region, or country-level component inputs such as household size, "
+            "school attendance, unemployment, age/sex groups, occupancy rates, or census rates."
+        ),
+        query_templates=(
+            '"{locality}" census household size',
+            '"{locality}" school attendance rate',
+            '"{locality}" unemployment rate age sex population',
+        ),
+        preferred_source_types=(
+            "national statistics office",
+            "census table",
+            "official survey table",
+            "government open-data portal",
+        ),
+        accepted_count_semantics=("regional_component_input", "demographic_rate", "census_input"),
+        negative_traps=(
+            "regional statistic treated as facility-specific",
+            "unlabeled geographic scope",
+            "derived final occupancy estimate",
+        ),
+        default_representativeness="regional_component_input",
+    ),
+    EvidenceStrategyType.OPERATIONAL_SCHEDULE_FACTORS: EvidenceStrategy(
+        strategy_id=EvidenceStrategyType.OPERATIONAL_SCHEDULE_FACTORS,
+        label="Operational schedule factors",
+        objective=(
+            "Find component inputs about shifts, day/night staffing fractions, operating hours, "
+            "days open, school shifts, or staff presence factors."
+        ),
+        query_templates=(
+            '"{locality}" {alias} shifts employees',
+            '"{locality}" {alias} operating hours staff',
+            '"{locality}" {alias} day night staff',
+        ),
+        preferred_source_types=(
+            "official operating schedule",
+            "staffing report",
+            "regulatory filing",
+            "institutional operations report",
+        ),
+        accepted_count_semantics=("schedule_factor", "staffing_factor", "operational_input"),
+        negative_traps=(
+            "scheduled staffing treated as observed occupancy",
+            "ordinary hours without a usable component value",
+            "unattributed percentage or factor",
+        ),
+        default_representativeness="operational_component_input",
+    ),
+    EvidenceStrategyType.VISITOR_TRAFFIC_VOLUME: EvidenceStrategy(
+        strategy_id=EvidenceStrategyType.VISITOR_TRAFFIC_VOLUME,
+        label="Visitor and traffic volume statistics",
+        objective=(
+            "Find component inputs such as annual visitors, daily visitors, passenger traffic, "
+            "freight, ship passengers, or visit duration for facilities where volume informs "
+            "population estimates."
+        ),
+        query_templates=(
+            '"{locality}" {alias} annual visitors',
+            '"{locality}" {alias} passenger traffic employees',
+            '"{locality}" {alias} daily visitors average visit time',
+        ),
+        preferred_source_types=(
+            "official visitor statistics",
+            "transport authority report",
+            "tourism or cultural annual report",
+            "facility traffic report",
+        ),
+        accepted_count_semantics=("visitor_volume_input", "traffic_volume_input", "annual_flow"),
+        negative_traps=(
+            "annual flow treated as simultaneous occupancy",
+            "ticket sales converted into attendance without source support",
+            "unscoped multi-site total",
+        ),
+        default_representativeness="volume_component_input",
+    ),
 }
 
 
@@ -296,6 +403,25 @@ def _recommendation_reason(
             "The selected subtype includes intermittently occupied arenas, halls, theaters, "
             "event venues, or shelters where event-time use is analytically meaningful."
         )
+    if strategy_id in {
+        EvidenceStrategyType.OFFICIAL_FACILITY_STATISTICS,
+        EvidenceStrategyType.REGIONAL_DEMOGRAPHIC_STATISTICS,
+        EvidenceStrategyType.OPERATIONAL_SCHEDULE_FACTORS,
+        EvidenceStrategyType.VISITOR_TRAFFIC_VOLUME,
+    }:
+        component_fields = sorted(
+            {
+                field
+                for profile in profiles
+                for field in profile.component_count_fields + profile.regional_stat_fields
+            }
+        )
+        field_text = ", ".join(component_fields) if component_fields else "configured inputs"
+        return (
+            f"{STRATEGIES[strategy_id].label} is a component-input pathway for "
+            f"{profile_set.label} within the selected scope ({labels}); target fields: "
+            f"{field_text}."
+        )
     return (
         f"{STRATEGIES[strategy_id].label} is a productive evidence pathway for "
         f"{profile_set.label} within the selected scope ({labels})."
@@ -306,7 +432,9 @@ def build_strategy_plan(
     profile_set: BuildingProfileSet,
     *,
     profile_id: str | None = None,
+    count_method_override: CountMethod | None = None,
 ) -> StrategyPlan:
+    profile_set = apply_count_method_override(profile_set, count_method_override)
     profiles = tuple(
         profile
         for profile in profile_set.profiles
@@ -317,11 +445,11 @@ def build_strategy_plan(
             f"no enabled profile {profile_id!r} in profile set {profile_set.profile_set_id!r}"
         )
 
-    strategy_ids: list[EvidenceStrategyType] = []
+    direct_strategy_ids: list[EvidenceStrategyType] = []
     for profile in sorted(profiles, key=lambda item: item.priority):
-        strategy_ids.extend(profile.preferred_strategy_ids)
-    if not strategy_ids:
-        strategy_ids = list(
+        direct_strategy_ids.extend(profile.preferred_strategy_ids)
+    if not direct_strategy_ids:
+        direct_strategy_ids = list(
             _PROFILE_SET_PRIORITIES.get(
                 profile_set.profile_set_id,
                 (
@@ -333,8 +461,32 @@ def build_strategy_plan(
             )
         )
     if _profiles_support_temporary_use(profiles):
-        insertion_index = min(2, len(strategy_ids))
-        strategy_ids.insert(insertion_index, EvidenceStrategyType.TEMPORARY_USE_OCCUPANCY)
+        insertion_index = min(2, len(direct_strategy_ids))
+        direct_strategy_ids.insert(insertion_index, EvidenceStrategyType.TEMPORARY_USE_OCCUPANCY)
+
+    component_strategy_ids = [
+        EvidenceStrategyType.OFFICIAL_FACILITY_STATISTICS,
+        EvidenceStrategyType.OPERATIONAL_SCHEDULE_FACTORS,
+    ]
+    if any(profile.regional_stat_fields for profile in profiles):
+        component_strategy_ids.append(EvidenceStrategyType.REGIONAL_DEMOGRAPHIC_STATISTICS)
+    if any(
+        any(
+            marker in field.casefold()
+            for marker in ("visitor", "passenger", "traffic", "freight", "visit time")
+        )
+        for profile in profiles
+        for field in profile.component_count_fields
+    ):
+        component_strategy_ids.append(EvidenceStrategyType.VISITOR_TRAFFIC_VOLUME)
+
+    methods = {profile.count_method for profile in profiles}
+    if methods == {CountMethod.POPULATION_SUBCOMPONENT}:
+        strategy_ids = component_strategy_ids
+    elif CountMethod.HYBRID in methods or CountMethod.POPULATION_SUBCOMPONENT in methods:
+        strategy_ids = component_strategy_ids + direct_strategy_ids
+    else:
+        strategy_ids = direct_strategy_ids
 
     unique_strategy_ids = tuple(dict.fromkeys(strategy_ids))
     return StrategyPlan(

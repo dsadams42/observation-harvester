@@ -982,6 +982,11 @@ or prose. Use this exact schema. Use raw URLs, not Markdown links, in `source_ur
 
 Set `source_type` to one of: news, official, wire, encyclopedia, social, directory, unknown.
 Set `confidence` to one of: high, medium, low, unknown.
+Set component `time_basis` to one of: instant, shift, daily, event, annual, school_year,
+census_year, operating_period, current_static, unknown. Use `current_static` for facility facts
+such as seating capacity, rooms, beds, or named static capacities when no date period is supplied.
+Use `event` for an event-specific component input such as event capacity or staff for a sold-out
+event.
 Set `strategy_id` to the strategy that produced the lead. Set `count_semantics` to a concise value
 such as `confirmed_inside`, `evacuated`, `counted_inside`, `attended`, `on_shift`, or
 `sensor_measured`. Set `representativeness` to a concise value such as `incident_specific`,
@@ -1035,7 +1040,7 @@ disaster totals. Add short machine-readable `review_flags` such as "missing_quot
           "component_type": "String such as students, staff, beds, annual visitors",
           "value": 0,
           "unit": "String such as people, beds, rooms, percent, visits/year",
-          "time_basis": "One allowed TimeBasis value",
+          "time_basis": "Allowed TimeBasis value",
           "geography_level": "facility | locality | region | country",
           "period_label": "String or null"
         }}

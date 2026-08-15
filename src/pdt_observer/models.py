@@ -76,10 +76,12 @@ class TimeBasis(StrEnum):
     INSTANT = "instant"
     SHIFT = "shift"
     DAILY = "daily"
+    EVENT = "event"
     ANNUAL = "annual"
     SCHOOL_YEAR = "school_year"
     CENSUS_YEAR = "census_year"
     OPERATING_PERIOD = "operating_period"
+    CURRENT_STATIC = "current_static"
     UNKNOWN = "unknown"
 
 

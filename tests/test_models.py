@@ -162,6 +162,46 @@ def test_harvest_evidence_set_accepts_component_leads() -> None:
     assert component.component_data[0].geography_level == GeographyLevel.FACILITY
 
 
+def test_component_time_basis_accepts_static_and_event_inputs() -> None:
+    evidence_set = HarvestEvidenceSet.model_validate(
+        {
+            "schema_version": 1,
+            "component_leads": [
+                {
+                    "is_valid_component_report": True,
+                    "source_url": "https://example.test/arena",
+                    "source_title": "Arena facts",
+                    "source_type": "official",
+                    "evidence_quote": "The arena has 55,000 seats and 300 event staff.",
+                    "component_data": [
+                        {
+                            "component_type": "seating capacity",
+                            "value": 55000,
+                            "unit": "seats",
+                            "time_basis": "current_static",
+                            "geography_level": "facility",
+                        },
+                        {
+                            "component_type": "staff",
+                            "value": 300,
+                            "unit": "people",
+                            "time_basis": "event",
+                            "geography_level": "facility",
+                            "period_label": "sold-out event",
+                        },
+                    ],
+                    "geography_name": "Example Arena",
+                    "country": "US",
+                }
+            ],
+        }
+    )
+
+    static, event = evidence_set.component_leads[0].component_data
+    assert static.time_basis == TimeBasis.CURRENT_STATIC
+    assert event.time_basis == TimeBasis.EVENT
+
+
 def test_harvest_evidence_set_accepts_countable_component_bundles() -> None:
     evidence_set = HarvestEvidenceSet.model_validate(
         {

@@ -181,9 +181,6 @@ The launchers:
 4. locate the authenticated Codex CLI;
 5. start OASIS and open `http://127.0.0.1:8771`.
 
-The previous `Observation Harvester` launcher filenames remain as compatibility
-wrappers, so existing shortcuts continue to work.
-
 ### Manual installation
 
 ```powershell

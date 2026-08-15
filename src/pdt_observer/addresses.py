@@ -7,9 +7,10 @@ from typing import Any
 from pydantic import TypeAdapter
 
 from pdt_observer.geometry import approved_records_for_child, item_id_for_lead
-from pdt_observer.leads import load_leads, load_qaqc_reviews
+from pdt_observer.leads import load_evidence_set, load_qaqc_review_set
 from pdt_observer.models import (
     AddressEnrichmentResult,
+    EvidenceRole,
     HarvestRunManifest,
     LeadQaqcRecommendedAction,
     LeadQaqcVerificationStatus,
@@ -75,20 +76,21 @@ def approved_address_inputs_from_files(
     qaqc_path: Path,
     child_run_id: str | None = None,
 ) -> tuple[dict[str, Any], ...]:
-    leads = load_leads(lead_path)
-    reviews = load_qaqc_reviews(qaqc_path)
+    evidence_set = load_evidence_set(lead_path)
+    review_set = load_qaqc_review_set(qaqc_path)
     run_id = child_run_id or lead_path.stem
     inputs: list[dict[str, Any]] = []
-    for review in reviews:
-        if review.lead_index >= len(leads):
+    for review in review_set.occupancy_reviews:
+        if review.lead_index >= len(evidence_set.occupancy_leads):
             continue
         if review.verification_status != LeadQaqcVerificationStatus.VERIFIED:
             continue
         if review.recommended_action != LeadQaqcRecommendedAction.KEEP:
             continue
-        lead = leads[review.lead_index]
+        lead = evidence_set.occupancy_leads[review.lead_index]
         inputs.append(
             {
+                "evidence_role": EvidenceRole.DIRECT_OCCUPANCY.value,
                 "lead_index": review.lead_index,
                 "item_id": item_id_for_lead(run_id, review.lead_index),
                 "source_url": lead.source_url,
@@ -99,6 +101,47 @@ def approved_address_inputs_from_files(
                 "country": lead.location.country,
                 "qaqc_supporting_quote": review.supporting_quote,
                 "qaqc_review_notes": review.review_notes,
+            }
+        )
+    for component_review in review_set.component_reviews:
+        if component_review.lead_index >= len(evidence_set.component_leads):
+            continue
+        if component_review.verification_status != LeadQaqcVerificationStatus.VERIFIED:
+            continue
+        if component_review.recommended_action != LeadQaqcRecommendedAction.KEEP:
+            continue
+        component_lead = evidence_set.component_leads[component_review.lead_index]
+        location = component_lead.location
+        component_summary = "; ".join(
+            f"{datum.component_type}: {datum.value:g} {datum.unit}"
+            for datum in component_lead.component_data
+        )
+        inputs.append(
+            {
+                "evidence_role": EvidenceRole.COMPONENT_INPUT.value,
+                "lead_index": component_review.lead_index,
+                "item_id": f"{run_id}-component-{component_review.lead_index}",
+                "source_url": component_lead.source_url,
+                "source_title": component_lead.source_title,
+                "facility_name": (
+                    location.facility_name
+                    if location is not None
+                    else component_lead.geography_name
+                ),
+                "reported_address_or_landmark": (
+                    location.specific_address_or_landmark if location is not None else ""
+                ),
+                "city_or_region": (
+                    location.city_or_region
+                    if location is not None
+                    else component_lead.geography_name
+                ),
+                "country": component_lead.country,
+                "qaqc_supporting_quote": (
+                    component_review.supporting_quote or component_lead.evidence_quote
+                ),
+                "qaqc_review_notes": component_review.review_notes,
+                "component_summary": component_summary,
             }
         )
     return tuple(inputs)
@@ -113,8 +156,8 @@ def render_address_enrichment_prompt(
     return f"""# Facility Address Enrichment
 
 You are a careful facility-address enrichment agent. Your job is to find a reliable street,
-campus, or site address for each QAQC-approved occupancy lead, then return address review JSON
-only.
+campus, or site address for each QAQC-approved facility evidence record, then return address
+review JSON only.
 
 Input source: {source_label}
 
@@ -129,6 +172,9 @@ For each input record:
 - Corroborate directory addresses against an independent source whenever possible. Pay special
   attention to street-name ordering, aliases, entrances, campus names, and postal codes.
 - Confirm the address belongs to the same facility, city/region, and country as the lead.
+- `component_input` records are addressable facility examples, not direct occupancy observations.
+  Enrich their facility address the same way, but do not infer an occupancy count from component
+  facts.
 - Prefer a specific street/campus/site address over a broad city, district, or province.
 - Capture a short exact supporting quote or address snippet when found.
 - Do not invent an address. If multiple plausible addresses exist, mark the result `ambiguous`.

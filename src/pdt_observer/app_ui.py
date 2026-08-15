@@ -1810,10 +1810,14 @@ INDEX_HTML = r"""<!doctype html>
       ['count', 'Count'],
       ['group_type', 'Group'],
       ['component_type', 'Component'],
-      ['value', 'Value'],
+      ['value', 'Component Summary'],
       ['unit', 'Unit'],
       ['time_basis', 'Time Basis'],
       ['geography_level', 'Geography Level'],
+      ['component_bundle_status', 'Bundle Status'],
+      ['counts_toward_target', 'Counts Toward Target'],
+      ['missing_component_types', 'Missing Components'],
+      ['source_count', 'Sources'],
       ['incident_date', 'Date'],
       ['incident_time', 'Time'],
       ['strategy_id', 'Strategy'],
@@ -1831,6 +1835,31 @@ INDEX_HTML = r"""<!doctype html>
       ['review_notes', 'Review Notes'],
       ['actions', 'Actions']
     ];
+
+    function componentValueColumns(rows = state.tableRows) {
+      const labels = [];
+      const seen = new Set();
+      rows.forEach((row) => {
+        const values = row.component_values || {};
+        if (!values || typeof values !== 'object' || Array.isArray(values)) return;
+        Object.keys(values).forEach((label) => {
+          if (seen.has(label)) return;
+          seen.add(label);
+          labels.push(label);
+        });
+      });
+      return labels.sort((left, right) => left.localeCompare(right))
+        .map((label) => [`component_values.${label}`, label]);
+    }
+
+    function activeTableColumns() {
+      const columns = [...tableColumns];
+      const insertIndex = columns.findIndex(([key]) => key === 'incident_date');
+      const dynamicColumns = componentValueColumns();
+      if (insertIndex === -1 || !dynamicColumns.length) return columns;
+      columns.splice(insertIndex, 0, ...dynamicColumns);
+      return columns;
+    }
 
     function setTableStatus(message, kind = '') {
       $('tableStatus').textContent = message;
@@ -1950,6 +1979,11 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function tableCellValue(row, key) {
+      if (key.startsWith('component_values.')) {
+        const label = key.slice('component_values.'.length);
+        const values = row.component_values || {};
+        return values && typeof values === 'object' ? (values[label] || '') : '';
+      }
       const value = row[key];
       if (value == null) return '';
       return String(value);
@@ -1967,8 +2001,8 @@ INDEX_HTML = r"""<!doctype html>
       });
       const direction = state.tableSortDirection === 'desc' ? -1 : 1;
       filtered.sort((left, right) => {
-        const leftValue = left[state.tableSortKey];
-        const rightValue = right[state.tableSortKey];
+        const leftValue = tableCellValue(left, state.tableSortKey);
+        const rightValue = tableCellValue(right, state.tableSortKey);
         const leftNumber = Number(leftValue);
         const rightNumber = Number(rightValue);
         if (
@@ -1998,7 +2032,8 @@ INDEX_HTML = r"""<!doctype html>
       } else if (!state.tableVisibleRows.length) {
         $('tableEmpty').textContent = 'No rows match the current search.';
       }
-      $('tableHead').innerHTML = `<tr>${tableColumns.map(([key, label]) => {
+      const columns = activeTableColumns();
+      $('tableHead').innerHTML = `<tr>${columns.map(([key, label]) => {
         if (key === 'select') return `<th>${label}</th>`;
         if (key === 'actions') return `<th>${label}</th>`;
         const marker = state.tableSortKey === key
@@ -2008,7 +2043,7 @@ INDEX_HTML = r"""<!doctype html>
           `${escapeHtml(label + marker)}</button></th>`;
       }).join('')}</tr>`;
       $('tableBody').innerHTML = state.tableVisibleRows.map((row) => {
-        const cells = tableColumns.map(([key]) => {
+        const cells = columns.map(([key]) => {
           if (key === 'select') {
             const checked = state.selectedCurationItemIds.has(row.item_id) ? ' checked' : '';
             return `<td class="selection-cell"><input type="checkbox" ` +
@@ -2047,10 +2082,10 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function tableRowsToCsv(rows) {
-      const columns = tableColumns.filter(([key]) => !['actions', 'select'].includes(key));
+      const columns = activeTableColumns().filter(([key]) => !['actions', 'select'].includes(key));
       const header = columns.map(([, label]) => csvEscape(label)).join(',');
       const lines = rows.map((row) =>
-        columns.map(([key]) => csvEscape(row[key])).join(',')
+        columns.map(([key]) => csvEscape(tableCellValue(row, key))).join(',')
       );
       return [header, ...lines].join('\n');
     }

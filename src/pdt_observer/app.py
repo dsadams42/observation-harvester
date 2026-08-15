@@ -100,7 +100,6 @@ from pdt_observer.leads import (
     load_evidence_set,
     load_leads,
     load_qaqc_review_set,
-    load_qaqc_reviews,
     promote_lead_to_run,
     render_lead_qaqc_prompt,
 )
@@ -1103,6 +1102,228 @@ def _component_records_csv(records: Sequence[dict[str, Any]]) -> str:
     return output.getvalue()
 
 
+def _format_component_table_value(datum: dict[str, Any]) -> str:
+    value = datum.get("value", "")
+    value_text = f"{value:g}" if isinstance(value, int | float) else str(value)
+    unit = str(datum.get("unit") or "").strip()
+    main = f"{value_text} {unit}".strip()
+    qualifiers = [
+        str(datum.get("time_basis") or "").strip(),
+        str(datum.get("geography_level") or "").strip(),
+        str(datum.get("period_label") or "").strip(),
+    ]
+    qualifier_text = ", ".join(qualifier for qualifier in qualifiers if qualifier)
+    return f"{main} ({qualifier_text})" if qualifier_text else main
+
+
+def _append_component_value(
+    component_values: dict[str, str],
+    datum: dict[str, Any],
+) -> None:
+    component_type = str(datum.get("component_type") or "").strip()
+    if not component_type:
+        return
+    value = _format_component_table_value(datum)
+    existing = component_values.get(component_type)
+    if existing:
+        existing_parts = {part.strip() for part in existing.split(";")}
+        if value not in existing_parts:
+            component_values[component_type] = f"{existing}; {value}"
+    else:
+        component_values[component_type] = value
+
+
+def _component_location_values(
+    lead: dict[str, Any],
+) -> tuple[str, str, str, str]:
+    location = lead.get("location") or {}
+    facility_name = str(location.get("facility_name") or lead.get("geography_name") or "")
+    city_or_region = str(location.get("city_or_region") or lead.get("geography_name") or "")
+    country = str(location.get("country") or lead.get("country") or "")
+    reported_address = str(location.get("specific_address_or_landmark") or "")
+    return facility_name, city_or_region, country, reported_address
+
+
+def _component_bundle_table_rows(
+    *,
+    child_run_id: str,
+    child_manifest: HarvestRunManifest,
+    evidence_set: Any,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    component_leads = [
+        lead.model_dump(mode="json") for lead in evidence_set.component_leads
+    ]
+    if evidence_set.component_bundles:
+        for bundle_index, bundle in enumerate(evidence_set.component_bundles):
+            bundle_payload = bundle.model_dump(mode="json")
+            lead_payloads = [
+                component_leads[index]
+                for index in bundle_payload.get("source_lead_indexes", ())
+                if 0 <= int(index) < len(component_leads)
+            ]
+            if not lead_payloads:
+                continue
+            component_values: dict[str, str] = {}
+            source_urls: list[str] = []
+            strategies: set[str] = set()
+            confidence_values: set[str] = set()
+            review_notes: list[str] = []
+            for lead_payload in lead_payloads:
+                source_url = str(lead_payload.get("source_url") or "")
+                if source_url and source_url not in source_urls:
+                    source_urls.append(source_url)
+                if lead_payload.get("strategy_id"):
+                    strategies.add(str(lead_payload["strategy_id"]))
+                if lead_payload.get("confidence"):
+                    confidence_values.add(str(lead_payload["confidence"]))
+                if lead_payload.get("review_notes"):
+                    review_notes.append(str(lead_payload["review_notes"]))
+                for datum in lead_payload.get("component_data", ()):
+                    _append_component_value(component_values, datum)
+            location = bundle_payload.get("location") or {}
+            fallback_lead = lead_payloads[0]
+            fallback_facility, fallback_city, fallback_country, fallback_address = (
+                _component_location_values(fallback_lead)
+            )
+            facility_name = str(
+                location.get("facility_name")
+                or bundle_payload.get("geography_name")
+                or fallback_facility
+            )
+            city_or_region = str(location.get("city_or_region") or fallback_city)
+            country = str(
+                location.get("country") or bundle_payload.get("country") or fallback_country
+            )
+            reported_address = str(
+                location.get("specific_address_or_landmark") or fallback_address
+            )
+            item_id = f"{child_run_id}-component-bundle-{bundle_index}"
+            rows.append(
+                {
+                    "row_id": item_id,
+                    "item_id": item_id,
+                    "run_id": child_run_id,
+                    "sample_set_id": "",
+                    "sample_round": "",
+                    "facility_type": child_manifest.profile_set,
+                    "evidence_role": "component_input",
+                    "lead_index": ",".join(
+                        str(index) for index in bundle_payload.get("source_lead_indexes", ())
+                    ),
+                    "count_index": "",
+                    "facility_name": facility_name,
+                    "count": "",
+                    "group_type": "",
+                    "component_type": ", ".join(component_values),
+                    "component_values": component_values,
+                    "value": "; ".join(
+                        f"{key}: {value}" for key, value in component_values.items()
+                    ),
+                    "unit": "",
+                    "time_basis": "",
+                    "geography_level": "",
+                    "incident_date": "",
+                    "incident_time": "",
+                    "strategy_id": ", ".join(sorted(strategies)),
+                    "representativeness": "component_input",
+                    "confidence": bundle_payload.get("confidence")
+                    or ", ".join(sorted(confidence_values)),
+                    "city_or_region": city_or_region,
+                    "country": country,
+                    "source_url": source_urls[0] if source_urls else "",
+                    "source_urls": "; ".join(source_urls),
+                    "source_count": len(source_urls),
+                    "qaqc_status": "",
+                    "recommended_action": "",
+                    "address_status": "not_run",
+                    "enriched_address": reported_address,
+                    "geometry_status": "not_applicable",
+                    "area_m2": "",
+                    "review_notes": bundle_payload.get("completion_notes")
+                    or "; ".join(review_notes),
+                    "component_bundle_status": bundle_payload.get("completion_status", ""),
+                    "counts_toward_target": bundle_payload.get("counts_toward_target", False),
+                    "missing_component_types": ", ".join(
+                        bundle_payload.get("missing_component_types", ())
+                    ),
+                    "excluded_from_dataset": False,
+                    "exclusion_reason_code": "",
+                    "exclusion_reason_note": "",
+                }
+            )
+        return rows
+
+    grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for lead_payload in component_leads:
+        facility_name, city_or_region, country, _ = _component_location_values(lead_payload)
+        grouped.setdefault((facility_name, city_or_region, country), []).append(lead_payload)
+    for group_index, ((facility_name, city_or_region, country), lead_payloads) in enumerate(
+        grouped.items()
+    ):
+        fallback_component_values: dict[str, str] = {}
+        fallback_source_urls: list[str] = []
+        lead_indexes: list[str] = []
+        for lead_payload in lead_payloads:
+            lead_index = component_leads.index(lead_payload)
+            lead_indexes.append(str(lead_index))
+            source_url = str(lead_payload.get("source_url") or "")
+            if source_url and source_url not in fallback_source_urls:
+                fallback_source_urls.append(source_url)
+            for datum in lead_payload.get("component_data", ()):
+                _append_component_value(fallback_component_values, datum)
+        _, _, _, reported_address = _component_location_values(lead_payloads[0])
+        item_id = f"{child_run_id}-component-group-{group_index}"
+        rows.append(
+            {
+                "row_id": item_id,
+                "item_id": item_id,
+                "run_id": child_run_id,
+                "sample_set_id": "",
+                "sample_round": "",
+                "facility_type": child_manifest.profile_set,
+                "evidence_role": "component_input",
+                "lead_index": ",".join(lead_indexes),
+                "count_index": "",
+                "facility_name": facility_name,
+                "count": "",
+                "group_type": "",
+                "component_type": ", ".join(fallback_component_values),
+                "component_values": fallback_component_values,
+                "value": "; ".join(
+                    f"{key}: {value}" for key, value in fallback_component_values.items()
+                ),
+                "unit": "",
+                "time_basis": "",
+                "geography_level": "",
+                "incident_date": "",
+                "incident_time": "",
+                "strategy_id": "",
+                "representativeness": "component_input",
+                "confidence": "",
+                "city_or_region": city_or_region,
+                "country": country,
+                "source_url": fallback_source_urls[0] if fallback_source_urls else "",
+                "source_urls": "; ".join(fallback_source_urls),
+                "source_count": len(fallback_source_urls),
+                "qaqc_status": "",
+                "recommended_action": "",
+                "address_status": "not_run",
+                "enriched_address": reported_address,
+                "geometry_status": "not_applicable",
+                "area_m2": "",
+                "review_notes": "",
+                "component_bundle_status": "",
+                "counts_toward_target": False,
+                "missing_component_types": "",
+                "excluded_from_dataset": False,
+                "exclusion_reason_code": "",
+                "exclusion_reason_note": "",
+            }
+        )
+    return rows
+
+
 def _geometry_items_payload(root: Path, manifest: Any) -> dict[str, Any]:
     records = merge_address_results(root, _approved_records_for_manifest(root, manifest))
     items = tuple(merge_geometry_items(root, records))
@@ -1692,6 +1913,7 @@ def _workflow_status_payload(
     all_lead_count = 0
     review_count = 0
     verified_count = 0
+    direct_verified_count = 0
     rejected_count = 0
     address_count = 0
     address_found_count = 0
@@ -1702,20 +1924,36 @@ def _workflow_status_payload(
             and child_manifest.validation_valid
             and Path(child_manifest.lead_path).is_file()
         ):
-            all_lead_count += len(load_leads(Path(child_manifest.lead_path)))
+            evidence_set = load_evidence_set(Path(child_manifest.lead_path))
+            all_lead_count += len(evidence_set.occupancy_leads) + len(
+                evidence_set.component_leads
+            )
         qaqc_path = _qaqc_output_path(root, child_run_id)
         if qaqc_path.is_file():
-            reviews = load_qaqc_reviews(qaqc_path)
-            review_count += len(reviews)
-            verified_count += sum(
+            review_set = load_qaqc_review_set(qaqc_path)
+            reviews = review_set.occupancy_reviews
+            component_reviews = review_set.component_reviews
+            review_count += len(reviews) + len(component_reviews)
+            direct_keep_count = sum(
                 review.verification_status.value == "verified"
                 and review.recommended_action.value == "keep"
                 for review in reviews
             )
+            component_keep_count = sum(
+                review.verification_status.value == "verified"
+                and review.recommended_action.value == "keep"
+                for review in component_reviews
+            )
+            direct_verified_count += direct_keep_count
+            verified_count += direct_keep_count + component_keep_count
             rejected_count += sum(
                 review.recommended_action.value in {"reject", "retry"}
                 or review.verification_status.value != "verified"
                 for review in reviews
+            ) + sum(
+                review.recommended_action.value in {"reject", "retry"}
+                or review.verification_status.value != "verified"
+                for review in component_reviews
             )
         child_address_path = address_output_path(root, child_run_id)
         if child_address_path.is_file():
@@ -1744,7 +1982,7 @@ def _workflow_status_payload(
         address_status = "blocked"
 
     geometry_items: tuple[dict[str, Any], ...] = ()
-    if verified_count > 0:
+    if direct_verified_count > 0:
         try:
             if sample_set is not None:
                 geometry_items = sample_records(root, refresh_sample_set(root, sample_set))
@@ -1769,14 +2007,14 @@ def _workflow_status_payload(
         geometry_status = "complete"
     elif geocoded_count or skipped_count:
         geometry_status = "running"
-    elif verified_count > 0:
+    elif direct_verified_count > 0:
         geometry_status = "ready"
     else:
         geometry_status = "blocked"
 
     if sample_set is not None:
         sample_status = "complete"
-    elif verified_count > 0:
+    elif direct_verified_count > 0:
         sample_status = "ready"
     else:
         sample_status = "blocked"
@@ -1909,7 +2147,11 @@ def _workflow_status_payload(
                 f"{review_count}/{all_lead_count} leads reviewed; "
                 f"{verified_count} verified; {rejected_count} rejected or unresolved."
             ),
-            metrics={"verified_count": verified_count, "rejected_count": rejected_count},
+            metrics={
+                "verified_count": verified_count,
+                "direct_verified_count": direct_verified_count,
+                "rejected_count": rejected_count,
+            },
             action_id="run_qaqc" if qaqc_status in {"ready", "attention"} else None,
             action_label="Run QAQC" if qaqc_status in {"ready", "attention"} else None,
             indeterminate=qaqc_status == "running",
@@ -2394,107 +2636,128 @@ def _all_lead_table_rows(root: Path, manifest: Any) -> list[dict[str, Any]]:
                         "exclusion_reason_note": "",
                     }
                 )
-        for lead_index, component_lead in enumerate(evidence_set.component_leads):
-            lead_payload = component_lead.model_dump(mode="json")
-            location = lead_payload.get("location") or {}
-            item_id = f"{child_run_id}-component-{lead_index}"
-            for count_index, datum in enumerate(lead_payload["component_data"]):
-                rows.append(
-                    {
-                        "row_id": f"{item_id}-{count_index}",
-                        "item_id": item_id,
-                        "run_id": child_run_id,
-                        "sample_set_id": "",
-                        "sample_round": "",
-                        "facility_type": child_manifest.profile_set,
-                        "evidence_role": "component_input",
-                        "lead_index": lead_index,
-                        "count_index": count_index,
-                        "facility_name": location.get(
-                            "facility_name", lead_payload["geography_name"]
-                        ),
-                        "count": "",
-                        "group_type": "",
-                        "component_type": datum["component_type"],
-                        "value": datum["value"],
-                        "unit": datum["unit"],
-                        "time_basis": datum["time_basis"],
-                        "geography_level": datum["geography_level"],
-                        "incident_date": datum.get("period_label") or "",
-                        "incident_time": "",
-                        "strategy_id": lead_payload.get("strategy_id") or "",
-                        "representativeness": lead_payload.get("representativeness") or "",
-                        "confidence": lead_payload.get("confidence") or "",
-                        "city_or_region": (
-                            location.get("city_or_region")
-                            or lead_payload.get("geography_name")
-                            or ""
-                        ),
-                        "country": lead_payload["country"],
-                        "source_url": lead_payload["source_url"],
-                        "qaqc_status": "",
-                        "recommended_action": "",
-                        "address_status": "not_applicable",
-                        "enriched_address": "",
-                        "geometry_status": "not_applicable",
-                        "area_m2": "",
-                        "review_notes": lead_payload.get("review_notes") or "",
-                        "excluded_from_dataset": False,
-                        "exclusion_reason_code": "",
-                        "exclusion_reason_note": "",
-                    }
-                )
+        rows.extend(
+            _component_bundle_table_rows(
+                child_run_id=child_run_id,
+                child_manifest=child_manifest,
+                evidence_set=evidence_set,
+            )
+        )
     return rows
 
 
 def _table_rows_from_component_records(records: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
+    grouped: dict[tuple[str, str, str, str, str], list[dict[str, Any]]] = {}
     for record in records:
         lead = record["component_lead"]
-        review = record.get("component_qaqc_review") or {}
-        location = lead.get("location") or {}
-        for count_index, datum in enumerate(lead["component_data"]):
-            rows.append(
-                {
-                    "row_id": f"{record['item_id']}-{count_index}",
-                    "item_id": record["item_id"],
-                    "run_id": record["child_run_id"],
-                    "sample_set_id": record.get("sample_set_id", ""),
-                    "sample_round": record.get("sample_round", ""),
-                    "facility_type": record.get("facility_type", ""),
-                    "evidence_role": "component_input",
-                    "lead_index": record["lead_index"],
-                    "count_index": count_index,
-                    "facility_name": location.get("facility_name", lead["geography_name"]),
-                    "count": "",
-                    "group_type": "",
-                    "component_type": datum["component_type"],
-                    "value": datum["value"],
-                    "unit": datum["unit"],
-                    "time_basis": datum["time_basis"],
-                    "geography_level": datum["geography_level"],
-                    "incident_date": datum.get("period_label") or "",
-                    "incident_time": "",
-                    "strategy_id": lead.get("strategy_id") or "",
-                    "representativeness": lead.get("representativeness") or "",
-                    "confidence": lead.get("confidence") or "",
-                    "city_or_region": (
-                        location.get("city_or_region") or lead.get("geography_name") or ""
-                    ),
-                    "country": lead["country"],
-                    "source_url": lead["source_url"],
-                    "qaqc_status": review.get("verification_status", ""),
-                    "recommended_action": review.get("recommended_action", ""),
-                    "address_status": "not_applicable",
-                    "enriched_address": "",
-                    "geometry_status": "not_applicable",
-                    "area_m2": "",
-                    "review_notes": review.get("review_notes") or lead.get("review_notes") or "",
-                    "excluded_from_dataset": False,
-                    "exclusion_reason_code": "",
-                    "exclusion_reason_note": "",
-                }
-            )
+        facility_name, city_or_region, country, _ = _component_location_values(lead)
+        key = (
+            str(record["child_run_id"]),
+            str(record.get("sample_set_id", "")),
+            facility_name,
+            city_or_region,
+            country,
+        )
+        grouped.setdefault(key, []).append(record)
+
+    for group_index, group_records in enumerate(grouped.values()):
+        first = group_records[0]
+        first_lead = first["component_lead"]
+        facility_name, city_or_region, country, reported_address = _component_location_values(
+            first_lead
+        )
+        component_values: dict[str, str] = {}
+        source_urls: list[str] = []
+        lead_indexes: list[str] = []
+        review_statuses: set[str] = set()
+        recommended_actions: set[str] = set()
+        strategies: set[str] = set()
+        confidences: set[str] = set()
+        review_notes: list[str] = []
+        selected_address: dict[str, Any] | None = None
+        selected_address_status = "not_run"
+
+        for record in group_records:
+            lead = record["component_lead"]
+            review = record.get("component_qaqc_review") or {}
+            lead_indexes.append(str(record["lead_index"]))
+            source_url = str(lead.get("source_url") or "")
+            if source_url and source_url not in source_urls:
+                source_urls.append(source_url)
+            if review.get("verification_status"):
+                review_statuses.add(str(review["verification_status"]))
+            if review.get("recommended_action"):
+                recommended_actions.add(str(review["recommended_action"]))
+            if lead.get("strategy_id"):
+                strategies.add(str(lead["strategy_id"]))
+            if lead.get("confidence"):
+                confidences.add(str(lead["confidence"]))
+            note = review.get("review_notes") or lead.get("review_notes")
+            if note:
+                review_notes.append(str(note))
+            for datum in lead["component_data"]:
+                _append_component_value(component_values, datum)
+            address = record.get("address_enrichment")
+            address_status = str(record.get("address_status") or "not_run")
+            if isinstance(address, dict) and address.get("formatted_address"):
+                selected_address = address
+                selected_address_status = address_status
+            elif selected_address is None and address_status != "not_run":
+                selected_address = address if isinstance(address, dict) else None
+                selected_address_status = address_status
+
+        item_id = str(first["item_id"])
+        rows.append(
+            {
+                "row_id": f"{item_id}-components-{group_index}",
+                "item_id": item_id,
+                "run_id": first["child_run_id"],
+                "sample_set_id": first.get("sample_set_id", ""),
+                "sample_round": first.get("sample_round", ""),
+                "facility_type": first.get("facility_type", ""),
+                "evidence_role": "component_input",
+                "lead_index": ",".join(lead_indexes),
+                "count_index": "",
+                "facility_name": facility_name,
+                "count": "",
+                "group_type": "",
+                "component_type": ", ".join(component_values),
+                "component_values": component_values,
+                "value": "; ".join(f"{key}: {value}" for key, value in component_values.items()),
+                "unit": "",
+                "time_basis": "",
+                "geography_level": "",
+                "incident_date": "",
+                "incident_time": "",
+                "strategy_id": ", ".join(sorted(strategies)),
+                "representativeness": "component_input",
+                "confidence": ", ".join(sorted(confidences)),
+                "city_or_region": city_or_region,
+                "country": country,
+                "source_url": source_urls[0] if source_urls else "",
+                "source_urls": "; ".join(source_urls),
+                "source_count": len(source_urls),
+                "qaqc_status": ", ".join(sorted(review_statuses)),
+                "recommended_action": ", ".join(sorted(recommended_actions)),
+                "address_status": selected_address_status,
+                "enriched_address": (
+                    selected_address.get("formatted_address")
+                    if isinstance(selected_address, dict)
+                    else reported_address
+                )
+                or reported_address,
+                "geometry_status": "not_applicable",
+                "area_m2": "",
+                "review_notes": "; ".join(review_notes),
+                "component_bundle_status": "",
+                "counts_toward_target": False,
+                "missing_component_types": "",
+                "excluded_from_dataset": False,
+                "exclusion_reason_code": "",
+                "exclusion_reason_note": "",
+            }
+        )
     return rows
 
 
@@ -2505,7 +2768,9 @@ def _run_table_payload(root: Path, run_id: str, *, mode: str) -> dict[str, Any]:
     elif mode == "verified":
         records = merge_address_results(root, _approved_records_for_manifest(root, manifest))
         rows = _table_rows_from_records(tuple(merge_geometry_items(root, records)))
-        component_records = _approved_component_records_for_manifest(root, manifest)
+        component_records = merge_address_results(
+            root, _approved_component_records_for_manifest(root, manifest)
+        )
         rows.extend(_table_rows_from_component_records(component_records))
     else:
         raise ValueError(f"unsupported table mode: {mode}")
@@ -2538,7 +2803,8 @@ def _sample_table_payload(root: Path, sample_set_id: str, *, mode: str) -> dict[
     curation = load_curation(root, sample_set_id)
     decisions = {decision.item_id: decision for decision in curation.decisions}
     rows = _table_rows_from_records(records)
-    rows.extend(_table_rows_from_component_records(component_records))
+    component_records_with_addresses = merge_address_results(root, tuple(component_records))
+    rows.extend(_table_rows_from_component_records(component_records_with_addresses))
     for row in rows:
         decision = decisions.get(str(row["item_id"]))
         if decision is None:

@@ -1345,6 +1345,14 @@ def test_run_table_and_exports_include_verified_component_rows(tmp_path: Path) -
                                 "time_basis": "school_year",
                                 "geography_level": "facility",
                                 "period_label": "SY 2025",
+                            },
+                            {
+                                "component_type": "Staff",
+                                "value": 44,
+                                "unit": "people",
+                                "time_basis": "school_year",
+                                "geography_level": "facility",
+                                "period_label": "SY 2025",
                             }
                         ],
                         "location": {
@@ -1386,6 +1394,13 @@ def test_run_table_and_exports_include_verified_component_rows(tmp_path: Path) -
                                 "unit": "people",
                                 "reported_value_found": True,
                                 "quote_found": True,
+                            },
+                            {
+                                "component_type": "Staff",
+                                "value": 44,
+                                "unit": "people",
+                                "reported_value_found": True,
+                                "quote_found": True,
                             }
                         ],
                         "recommended_action": "keep",
@@ -1397,14 +1412,22 @@ def test_run_table_and_exports_include_verified_component_rows(tmp_path: Path) -
         encoding="utf-8",
     )
 
+    address = client.post(f"/api/runs/{run_id}/address-run")
     table = client.get(f"/api/runs/{run_id}/table?mode=verified")
     component_json = client.get(f"/api/runs/{run_id}/export.components.json")
     component_csv = client.get(f"/api/runs/{run_id}/export.components.csv")
 
+    assert address.status_code == 200
+    assert address.json()["address"]["summary"]["result_count"] == 1
     assert table.status_code == 200
+    assert table.json()["row_count"] == 1
     row = table.json()["rows"][0]
     assert row["evidence_role"] == "component_input"
-    assert row["component_type"] == "Students"
+    assert row["component_type"] == "Students, Staff"
+    assert row["component_values"]["Students"] == "512 people (school_year, facility, SY 2025)"
+    assert row["component_values"]["Staff"] == "44 people (school_year, facility, SY 2025)"
+    assert row["address_status"] == "found"
+    assert row["enriched_address"].startswith("100")
     assert row["geometry_status"] == "not_applicable"
     assert component_json.status_code == 200
     assert component_json.json()[0]["component_lead"]["geography_name"] == "Example School"
@@ -1878,8 +1901,6 @@ def test_running_job_from_prior_session_is_visible_but_inactive(tmp_path: Path) 
 def test_launcher_references_bootstrap_steps() -> None:
     mac_launcher = Path("OASIS.command").read_text(encoding="utf-8")
     windows_launcher = Path("OASIS.bat").read_text(encoding="utf-8")
-    legacy_mac_launcher = Path("Observation Harvester.command").read_text(encoding="utf-8")
-    legacy_windows_launcher = Path("Observation Harvester.bat").read_text(encoding="utf-8")
 
     assert ".venv" in mac_launcher
     assert "ensurepip --upgrade" in mac_launcher
@@ -1903,5 +1924,3 @@ def test_launcher_references_bootstrap_steps() -> None:
     assert "OASIS_PORT" in windows_launcher
     assert "8771" in windows_launcher
     assert '".venv\\Scripts\\python.exe" -m pdt_observer app' in windows_launcher
-    assert "OASIS.command" in legacy_mac_launcher
-    assert "OASIS.bat" in legacy_windows_launcher

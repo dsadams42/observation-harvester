@@ -775,7 +775,7 @@ INDEX_HTML = r"""<!doctype html>
       <div class="pipeline-callout">
         <strong id="fullPipelineHeading">Guided end-to-end workflow</strong>
         <span id="fullPipelineStatus">
-          Runs through sample creation, then pauses for optional exclusions and approval.
+          Runs through review dataset assembly, then pauses for optional exclusions and approval.
         </span>
       </div>
       <div id="status" class="status">Ready.</div>
@@ -1020,7 +1020,7 @@ INDEX_HTML = r"""<!doctype html>
     <section id="dataTablePanel" class="wide hidden" data-workspace="table">
       <h2>Tabular Data</h2>
       <div class="workflow-summary" id="tableContext">
-        Select a run or sample set to inspect collected observations as rows.
+        Select a run or review dataset to inspect collected observations as rows.
       </div>
       <div class="table-toolbar">
         <div>
@@ -1048,7 +1048,7 @@ INDEX_HTML = r"""<!doctype html>
             </div>
           </div>
           <button id="approveCurationButton" type="button">
-            Approve Dataset &amp; Analyze Coverage
+            Approve Dataset &amp; Check Coverage
           </button>
         </div>
         <div class="curation-controls">
@@ -1111,18 +1111,20 @@ INDEX_HTML = r"""<!doctype html>
     </section>
 
     <section id="samplePanel" class="wide" data-workspace="workbench">
-      <h2>Sample Set / Coverage</h2>
+      <h2>Review Dataset / Coverage</h2>
       <div class="actions">
         <button id="createSampleButton" class="secondary" type="button">
-          Create Sample Set
+          Assemble Review Dataset
         </button>
         <button id="analyzeCoverageButton" class="secondary" type="button">
-          Analyze Coverage
+          Check Coverage
         </button>
-        <button id="runGapFillButton" class="secondary" type="button">Run Gap Fill</button>
+        <button id="runGapFillButton" class="secondary" type="button">
+          Run Targeted Follow-ups
+        </button>
       </div>
       <details class="action-group">
-        <summary>Repair passes and sample exports</summary>
+        <summary>Repair passes and review dataset exports</summary>
         <div class="actions">
           <button id="runSampleQaqcButton" class="secondary" type="button">
             Run QAQC Missing
@@ -1139,7 +1141,7 @@ INDEX_HTML = r"""<!doctype html>
         </div>
       </details>
       <div class="status" id="sampleStatus">
-        Create a sample set after geometry review; coverage works best once approved
+        Assemble a review dataset after geometry review; coverage works best once approved
         observations have geocoded points.
       </div>
       <textarea
@@ -1147,7 +1149,7 @@ INDEX_HTML = r"""<!doctype html>
         class="compact"
         spellcheck="false"
         readonly
-        placeholder="Sample set and coverage output will appear here."
+        placeholder="Review dataset and coverage output will appear here."
       ></textarea>
     </section>
   </main>
@@ -1376,10 +1378,13 @@ INDEX_HTML = r"""<!doctype html>
       $('workflowSteps').innerHTML = stages.map((stage) => {
         const total = Number(stage.total || 0);
         const current = Number(stage.current || 0);
+        const displayMode = stage.display_mode || 'progress';
+        const showProgress = ['progress', 'job_progress'].includes(displayMode) &&
+          (total > 0 || stage.indeterminate);
         const percent = stage.status === 'complete'
           ? 100
           : (total > 0 ? Math.min(100, Math.round((current / total) * 100)) : 0);
-        const progress = total > 0 || stage.indeterminate
+        const progress = showProgress
           ? `<div class="workflow-progress"><div class="workflow-progress-fill` +
             `${stage.indeterminate ? ' indeterminate' : ''}" style="width:${percent}%"></div></div>`
           : '';
@@ -1443,6 +1448,7 @@ INDEX_HTML = r"""<!doctype html>
           address: 'address',
           coverage: 'coverage',
           'gap fill': 'gap_fill',
+          'targeted follow-ups': 'gap_fill',
           'missing QAQC': 'qaqc',
           'missing address': 'address'
         };
@@ -1450,6 +1456,7 @@ INDEX_HTML = r"""<!doctype html>
         if (activeStage && activeStage.status !== 'complete') {
           activeStage.status = 'running';
           activeStage.indeterminate = true;
+          activeStage.display_mode = activeStage.id === 'gap_fill' ? 'job_progress' : 'progress';
           activeStage.detail = `${activeStage.label} agent work is currently running.`;
         }
       }
@@ -1800,7 +1807,7 @@ INDEX_HTML = r"""<!doctype html>
       ['curation_status', 'Dataset Status'],
       ['exclusion_reason_note', 'Exclusion Reason'],
       ['run_id', 'Run'],
-      ['sample_set_id', 'Sample'],
+      ['sample_set_id', 'Dataset'],
       ['sample_round', 'Round'],
       ['facility_type', 'Facility Type'],
       ['evidence_role', 'Evidence Role'],
@@ -1867,9 +1874,9 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function tableContextLabel() {
-      if (state.currentSampleSetId) return `Sample set: ${state.currentSampleSetId}`;
+      if (state.currentSampleSetId) return `Review dataset: ${state.currentSampleSetId}`;
       if (state.currentRunId) return `Run: ${state.currentRunId}`;
-      return 'No run or sample set selected';
+      return 'No run or review dataset selected';
     }
 
     function setTableBadge() {
@@ -1877,7 +1884,9 @@ INDEX_HTML = r"""<!doctype html>
       $('tableTabBadge').title = `${state.tableRows.length} loaded table row(s)`;
     }
 
-    function resetTable(message = 'Select a run or sample set to inspect collected observations.') {
+    function resetTable(
+      message = 'Select a run or review dataset to inspect collected observations.'
+    ) {
       state.tableRows = [];
       state.tableVisibleRows = [];
       state.curation = null;
@@ -1939,8 +1948,8 @@ INDEX_HTML = r"""<!doctype html>
         ? `${state.selectedCurationItemIds.size} observation(s) selected.`
         : 'No observations selected. Approval with no exclusions is valid.';
       $('approveCurationButton').textContent = summary.approval_status === 'approved'
-        ? 'Reapprove & Analyze Coverage'
-        : 'Approve Dataset & Analyze Coverage';
+        ? 'Reapprove & Check Coverage'
+        : 'Approve Dataset & Check Coverage';
     }
 
     async function refreshDataTable() {
@@ -1953,7 +1962,7 @@ INDEX_HTML = r"""<!doctype html>
         $('tableAllMode').classList.remove('active');
       }
       if (!endpoint) {
-        resetTable('No run or sample set selected.');
+        resetTable('No run or review dataset selected.');
         return;
       }
       setTableStatus('Loading table rows...');
@@ -2159,7 +2168,7 @@ INDEX_HTML = r"""<!doctype html>
 
     async function approveCurationAndAnalyzeCoverage() {
       if (!state.currentSampleSetId) {
-        return setTableStatus('Create or select a sample set first.', 'error');
+        return setTableStatus('Assemble or select a review dataset first.', 'error');
       }
       const payload = await api(`/api/samples/${state.currentSampleSetId}/curation/approve`, {
         method: 'POST'
@@ -2167,7 +2176,8 @@ INDEX_HTML = r"""<!doctype html>
       state.curation = payload.curation;
       renderCurationSummary();
       setTableStatus(
-        `Approved ${payload.curation.included_count} included observation(s); starting coverage.`,
+        `Approved ${payload.curation.included_count} included observation(s); ` +
+          'starting coverage check.',
         'ok'
       );
       await loadDialogue();
@@ -2299,7 +2309,7 @@ INDEX_HTML = r"""<!doctype html>
         try {
           const coverage = await api(`/api/samples/${state.currentSampleSetId}/coverage-results`);
           $('sampleOutput').value = JSON.stringify(coverage, null, 2);
-          setSampleStatus('Coverage analysis complete.', 'ok');
+          setSampleStatus('Coverage check complete.', 'ok');
         } catch (error) {
           setSampleStatus(error.message, 'error');
         }
@@ -2329,7 +2339,7 @@ INDEX_HTML = r"""<!doctype html>
       });
       state.currentSampleSetId = payload.sample_set.sample_set_id;
       $('sampleOutput').value = JSON.stringify(payload, null, 2);
-      setSampleStatus(`Sample set created: ${state.currentSampleSetId}.`, 'ok');
+      setSampleStatus(`Review dataset assembled: ${state.currentSampleSetId}.`, 'ok');
       if (state.activeWorkspace === 'table') await refreshDataTable();
       await loadWorkflowStatus();
       await loadDialogue();
@@ -2338,7 +2348,9 @@ INDEX_HTML = r"""<!doctype html>
 
     async function analyzeCoverage(options = {}) {
       const managed = Boolean(options.managed);
-      if (!state.currentSampleSetId) return setSampleStatus('Create a sample set first.', 'error');
+      if (!state.currentSampleSetId) {
+        return setSampleStatus('Assemble a review dataset first.', 'error');
+      }
       let geometryNote = '';
       try {
         const summaryPayload = await api(
@@ -2359,7 +2371,7 @@ INDEX_HTML = r"""<!doctype html>
         method: 'POST'
       });
       $('sampleOutput').value = JSON.stringify(payload, null, 2);
-      setSampleStatus(`Coverage analysis started.${geometryNote}`, 'ok');
+      setSampleStatus(`Coverage check started.${geometryNote}`, 'ok');
       if (payload.started && !managed) {
         startSamplePolling(state.currentSampleSetId, 'coverage');
       }
@@ -2448,8 +2460,8 @@ INDEX_HTML = r"""<!doctype html>
         }
 
         setPipelineStatus(
-          'Step 5 of 5 - Sample creation',
-          'Combining the reviewed observations into a sample set.'
+          'Step 5 of 5 - Review dataset',
+          'Combining the reviewed observations into a dataset for approval.'
         );
         await createSampleSet();
 
@@ -2458,14 +2470,15 @@ INDEX_HTML = r"""<!doctype html>
           ? ` ${interventionCount} coordinate assignment(s) also need review in Geometry Studio.`
           : '';
         setPipelineStatus(
-          'Sample ready - human approval required',
-          'The automated pipeline is paused in Tabular Data. Exclude only unsuitable ' +
-            'observations, or approve immediately with no feedback. Approval starts coverage ' +
-            `analysis; gap fill remains a separate decision.${reviewNote}`,
+          'Review dataset ready - approval required',
+          'The automated pipeline is paused in Tabular Data. Exclude unsuitable rows, ' +
+            'then approve to start the coverage check. Targeted follow-ups remain a ' +
+            `separate decision.${reviewNote}`,
           'ok'
         );
         setSampleStatus(
-          'Review the sample in Tabular Data, then approve it to start coverage analysis.',
+          'Review rows in Tabular Data, exclude unsuitable rows, then approve to ' +
+            'start coverage check.',
           'ok'
         );
         setWorkspaceTab('table');
@@ -2483,20 +2496,24 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     async function runGapFill() {
-      if (!state.currentSampleSetId) return setSampleStatus('Create a sample set first.', 'error');
+      if (!state.currentSampleSetId) {
+        return setSampleStatus('Assemble a review dataset first.', 'error');
+      }
       const payload = await api(`/api/samples/${state.currentSampleSetId}/gap-fill-run`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({})
       });
       $('sampleOutput').value = JSON.stringify(payload, null, 2);
-      setSampleStatus('Gap-fill started.', 'ok');
+      setSampleStatus('Targeted follow-ups started.', 'ok');
       if (state.activeWorkspace === 'table') await refreshDataTable();
-      if (payload.started) startSamplePolling(state.currentSampleSetId, 'gap fill');
+      if (payload.started) startSamplePolling(state.currentSampleSetId, 'targeted follow-ups');
     }
 
     async function runSampleQaqcMissing() {
-      if (!state.currentSampleSetId) return setSampleStatus('Create a sample set first.', 'error');
+      if (!state.currentSampleSetId) {
+        return setSampleStatus('Assemble a review dataset first.', 'error');
+      }
       const payload = await api(`/api/samples/${state.currentSampleSetId}/qaqc-missing`, {
         method: 'POST'
       });
@@ -2510,7 +2527,9 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     async function runSampleAddressMissing() {
-      if (!state.currentSampleSetId) return setSampleStatus('Create a sample set first.', 'error');
+      if (!state.currentSampleSetId) {
+        return setSampleStatus('Assemble a review dataset first.', 'error');
+      }
       const payload = await api(`/api/samples/${state.currentSampleSetId}/address-missing`, {
         method: 'POST'
       });
@@ -2603,7 +2622,7 @@ INDEX_HTML = r"""<!doctype html>
     function geometryRoundLabel(item) {
       const round = geometryRound(item);
       if (!round) return 'current run';
-      return round === 1 ? 'round 1' : `gap-fill round ${round}`;
+      return round === 1 ? 'round 1' : `targeted follow-up round ${round}`;
     }
 
     function geometryColor(item) {
@@ -3101,7 +3120,9 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     async function loadAugmentedSampleGeometry() {
-      if (!state.currentSampleSetId) return setGeometryStatus('No sample set selected.', 'error');
+      if (!state.currentSampleSetId) {
+        return setGeometryStatus('No review dataset selected.', 'error');
+      }
       initMap();
       const payload = await api(`/api/samples/${state.currentSampleSetId}/geometry-items`);
       state.geometryItems = payload.items || [];
@@ -3657,7 +3678,9 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     async function downloadSampleExport(format) {
-      if (!state.currentSampleSetId) return setSampleStatus('No sample set selected.', 'error');
+      if (!state.currentSampleSetId) {
+        return setSampleStatus('No review dataset selected.', 'error');
+      }
       const response = await fetch(
         `/api/samples/${state.currentSampleSetId}/export.verified.${format}`
       );
@@ -3670,7 +3693,9 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     async function downloadSampleFootprints() {
-      if (!state.currentSampleSetId) return setGeometryStatus('No sample set selected.', 'error');
+      if (!state.currentSampleSetId) {
+        return setGeometryStatus('No review dataset selected.', 'error');
+      }
       const response = await fetch(
         `/api/samples/${state.currentSampleSetId}/export.footprints.geojson`
       );

@@ -1935,6 +1935,7 @@ def _workflow_stage(
     action_id: str | None = None,
     action_label: str | None = None,
     indeterminate: bool = False,
+    display_mode: str = "progress",
 ) -> dict[str, object]:
     return {
         "id": stage_id,
@@ -1947,6 +1948,7 @@ def _workflow_stage(
         "action_id": action_id,
         "action_label": action_label,
         "indeterminate": indeterminate,
+        "display_mode": display_mode,
     }
 
 
@@ -2145,7 +2147,7 @@ def _workflow_status_payload(
         sample_status = "blocked"
 
     curation_state = "not_available"
-    curation_detail = "Create a sample set before human curation."
+    curation_detail = "Assemble a review dataset before approval."
     curation_included = 0
     curation_excluded = 0
     current_curation_approval = None
@@ -2175,7 +2177,7 @@ def _workflow_status_payload(
 
     coverage_review = None
     coverage_status = "blocked"
-    coverage_detail = "Approve the curated sample before coverage analysis."
+    coverage_detail = "Approve the review dataset before checking coverage."
     if (
         sample_set is not None
         and curation_state == "approved"
@@ -2188,17 +2190,26 @@ def _workflow_status_payload(
             if candidate_review.curation_snapshot_id == current_curation_approval.snapshot_id:
                 coverage_review = candidate_review
                 coverage_status = "complete"
-                coverage_detail = (
-                    f"Latest assessment: {coverage_review.dispersion_status.value}; "
-                    f"{len(coverage_review.recommended_child_jobs)} gap-fill job(s) "
-                    "recommended."
-                )
+                recommended_count = len(coverage_review.recommended_child_jobs)
+                if recommended_count:
+                    coverage_detail = (
+                        f"Coverage gaps found: {recommended_count} targeted follow-up "
+                        "search(es) recommended."
+                    )
+                else:
+                    coverage_detail = (
+                        "Coverage sufficient. No targeted follow-ups recommended."
+                    )
             else:
                 coverage_status = "ready"
-                coverage_detail = "Curation changed; rerun coverage for the approved snapshot."
+                coverage_detail = (
+                    "Coverage check is stale; approve or recheck the current dataset."
+                )
         except FileNotFoundError:
             coverage_status = "ready"
-            coverage_detail = f"{curation_included} included observation(s) are ready to assess."
+            coverage_detail = (
+                f"{curation_included} included observation(s) are ready for coverage check."
+            )
 
     gap_rounds = (
         tuple(round_item for round_item in sample_set.rounds if round_item.role.value == "gap_fill")
@@ -2240,6 +2251,7 @@ def _workflow_status_payload(
                 f"{country}; {len(localities) or 1} geographic scope(s); "
                 f"{len(facility_types)} facility type(s); {planned_jobs} initial job(s)."
             ),
+            display_mode="progress",
         ),
         _workflow_stage(
             stage_id="harvest",
@@ -2261,6 +2273,7 @@ def _workflow_status_payload(
                 "lead_quota": lead_quota,
             },
             indeterminate=harvest_running,
+            display_mode="progress",
         ),
         _workflow_stage(
             stage_id="qaqc",
@@ -2280,6 +2293,7 @@ def _workflow_status_payload(
             action_id="run_qaqc" if qaqc_status in {"ready", "attention"} else None,
             action_label="Run QAQC" if qaqc_status in {"ready", "attention"} else None,
             indeterminate=qaqc_status == "running",
+            display_mode="progress",
         ),
         _workflow_stage(
             stage_id="address",
@@ -2299,6 +2313,7 @@ def _workflow_status_payload(
                 else None
             ),
             indeterminate=address_status == "running",
+            display_mode="progress",
         ),
         _workflow_stage(
             stage_id="geometry",
@@ -2322,25 +2337,27 @@ def _workflow_status_payload(
                 if geometry_status in {"ready", "running"}
                 else None
             ),
+            display_mode="progress",
         ),
         _workflow_stage(
             stage_id="sample",
-            label="Create Sample Set",
+            label="Assemble Review Dataset",
             status=sample_status,
             current=1 if sample_set is not None else 0,
             total=1,
             detail=(
-                f"Sample set {sample_set.sample_set_id} contains "
+                f"Review dataset {sample_set.sample_set_id} contains "
                 f"{len(sample_set.combined_child_run_ids)} child run(s)."
                 if sample_set is not None
-                else "Create a durable sample after QAQC to enable coverage steering."
+                else "Assemble verified observations into a reviewable dataset."
             ),
             action_id="create_sample" if sample_status == "ready" else None,
-            action_label="Create Sample Set" if sample_status == "ready" else None,
+            action_label="Assemble Review Dataset" if sample_status == "ready" else None,
+            display_mode="gate",
         ),
         _workflow_stage(
             stage_id="curation",
-            label="Review and Approve Sample",
+            label="Approve / Exclude Observations",
             status=(
                 "complete"
                 if curation_state == "approved"
@@ -2361,36 +2378,41 @@ def _workflow_status_payload(
                 else None
             ),
             action_label=(
-                "Review & Approve Sample"
+                "Review & Approve Dataset"
                 if sample_set is not None and curation_state != "approved"
                 else None
             ),
+            display_mode="gate",
         ),
         _workflow_stage(
             stage_id="coverage",
-            label="Analyze Coverage",
+            label="Check Coverage",
             status=coverage_status,
             current=1 if coverage_status == "complete" else 0,
             total=1,
             detail=coverage_detail,
             action_id="analyze_coverage" if coverage_status == "ready" else None,
-            action_label="Analyze Coverage" if coverage_status == "ready" else None,
+            action_label="Check Coverage" if coverage_status == "ready" else None,
             indeterminate=coverage_status == "running",
+            display_mode="progress" if coverage_status == "running" else "gate",
         ),
         _workflow_stage(
             stage_id="gap_fill",
-            label="Fill Coverage Gaps",
+            label="Run Targeted Follow-ups",
             status=gap_status,
             current=gap_completed,
             total=recommended_jobs,
             detail=(
-                f"{gap_completed}/{recommended_jobs} recommended gap-fill job(s) completed."
+                f"{gap_completed}/{recommended_jobs} targeted follow-up job(s) complete."
                 if recommended_jobs
-                else "No outstanding gap-fill jobs are currently recommended."
+                else "Not needed. No targeted follow-ups are currently recommended."
             ),
             action_id="run_gap_fill" if gap_status in {"ready", "attention"} else None,
-            action_label="Run Gap Fill" if gap_status in {"ready", "attention"} else None,
+            action_label=(
+                "Run Targeted Follow-ups" if gap_status in {"ready", "attention"} else None
+            ),
             indeterminate=gap_status == "running",
+            display_mode="job_progress" if recommended_jobs or gap_status == "running" else "gate",
         ),
         _workflow_stage(
             stage_id="export",
@@ -2410,6 +2432,7 @@ def _workflow_status_payload(
                 if (approved_count if sample_set else verified_count) > 0
                 else None
             ),
+            display_mode="progress",
         ),
     ]
     next_action = next(
@@ -3741,7 +3764,7 @@ def create_app(
                 ),
                 rationale=(
                     "No item-by-item feedback was required; only explicit exclusions affect "
-                    "coverage and gap-fill guidance."
+                    "coverage and targeted follow-up guidance."
                 ),
             )
             return JSONResponse(_sample_curation_payload(root, sample_set_id))
@@ -3860,7 +3883,7 @@ def create_app(
                 log=lambda message: append_harvest_log(
                     root,
                     sample_set_id,
-                    f"Coverage analysis failed: {message}.",
+                    f"Coverage check failed: {message}.",
                 ),
                 task=task,
                 summary=lambda result: (
@@ -3908,7 +3931,7 @@ def create_app(
             approval = ensure_current_approval(curation, item_ids)
             if review.curation_snapshot_id != approval.snapshot_id:
                 raise ValueError(
-                    "coverage analysis is stale for the current human curation approval; "
+                    "coverage check is stale for the current human curation approval; "
                     "rerun coverage"
                 )
         except (ValidationError, FileNotFoundError) as exc:
@@ -3940,7 +3963,7 @@ def create_app(
                 log=lambda message: append_harvest_log(
                     root,
                     sample_set_id,
-                    f"Gap-fill failed: {message}.",
+                    f"Targeted follow-ups failed: {message}.",
                 ),
                 task=task,
                 manifest_path=lambda result: str(

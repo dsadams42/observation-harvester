@@ -151,6 +151,27 @@ def successful_runner(
     return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
 
+def no_gap_runner(
+    command: Sequence[str],
+    prompt: str,
+    cwd: Path,
+) -> subprocess.CompletedProcess[str]:
+    if "Sample Set Coverage Steering" not in prompt:
+        return successful_runner(command, prompt, cwd)
+    output_path = Path(command[command.index("-o") + 1])
+    payload = {
+        **COVERAGE_PAYLOAD,
+        "coverage_id": output_path.stem,
+        "sample_set_id": output_path.stem.split("-coverage", 1)[0],
+        "dispersion_status": "balanced",
+        "duplicate_or_cluster_flags": [],
+        "narrative_notes": "Coverage is sufficient for this review dataset.",
+        "recommended_child_jobs": [],
+    }
+    output_path.write_text(json.dumps(payload), encoding="utf-8")
+    return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+
 def multi_count_runner(
     command: Sequence[str],
     prompt: str,
@@ -270,8 +291,8 @@ def test_index_page_contains_local_app_controls(tmp_path: Path) -> None:
     assert 'data-workspace="table"' in html
     assert "setWorkspaceTab" in html
     assert "Run Full Pipeline" in html
-    assert "Sample ready - human approval required" in html
-    assert "Approve Dataset &amp; Analyze Coverage" in html
+    assert "Review dataset ready - approval required" in html
+    assert "Approve Dataset &amp; Check Coverage" in html
     assert "approval with no exclusions is valid" in html.lower()
     assert "Run Harvest" in html
     assert "Copy JSON" in html
@@ -294,11 +315,11 @@ def test_index_page_contains_local_app_controls(tmp_path: Path) -> None:
     assert "Recommended next:" in html
     assert "/workflow-status" in html
     assert "Geocoding ${index + 1}/${pending.length}" in html
-    assert "Sample Set / Coverage" in html
-    assert html.index("Geometry Studio") < html.index("Sample Set / Coverage")
-    assert "Create Sample Set" in html
-    assert "Analyze Coverage" in html
-    assert "Run Gap Fill" in html
+    assert "Review Dataset / Coverage" in html
+    assert html.index("Geometry Studio") < html.index("Review Dataset / Coverage")
+    assert "Assemble Review Dataset" in html
+    assert "Check Coverage" in html
+    assert "Run Targeted Follow-ups" in html
     assert "Run QAQC Missing" in html
     assert "Run Address Missing" in html
     assert "leaflet.draw" in html
@@ -537,7 +558,9 @@ def test_workflow_status_recommends_next_artifact_backed_stage(tmp_path: Path) -
     assert stages["harvest"]["status"] == "complete"
     assert stages["harvest"]["current"] == 1
     assert stages["harvest"]["total"] == 1
+    assert stages["harvest"]["display_mode"] == "progress"
     assert stages["qaqc"]["status"] == "ready"
+    assert stages["qaqc"]["display_mode"] == "progress"
     assert payload["next_action"]["id"] == "run_qaqc"
 
     assert client.post(f"/api/runs/{run_id}/qaqc-run").status_code == 200
@@ -1708,6 +1731,7 @@ def test_sample_set_coverage_and_gap_fill_api_flow(tmp_path: Path) -> None:
     summary = client.get("/api/samples/tn-schools-sample/coverage-summary")
     approval = client.post("/api/samples/tn-schools-sample/curation/approve")
     coverage = client.post("/api/samples/tn-schools-sample/coverage-run")
+    workflow = client.get("/api/samples/tn-schools-sample/workflow-status")
     coverage_results = client.get("/api/samples/tn-schools-sample/coverage-results")
     gap_fill = client.post("/api/samples/tn-schools-sample/gap-fill-run", json={})
     missing_qaqc = client.post("/api/samples/tn-schools-sample/qaqc-missing")
@@ -1724,6 +1748,18 @@ def test_sample_set_coverage_and_gap_fill_api_flow(tmp_path: Path) -> None:
     assert approval.json()["curation"]["excluded_count"] == 0
     assert coverage.status_code == 200
     assert coverage.json()["coverage"]["review"]["dispersion_status"] == "clustered"
+    workflow_stages = {stage["id"]: stage for stage in workflow.json()["stages"]}
+    assert workflow_stages["sample"]["label"] == "Assemble Review Dataset"
+    assert workflow_stages["sample"]["display_mode"] == "gate"
+    assert workflow_stages["curation"]["label"] == "Approve / Exclude Observations"
+    assert workflow_stages["curation"]["display_mode"] == "gate"
+    assert workflow_stages["coverage"]["label"] == "Check Coverage"
+    assert workflow_stages["coverage"]["display_mode"] == "gate"
+    assert "Coverage gaps found" in workflow_stages["coverage"]["detail"]
+    assert workflow_stages["gap_fill"]["label"] == "Run Targeted Follow-ups"
+    assert workflow_stages["gap_fill"]["display_mode"] == "job_progress"
+    assert workflow_stages["gap_fill"]["action_id"] == "run_gap_fill"
+    assert workflow_stages["gap_fill"]["action_label"] == "Run Targeted Follow-ups"
     assert coverage_results.json()["review"]["recommended_child_jobs"][0]["locality"] == (
         "Western Tennessee"
     )
@@ -1733,6 +1769,44 @@ def test_sample_set_coverage_and_gap_fill_api_flow(tmp_path: Path) -> None:
     assert missing_address.json()["address"]["child_run_ids"]
     assert geometry_items.json()["item_count"] == 2
     assert "sample_round" in exported.text
+
+
+def test_workflow_status_marks_targeted_follow_ups_not_needed(tmp_path: Path) -> None:
+    client = TestClient(create_app(workspace=tmp_path, runner=no_gap_runner, background=False))
+    created = client.post(
+        "/api/harvest/campaign-run",
+        json={
+            "country": "US",
+            "localities": ["Tennessee"],
+            "facility_types": ["schools"],
+            "target": 3,
+        },
+    ).json()
+    campaign_id = created["manifest"]["campaign_id"]
+    client.post(f"/api/runs/{campaign_id}/qaqc-run")
+    client.post(f"/api/runs/{campaign_id}/address-run")
+    sample = client.post(
+        "/api/samples/from-run",
+        json={"run_id": campaign_id, "sample_set_id": "tn-schools-balanced"},
+    )
+    client.post("/api/samples/tn-schools-balanced/curation/approve")
+    coverage = client.post("/api/samples/tn-schools-balanced/coverage-run")
+
+    workflow = client.get("/api/samples/tn-schools-balanced/workflow-status")
+    stages = {stage["id"]: stage for stage in workflow.json()["stages"]}
+
+    assert sample.status_code == 200
+    assert coverage.status_code == 200
+    assert stages["coverage"]["detail"] == (
+        "Coverage sufficient. No targeted follow-ups recommended."
+    )
+    assert stages["coverage"]["display_mode"] == "gate"
+    assert stages["gap_fill"]["status"] == "complete"
+    assert stages["gap_fill"]["detail"] == (
+        "Not needed. No targeted follow-ups are currently recommended."
+    )
+    assert stages["gap_fill"]["display_mode"] == "gate"
+    assert stages["gap_fill"]["action_id"] is None
 
 
 def test_sample_curation_supports_zero_feedback_exclusion_and_restore(tmp_path: Path) -> None:

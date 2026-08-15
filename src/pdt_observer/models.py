@@ -611,8 +611,11 @@ class VernacularTerm(StrictModel):
 
 
 class GeographerProposal(StrictModel):
+    country_code: str | None = None
+    country_aliases: tuple[str, ...] = ()
     search_languages: tuple[str, ...] = ()
     administrative_terms: tuple[VernacularTerm, ...] = ()
+    address_terms: tuple[VernacularTerm, ...] = ()
     public_safety_terms: tuple[VernacularTerm, ...] = ()
     facility_terms: tuple[VernacularTerm, ...] = ()
     query_adjustments: tuple[str, ...] = ()

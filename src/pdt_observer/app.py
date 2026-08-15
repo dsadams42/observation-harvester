@@ -55,6 +55,7 @@ from pdt_observer.app_api import (
 )
 from pdt_observer.app_runtime import ActiveCodexRegistry, delayed_hard_exit, run_background_job
 from pdt_observer.app_ui import INDEX_HTML
+from pdt_observer.countries import country_alias_map
 from pdt_observer.curation import (
     approve_curation,
     curation_summary,
@@ -1356,47 +1357,64 @@ def _geocode_context(
 
     def add_query(value: object) -> None:
         text = str(value or "").strip()
-        if text and text not in queries:
+        if text and text.casefold() != "unknown" and text not in queries:
             queries.append(text)
+
+    def join_parts(*values: object) -> str:
+        return ", ".join(
+            str(value or "").strip()
+            for value in values
+            if str(value or "").strip() and str(value or "").strip().casefold() != "unknown"
+        )
+
+    def without_house_number(value: object) -> str:
+        return re.sub(r"^\s*\d+[A-Za-z]?(?:\s+|,\s*)", "", str(value or "")).strip()
 
     add_query(requested_query)
     address = record.get("address_enrichment")
+    facility_name = _record_facility_name(record)
     if isinstance(address, dict):
+        address_line1 = str(address.get("address_line1") or "").strip()
+        city = address.get("city_or_region")
+        state = address.get("state_or_province")
+        postal_code = address.get("postal_code")
+        country = address.get("country")
         add_query(
-            ", ".join(
-                str(address.get(key) or "").strip()
-                for key in (
-                    "address_line1",
-                    "city_or_region",
-                    "state_or_province",
-                    "postal_code",
-                    "country",
-                )
-                if str(address.get(key) or "").strip()
-            )
+            join_parts(address_line1, city, state, postal_code, country)
         )
         add_query(address.get("formatted_address"))
+        add_query(
+            join_parts(
+                without_house_number(address_line1),
+                city,
+                state,
+                postal_code,
+                country,
+            )
+        )
+        add_query(join_parts(facility_name, city, state, country))
+        add_query(join_parts(postal_code, state, city, facility_name, country))
+        add_query(join_parts(facility_name, address.get("address_line2"), city, state, country))
+        evidence_quote = str(address.get("address_evidence_quote") or "")
+        if any(ord(character) > 127 for character in evidence_quote):
+            add_query(address.get("address_evidence_quote"))
     lead = record.get("lead")
     if isinstance(lead, dict):
         location = lead.get("location")
         if isinstance(location, dict):
             add_query(
-                ", ".join(
-                    str(location.get(key) or "").strip()
-                    for key in (
-                        "facility_name",
-                        "specific_address_or_landmark",
-                        "city_or_region",
-                        "country",
-                    )
-                    if str(location.get(key) or "").strip()
+                join_parts(
+                    location.get("facility_name"),
+                    location.get("specific_address_or_landmark"),
+                    location.get("city_or_region"),
+                    location.get("country"),
                 )
             )
             add_query(
-                ", ".join(
-                    str(location.get(key) or "").strip()
-                    for key in ("facility_name", "city_or_region", "country")
-                    if str(location.get(key) or "").strip()
+                join_parts(
+                    location.get("facility_name"),
+                    location.get("city_or_region"),
+                    location.get("country"),
                 )
             )
     return manifest, tuple(queries)
@@ -1515,6 +1533,48 @@ def _normalized_address_words(value: object) -> set[str]:
     }
 
 
+def _record_facility_name(record: dict[str, Any]) -> str:
+    lead = record.get("lead")
+    location = lead.get("location") if isinstance(lead, dict) else None
+    return str(location.get("facility_name") or "") if isinstance(location, dict) else ""
+
+
+def _record_expected_postal_code(record: dict[str, Any]) -> str:
+    address = record.get("address_enrichment")
+    return str(address.get("postal_code") or "") if isinstance(address, dict) else ""
+
+
+def _record_address_status(record: dict[str, Any]) -> str:
+    address = record.get("address_enrichment")
+    if isinstance(address, dict):
+        return str(address.get("status") or record.get("address_status") or "")
+    return str(record.get("address_status") or "")
+
+
+def _geographer_validation_context(
+    root: Path,
+    manifest: HarvestRunManifest,
+) -> tuple[dict[str, str], tuple[str, ...]]:
+    if manifest.geographer_plan_path is None:
+        return {}, ()
+    try:
+        plan = load_geographer_plan(root, manifest.geographer_plan_path)
+    except (OSError, ValueError):
+        return {}, ()
+    proposal = plan.proposal
+    country_code = proposal.country_code or manifest.country
+    country_aliases = country_alias_map(country_code, proposal.country_aliases)
+    locality_aliases = tuple(
+        dict.fromkeys(
+            term
+            for item in proposal.administrative_terms
+            for term in (item.standard_term, item.local_term)
+            if term.strip()
+        )
+    )
+    return country_aliases, locality_aliases
+
+
 def _address_candidate_mismatch(
     candidate: dict[str, Any],
     record: dict[str, Any],
@@ -1545,6 +1605,21 @@ def _address_candidate_mismatch(
             f"Geocoder house number {candidate_number} does not match researched "
             f"house number {expected_number}."
         )
+    return None
+
+
+def _address_candidate_warnings(
+    candidate: dict[str, Any],
+    record: dict[str, Any],
+) -> tuple[str, ...]:
+    enriched = record.get("address_enrichment")
+    if not isinstance(enriched, dict):
+        return ()
+    candidate_address = candidate.get("address")
+    if not isinstance(candidate_address, dict):
+        return ()
+    warnings: list[str] = []
+    expected_line = str(enriched.get("address_line1") or "")
     expected_road_words = _normalized_address_words(
         re.sub(r"^\s*\d+[A-Za-z]?\s*", "", expected_line)
     )
@@ -1558,20 +1633,16 @@ def _address_candidate_mismatch(
         and candidate_road_words
         and not expected_road_words.intersection(candidate_road_words)
     ):
-        return "Geocoder street name does not agree with the researched address."
+        warnings.append("Geocoder street name differs from the researched address.")
     candidate_name_words = _normalized_address_words(candidate.get("name"))
-    lead = record.get("lead")
-    location = lead.get("location") if isinstance(lead, dict) else None
-    facility_words = _normalized_address_words(
-        location.get("facility_name") if isinstance(location, dict) else ""
-    )
+    facility_words = _normalized_address_words(_record_facility_name(record))
     if (
         candidate_name_words
         and facility_words
         and not candidate_name_words.intersection(facility_words)
     ):
-        return "Named geocoder feature does not match the researched facility identity."
-    return None
+        warnings.append("Named geocoder feature differs from the researched facility identity.")
+    return tuple(warnings)
 
 
 def _ranked_candidate_options(
@@ -1580,6 +1651,8 @@ def _ranked_candidate_options(
     record: dict[str, Any],
     expected_country: str,
     expected_locality: str | None,
+    expected_country_aliases: dict[str, str],
+    expected_locality_aliases: tuple[str, ...],
     query: str,
 ) -> list[dict[str, Any]]:
     if result is None:
@@ -1591,11 +1664,9 @@ def _ranked_candidate_options(
         else [result]
     )
     options: list[dict[str, Any]] = []
-    lead = record.get("lead")
-    location = lead.get("location") if isinstance(lead, dict) else None
-    facility_words = _normalized_address_words(
-        location.get("facility_name") if isinstance(location, dict) else ""
-    )
+    expected_facility_name = _record_facility_name(record)
+    expected_postal_code = _record_expected_postal_code(record)
+    facility_words = _normalized_address_words(expected_facility_name)
     for candidate in candidates:
         latitude = candidate.get("latitude")
         longitude = candidate.get("longitude")
@@ -1605,6 +1676,10 @@ def _ranked_candidate_options(
             {"candidates": [candidate]},
             expected_country=expected_country,
             expected_locality=expected_locality,
+            expected_country_aliases=expected_country_aliases,
+            expected_locality_aliases=expected_locality_aliases,
+            expected_postal_code=expected_postal_code,
+            expected_facility_name=expected_facility_name,
         )
         raw_assessments = validation.get("assessments")
         assessment: dict[str, object] = (
@@ -1617,6 +1692,7 @@ def _ranked_candidate_options(
         scope_status = str(assessment.get("status") or validation["status"])
         scope_reason = str(assessment.get("reason") or validation["reason"])
         mismatch = _address_candidate_mismatch(candidate, record)
+        warnings = _address_candidate_warnings(candidate, record)
         candidate_words = _normalized_address_words(
             candidate.get("name") or candidate.get("display_name")
         )
@@ -1637,9 +1713,19 @@ def _ranked_candidate_options(
         else:
             score -= 30
             match_summary.append(mismatch)
+        for warning in warnings:
+            score -= 8
+            match_summary.append(warning)
         if facility_match:
             score += 15
             match_summary.append("The candidate name overlaps the facility name.")
+        raw_support_signals = assessment.get("support_signals")
+        support_signals = tuple(
+            str(signal) for signal in raw_support_signals
+        ) if isinstance(raw_support_signals, list) else ()
+        if support_signals:
+            score += min(len(support_signals), 2) * 10
+            match_summary.append(f"Support signals: {', '.join(support_signals)}.")
         importance = candidate.get("importance")
         if isinstance(importance, int | float):
             score += min(max(float(importance), 0.0), 1.0) * 10
@@ -1669,7 +1755,10 @@ def _ranked_candidate_options(
                 "scope_status": scope_status,
                 "scope_reason": scope_reason,
                 "address_mismatch": mismatch,
+                "address_warnings": list(warnings),
+                "hard_conflict": mismatch is not None,
                 "facility_name_match": facility_match,
+                "support_signals": list(support_signals),
                 "score": round(score, 1),
                 "confidence": confidence,
                 "match_summary": match_summary,
@@ -1713,6 +1802,11 @@ def _spatially_geocode_item(
 ) -> tuple[dict[str, Any] | None, dict[str, object], str]:
     manifest, record = _geometry_record_context(root, item_id)
     _, queries = _geocode_context(root, item_id, requested_query)
+    expected_facility_name = _record_facility_name(record)
+    expected_postal_code = _record_expected_postal_code(record)
+    expected_country_aliases, expected_locality_aliases = _geographer_validation_context(
+        root, manifest
+    )
     attempts: list[dict[str, object]] = []
     final_validation: dict[str, object] = {
         "status": "no_match",
@@ -1730,6 +1824,8 @@ def _spatially_geocode_item(
                 record=record,
                 expected_country=manifest.country,
                 expected_locality=manifest.locality,
+                expected_country_aliases=expected_country_aliases,
+                expected_locality_aliases=expected_locality_aliases,
                 query=query,
             ),
         )
@@ -1737,6 +1833,10 @@ def _spatially_geocode_item(
             result,
             expected_country=manifest.country,
             expected_locality=manifest.locality,
+            expected_country_aliases=expected_country_aliases,
+            expected_locality_aliases=expected_locality_aliases,
+            expected_postal_code=expected_postal_code,
+            expected_facility_name=expected_facility_name,
         )
         mismatch = _address_candidate_mismatch(accepted, record) if accepted is not None else None
         if mismatch is not None:
@@ -1745,8 +1845,17 @@ def _spatially_geocode_item(
                 "status": "address_mismatch",
                 "requires_human_intervention": True,
                 "reason": mismatch,
+                "hard_conflict": True,
             }
             accepted = None
+        elif accepted is not None:
+            warnings = _address_candidate_warnings(accepted, record)
+            if warnings:
+                validation = {
+                    **validation,
+                    "address_warnings": list(warnings),
+                    "reason": f"{validation['reason']} {' '.join(warnings)}",
+                }
         attempts.append(
             {
                 "query": query,
@@ -1775,6 +1884,22 @@ def _spatially_geocode_item(
         },
         requested_query,
     )
+
+
+def _should_retry_address_after_geocode(
+    spatial_validation: dict[str, object],
+    geometry_record: dict[str, Any],
+) -> bool:
+    raw_candidate_count = spatial_validation.get("candidate_count")
+    candidate_count = raw_candidate_count if isinstance(raw_candidate_count, int) else 0
+    address_status = _record_address_status(geometry_record)
+    if bool(spatial_validation.get("hard_conflict")):
+        return True
+    if spatial_validation.get("status") in {"address_mismatch", "out_of_scope"}:
+        return True
+    if candidate_count == 0:
+        return True
+    return address_status in {"", "not_run", "not_found", "ambiguous", "needs_review"}
 
 
 def _sample_geometry_items_payload(root: Path, sample_set_id: str) -> dict[str, Any]:
@@ -4055,6 +4180,7 @@ def create_app(
                 result is None
                 and data.allow_address_retry
                 and not address_retry_already_attempted
+                and _should_retry_address_after_geocode(spatial_validation, geometry_record)
             ):
                 initial_validation = spatial_validation
                 address_retry = await run_in_threadpool(

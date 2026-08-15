@@ -16,6 +16,7 @@ from typing import Any
 
 from pydantic import TypeAdapter
 
+from pdt_observer.countries import country_code_for
 from pdt_observer.leads import load_leads, load_qaqc_reviews
 from pdt_observer.models import (
     GeometryPoint,
@@ -66,8 +67,6 @@ _CENTROID_RESULT_TYPES = {
     "town",
     "village",
 }
-
-
 def geometry_review_path(root: Path, child_run_id: str) -> Path:
     return root / "geometry_reviews" / f"{child_run_id}.json"
 
@@ -529,30 +528,27 @@ def _normalized_words(value: str) -> set[str]:
     }
 
 
-def _candidate_scope_status(
+def _normalized_postal_code(value: object) -> str:
+    return re.sub(r"\W", "", str(value or "").casefold())
+
+
+def _candidate_support_signals(
     candidate: dict[str, Any],
     *,
-    expected_country: str,
     expected_locality: str | None,
-) -> tuple[str, str]:
+    expected_locality_aliases: tuple[str, ...] = (),
+    expected_postal_code: str | None,
+    expected_facility_name: str | None,
+) -> tuple[tuple[str, ...], str | None]:
     address = candidate.get("address")
     address = address if isinstance(address, dict) else {}
-    country_code = str(address.get("country_code") or "").casefold()
-    country_name = str(address.get("country") or "").casefold()
-    expected_country_folded = expected_country.casefold().strip()
-    if len(expected_country_folded) == 2 and country_code:
-        if country_code != expected_country_folded:
-            return "out_of_scope", f"Result country code is {country_code}, not {expected_country}."
-    elif (
-        len(expected_country_folded) > 2
-        and country_name
-        and expected_country_folded not in country_name
-        and country_name not in expected_country_folded
-    ):
-        return "out_of_scope", f"Result country is {country_name}, not {expected_country}."
-
-    if expected_locality:
-        locality_words = _normalized_words(expected_locality) - _LOCALITY_STOPWORDS
+    signals: list[str] = []
+    locality_miss_reason: str | None = None
+    locality_values = (expected_locality or "", *expected_locality_aliases)
+    if any(value.strip() for value in locality_values):
+        locality_words: set[str] = set()
+        for value in locality_values:
+            locality_words.update(_normalized_words(value) - _LOCALITY_STOPWORDS)
         administrative_text = " ".join(
             [
                 str(candidate.get("display_name") or ""),
@@ -560,24 +556,100 @@ def _candidate_scope_status(
             ]
         )
         administrative_words = _normalized_words(administrative_text)
-        if locality_words and not locality_words.intersection(administrative_words):
+        if locality_words and locality_words.intersection(administrative_words):
+            signals.append("locality_match")
+        elif locality_words:
+            locality_miss_reason = (
+                f"Result does not visibly match requested locality {expected_locality}."
+            )
+    expected_postal = _normalized_postal_code(expected_postal_code)
+    candidate_postal = _normalized_postal_code(address.get("postcode"))
+    if expected_postal and candidate_postal and expected_postal == candidate_postal:
+        signals.append("postal_code_match")
+    facility_words = _normalized_words(str(expected_facility_name or "")) - _LOCALITY_STOPWORDS
+    candidate_words = _normalized_words(
+        " ".join(
+            str(candidate.get(key) or "")
+            for key in ("name", "display_name", "category", "type")
+        )
+    )
+    if facility_words and candidate_words and facility_words.intersection(candidate_words):
+        signals.append("facility_name_match")
+    return tuple(dict.fromkeys(signals)), locality_miss_reason
+
+
+def _candidate_scope_status(
+    candidate: dict[str, Any],
+    *,
+    expected_country: str,
+    expected_locality: str | None,
+    expected_country_aliases: dict[str, str] | None = None,
+    expected_locality_aliases: tuple[str, ...] = (),
+    expected_postal_code: str | None = None,
+    expected_facility_name: str | None = None,
+) -> tuple[str, str, tuple[str, ...]]:
+    address = candidate.get("address")
+    address = address if isinstance(address, dict) else {}
+    country_code = str(address.get("country_code") or "").casefold()
+    country_name = str(address.get("country") or "").casefold()
+    expected_country_code = country_code_for(
+        expected_country, extra_aliases=expected_country_aliases
+    )
+    candidate_country_code = country_code_for(
+        country_code, extra_aliases=expected_country_aliases
+    ) or country_code_for(
+        country_name, extra_aliases=expected_country_aliases
+    )
+    if expected_country_code and candidate_country_code:
+        if candidate_country_code != expected_country_code:
             return (
                 "out_of_scope",
-                f"Result does not match requested locality {expected_locality}.",
+                f"Result country code is {candidate_country_code}, not {expected_country}.",
+                (),
             )
+    else:
+        expected_country_folded = expected_country.casefold().strip()
+        if (
+            len(expected_country_folded) > 2
+            and country_name
+            and expected_country_folded not in country_name
+            and country_name not in expected_country_folded
+        ):
+            return "out_of_scope", f"Result country is {country_name}, not {expected_country}.", ()
 
     result_type = str(candidate.get("type") or "").casefold()
     if result_type in _CENTROID_RESULT_TYPES:
         return (
             "requires_human",
             f"Result type {result_type} is an administrative centroid, not a facility coordinate.",
+            (),
         )
     if not address:
         return (
             "requires_human",
             "Provider returned no structured administrative components for validation.",
+            (),
         )
-    return "accepted", "Country, locality, and result type passed spatial validation."
+    support_signals, locality_miss_reason = _candidate_support_signals(
+        candidate,
+        expected_locality=expected_locality,
+        expected_locality_aliases=expected_locality_aliases,
+        expected_postal_code=expected_postal_code,
+        expected_facility_name=expected_facility_name,
+    )
+    country_signal = "country_code_match" if candidate_country_code else "country_name_match"
+    if support_signals:
+        return (
+            "accepted",
+            f"{country_signal}, {', '.join(support_signals)}, and result type passed validation.",
+            support_signals,
+        )
+    return (
+        "requires_human",
+        locality_miss_reason
+        or "Candidate is in the expected country but lacks a locality, postal, or facility match.",
+        (),
+    )
 
 
 def spatially_validate_geocode_result(
@@ -585,6 +657,10 @@ def spatially_validate_geocode_result(
     *,
     expected_country: str,
     expected_locality: str | None,
+    expected_country_aliases: dict[str, str] | None = None,
+    expected_locality_aliases: tuple[str, ...] = (),
+    expected_postal_code: str | None = None,
+    expected_facility_name: str | None = None,
 ) -> tuple[dict[str, Any] | None, dict[str, object]]:
     if result is None:
         return None, {
@@ -602,16 +678,21 @@ def spatially_validate_geocode_result(
     assessments: list[dict[str, object]] = []
     accepted: dict[str, Any] | None = None
     for candidate in candidates:
-        status, reason = _candidate_scope_status(
+        status, reason, support_signals = _candidate_scope_status(
             candidate,
             expected_country=expected_country,
             expected_locality=expected_locality,
+            expected_country_aliases=expected_country_aliases,
+            expected_locality_aliases=expected_locality_aliases,
+            expected_postal_code=expected_postal_code,
+            expected_facility_name=expected_facility_name,
         )
         assessments.append(
             {
                 "display_name": str(candidate.get("display_name") or ""),
                 "status": status,
                 "reason": reason,
+                "support_signals": list(support_signals),
                 "latitude": candidate.get("latitude"),
                 "longitude": candidate.get("longitude"),
             }

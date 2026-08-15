@@ -178,17 +178,24 @@ def test_spatial_validation_accepts_specific_in_scope_candidate() -> None:
 
 
 def test_spatial_validation_routes_out_of_scope_and_centroid_results_to_humans() -> None:
+    mexico = {
+        "display_name": "Example School, Monterrey, Nuevo León, México",
+        "latitude": 25.67,
+        "longitude": -100.31,
+        "type": "school",
+        "address": {
+            "city": "Monterrey",
+            "state": "Nuevo León",
+            "country": "México",
+            "country_code": "mx",
+        },
+    }
     florida = {
         "display_name": "Example School, Parkland, Florida, United States",
         "latitude": 26.31,
         "longitude": -80.24,
         "type": "school",
-        "address": {
-            "city": "Parkland",
-            "state": "Florida",
-            "country": "United States",
-            "country_code": "us",
-        },
+        "address": {"city": "Parkland", "state": "Florida", "country_code": "us"},
     }
     georgia_centroid = {
         "display_name": "Georgia, United States",
@@ -203,6 +210,11 @@ def test_spatial_validation_routes_out_of_scope_and_centroid_results_to_humans()
     }
 
     accepted_outside, outside = spatially_validate_geocode_result(
+        {**mexico, "candidates": [mexico]},
+        expected_country="US",
+        expected_locality="Georgia",
+    )
+    accepted_locality, locality = spatially_validate_geocode_result(
         {**florida, "candidates": [florida]},
         expected_country="US",
         expected_locality="Georgia",
@@ -215,8 +227,65 @@ def test_spatial_validation_routes_out_of_scope_and_centroid_results_to_humans()
 
     assert accepted_outside is None
     assert outside["status"] == "out_of_scope"
+    assert accepted_locality is None
+    assert locality["status"] == "requires_human"
     assert accepted_centroid is None
     assert centroid["status"] == "requires_human"
+
+
+def test_spatial_validation_accepts_local_script_country_with_matching_code() -> None:
+    candidate = {
+        "display_name": "มหาวิทยาลัยสงขลานครินทร์, อำเภอหาดใหญ่, ประเทศไทย",
+        "latitude": 7.0069589,
+        "longitude": 100.5007596,
+        "type": "university",
+        "address": {
+            "amenity": "มหาวิทยาลัยสงขลานครินทร์",
+            "county": "อำเภอหาดใหญ่",
+            "province": "จังหวัดสงขลา",
+            "postcode": "90110",
+            "country": "ประเทศไทย",
+            "country_code": "th",
+        },
+    }
+
+    accepted, validation = spatially_validate_geocode_result(
+        {**candidate, "candidates": [candidate]},
+        expected_country="Thailand",
+        expected_locality="Hat Yai district, Songkhla",
+        expected_postal_code="90110",
+        expected_facility_name="Prince of Songkla University",
+    )
+
+    assert accepted == candidate
+    assert validation["status"] == "accepted"
+    assert "postal_code_match" in validation["assessments"][0]["support_signals"]
+
+
+def test_spatial_validation_uses_global_country_name_map() -> None:
+    candidate = {
+        "display_name": "Tokyo International Forum, Tokyo, Japan",
+        "latitude": 35.6769,
+        "longitude": 139.7649,
+        "type": "events_venue",
+        "address": {
+            "city": "Tokyo",
+            "postcode": "100-0005",
+            "country": "日本",
+            "country_code": "jp",
+        },
+    }
+
+    accepted, validation = spatially_validate_geocode_result(
+        {**candidate, "candidates": [candidate]},
+        expected_country="Japan",
+        expected_locality="Tokyo",
+        expected_postal_code="100-0005",
+        expected_facility_name="Tokyo International Forum",
+    )
+
+    assert accepted == candidate
+    assert validation["status"] == "accepted"
 
 
 def test_verified_csv_includes_geometry_status(tmp_path: Path) -> None:

@@ -142,7 +142,7 @@ def successful_runner(
         except (IndexError, KeyError, ValueError, json.JSONDecodeError):
             pass
         payload = [{**ADDRESS_PAYLOAD[0], "item_id": item_id}]
-    elif "Occupancy Lead QAQC Verification" in prompt:
+    elif "QAQC Verification" in prompt:
         payload = QAQC_PAYLOAD
     else:
         payload = LEAD_PAYLOAD
@@ -208,8 +208,11 @@ def geographer_and_harvest_runner(
         output_path.write_text(
             json.dumps(
                 {
+                    "country_code": "US",
+                    "country_aliases": ["Estados Unidos"],
                     "search_languages": ["English"],
                     "administrative_terms": [],
+                    "address_terms": [],
                     "public_safety_terms": [
                         {
                             "standard_term": "state police",
@@ -231,6 +234,8 @@ def geographer_and_harvest_runner(
             ),
             encoding="utf-8",
         )
+    elif "QAQC Verification" in prompt:
+        output_path.write_text(json.dumps(QAQC_PAYLOAD), encoding="utf-8")
     else:
         output_path.write_text(json.dumps(LEAD_PAYLOAD), encoding="utf-8")
     return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
@@ -862,6 +867,74 @@ def test_geocode_can_retry_address_research_after_spatial_failure(tmp_path: Path
     assert "=== AUTOMATED GEOCODING ===" in transcript
 
 
+def test_geocode_skips_address_retry_for_plausible_same_country_candidate(
+    tmp_path: Path,
+) -> None:
+    correction_prompts: list[str] = []
+
+    def runner(
+        command: Sequence[str],
+        prompt: str,
+        cwd: Path,
+    ) -> subprocess.CompletedProcess[str]:
+        if "Spatial Correction" in prompt:
+            correction_prompts.append(prompt)
+        return successful_runner(command, prompt, cwd)
+
+    def geocoder(query: str) -> dict[str, object]:
+        return {
+            "display_name": "Unmapped Depot, United States",
+            "latitude": 36.2,
+            "longitude": -86.8,
+            "provider": "mock",
+            "query": query,
+            "name": "Unmapped Depot",
+            "type": "industrial",
+            "address": {"country_code": "us"},
+        }
+
+    client = TestClient(
+        create_app(
+            workspace=tmp_path,
+            runner=runner,
+            geocoder=geocoder,
+            background=False,
+        )
+    )
+    created = client.post(
+        "/api/harvest/run",
+        json={
+            "country": "US",
+            "locality": "Tennessee",
+            "profiles": "commercial_business",
+            "profile": "factories_warehouses",
+            "target": 1,
+        },
+    ).json()
+    run_id = created["manifest"]["run_id"]
+    client.post(f"/api/runs/{run_id}/qaqc-run")
+    client.post(f"/api/runs/{run_id}/address-run")
+    item = client.get(f"/api/runs/{run_id}/geometry-items").json()["items"][0]
+
+    response = client.post(
+        "/api/geometry/geocode",
+        json={
+            "item_id": item["item_id"],
+            "query": item["geocode_query"],
+            "allow_address_retry": True,
+            "conversation_id": run_id,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["address_retry"] is None
+    assert correction_prompts == []
+    assert payload["geocode_result"] is None
+    assert payload["spatial_validation"]["status"] == "requires_human"
+    assert payload["spatial_validation"]["candidate_options"][0]["confidence"] == "possible"
+
+
 def test_geometry_geocode_prefers_enriched_address(tmp_path: Path) -> None:
     def geocoder(query: str) -> dict[str, object]:
         assert query == "100 Industrial Drive, Nashville, TN, US"
@@ -908,12 +981,73 @@ def test_geometry_geocode_prefers_enriched_address(tmp_path: Path) -> None:
     assert geocoded.json()["geometry"]["point"]["latitude"] == 36.0
 
 
-def test_geometry_geocode_routes_out_of_scope_candidate_to_human_queue(
+def test_geometry_geocode_uses_geographer_country_aliases(tmp_path: Path) -> None:
+    def geocoder(query: str) -> dict[str, object]:
+        return {
+            "display_name": "Example Warehouse, Nashville, Tennessee, Estados Unidos",
+            "latitude": 36.0,
+            "longitude": -86.0,
+            "provider": "mock",
+            "query": query,
+            "type": "industrial",
+            "address": {
+                "city": "Nashville",
+                "state": "Tennessee",
+                "country": "Estados Unidos",
+            },
+        }
+
+    client = TestClient(
+        create_app(
+            workspace=tmp_path,
+            runner=geographer_and_harvest_runner,
+            geocoder=geocoder,
+            background=False,
+        )
+    )
+    planned = client.post(
+        "/api/geographer/plan",
+        json={
+            "country": "US",
+            "locality": "Tennessee",
+            "profiles": "commercial_business",
+            "profile": "factories_warehouses",
+            "mode": "single",
+        },
+    ).json()
+    harvested = client.post(
+        "/api/harvest/run",
+        json={
+            "country": "US",
+            "locality": "Tennessee",
+            "profiles": "commercial_business",
+            "profile": "factories_warehouses",
+            "target": 1,
+            "run_id": planned["run_id"],
+            "geographer_plan_path": planned["plan_path"],
+        },
+    ).json()
+    run_id = harvested["manifest"]["run_id"]
+    client.post(f"/api/runs/{run_id}/qaqc-run")
+    item = client.get(f"/api/runs/{run_id}/geometry-items").json()["items"][0]
+
+    response = client.post(
+        "/api/geometry/geocode",
+        json={"item_id": item["item_id"], "query": item["geocode_query"]},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["spatial_validation"]["status"] == "accepted"
+    assert payload["geometry"]["point"]["latitude"] == 36.0
+
+
+def test_geometry_geocode_routes_same_country_uncertain_candidate_to_human_queue(
     tmp_path: Path,
 ) -> None:
     def geocoder(query: str) -> dict[str, object]:
         return {
-            "display_name": "Example Warehouse, Birmingham, Alabama, United States",
+            "display_name": "Unrelated Depot, Birmingham, Alabama, United States",
             "latitude": 33.52,
             "longitude": -86.80,
             "provider": "mock",
@@ -956,9 +1090,9 @@ def test_geometry_geocode_routes_out_of_scope_candidate_to_human_queue(
     assert response.status_code == 200
     payload = response.json()
     assert payload["geocode_result"] is None
-    assert payload["spatial_validation"]["status"] == "out_of_scope"
+    assert payload["spatial_validation"]["status"] == "requires_human"
     assert payload["spatial_validation"]["candidate_options"][0]["confidence"] == (
-        "conflicting"
+        "possible"
     )
     assert payload["spatial_validation"]["candidate_options"][0]["latitude"] == 33.52
     assert payload["geometry"]["point"] is None

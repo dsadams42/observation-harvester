@@ -77,7 +77,10 @@ Existing facility aliases:
 
 Review only:
 - Languages that are useful for public web searches in this locality.
+- The ISO 3166-1 alpha-2 country code and local-script or official country aliases.
 - Local administrative terms that may replace generic words such as city, district, or province.
+- Local address terms that may appear in geocoder results, such as road, village, subdistrict,
+  district, province, building, campus, or municipality.
 - Names or abbreviations used for police, fire, emergency, labor, or regulatory authorities.
 - Local facility vernacular not already represented by the aliases.
 - Local terms for census, enrollment, attendance, bed occupancy, staffing, hotel occupancy,
@@ -96,6 +99,8 @@ changes should improve discovery. Report decisions and evidence, not hidden chai
 Return exactly one JSON object with this schema and no Markdown:
 
 {{
+  "country_code": "ISO 3166-1 alpha-2 code, such as PH",
+  "country_aliases": ["country names in local scripts or common romanizations"],
   "search_languages": ["language name or code"],
   "administrative_terms": [
     {{
@@ -105,6 +110,7 @@ Return exactly one JSON object with this schema and no Markdown:
       "usage_note": "how to use it in a search"
     }}
   ],
+  "address_terms": [],
   "public_safety_terms": [],
   "facility_terms": [],
   "query_adjustments": ["short query adjustment"],
@@ -239,6 +245,12 @@ Search languages:
 
 Administrative terminology:
 {_bullet_list(terms(proposal.administrative_terms))}
+
+Country aliases:
+{_bullet_list(proposal.country_aliases)}
+
+Address terminology:
+{_bullet_list(terms(proposal.address_terms))}
 
 Police, fire, emergency, labor, and regulator terminology:
 {_bullet_list(terms(proposal.public_safety_terms))}

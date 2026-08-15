@@ -17,6 +17,8 @@ from pdt_observer.geographer import (
 from pdt_observer.models import GeographerPlanStatus
 
 PROPOSAL = {
+    "country_code": "PH",
+    "country_aliases": ["Pilipinas"],
     "search_languages": ["English", "Cebuano"],
     "administrative_terms": [
         {
@@ -24,6 +26,14 @@ PROPOSAL = {
             "local_term": "barangay",
             "language": "Filipino",
             "usage_note": "Use with the locality and facility alias.",
+        }
+    ],
+    "address_terms": [
+        {
+            "standard_term": "street",
+            "local_term": "kalye",
+            "language": "Filipino",
+            "usage_note": "May appear in local address snippets.",
         }
     ],
     "public_safety_terms": [
@@ -73,6 +83,8 @@ def test_geographer_prompt_is_bounded_to_vernacular_review() -> None:
 
     assert "Do not harvest occupancy observations" in prompt
     assert "Names or abbreviations used for police, fire" in prompt
+    assert "ISO 3166-1 alpha-2 country code" in prompt
+    assert "Local address terms" in prompt
     assert "full-service restaurants" in prompt.casefold()
 
 
@@ -111,6 +123,8 @@ def test_run_geographer_writes_plan_and_colleague_dialogue(tmp_path: Path) -> No
     assert "Geographer Agent: I found that BFP" in dialogue
     assert "Why: Local agency" in dialogue
     assert "BFP" in geographer_prompt_guidance(plan)
+    assert "Pilipinas" in geographer_prompt_guidance(plan)
+    assert "kalye" in geographer_prompt_guidance(plan)
 
 
 def test_run_geographer_falls_back_when_agent_output_is_invalid(tmp_path: Path) -> None:

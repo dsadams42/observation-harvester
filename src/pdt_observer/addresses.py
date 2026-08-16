@@ -396,7 +396,7 @@ def reconcile_address_results(
                 status=AddressEnrichmentStatus.NEEDS_REVIEW,
                 review_notes=(
                     "Address enrichment agent did not return a result for this expected "
-                    "QAQC-approved address target."
+                    "addressable target."
                 ),
             )
         )

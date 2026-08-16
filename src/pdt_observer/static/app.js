@@ -1160,7 +1160,7 @@
       $('tableEmpty').classList.toggle('hidden', Boolean(state.tableVisibleRows.length));
       if (!state.tableRows.length) {
         $('tableEmpty').textContent = state.tableMode === 'verified'
-          ? 'No QAQC-approved rows are available for this context.'
+          ? 'No reviewable rows are available for this context.'
           : 'No leads are available for this context.';
       } else if (!state.tableVisibleRows.length) {
         $('tableEmpty').textContent = 'No rows match the current search.';

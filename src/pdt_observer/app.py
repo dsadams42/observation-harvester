@@ -7,6 +7,7 @@ import json
 import re
 import time
 import webbrowser
+from collections import Counter
 from collections.abc import AsyncIterator, Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
@@ -759,6 +760,7 @@ def _run_qaqc_for_manifest(
         "cancelled_count": cancelled_count,
         "review_count": review_count,
     }
+    audit_counters = _qaqc_audit_counters(root, child_run_ids)
     append_harvest_log(root, parent_id, f"QAQC run finished: {summary}.")
     append_dialogue(
         root,
@@ -766,13 +768,21 @@ def _run_qaqc_for_manifest(
         speaker="QAQC Agent",
         stage="qaqc",
         message=(
-            f"I reviewed {review_count} lead record(s) across {completed_count} completed "
-            f"child run(s)."
+            f"I completed an evidence QAQC audit for {completed_count} child run(s): "
+            f"{audit_counters['direct_total']} direct review(s), "
+            f"{audit_counters['component_total']} component review(s), and "
+            f"{audit_counters['bundle_total']} bundle review(s). "
+            f"{audit_counters['approved_bundle_count']} bundle(s) are approved as "
+            f"countable facility observations; {audit_counters['held_bundle_count']} are held."
         ),
         rationale=(
             f"{failed_count} child review(s) failed and {cancelled_count} were cancelled. "
-            "I checked source support, facility and location agreement, count evidence, and "
-            "strategy semantics before recommending what to keep."
+            f"Direct actions: {audit_counters['direct_actions']}. Component actions: "
+            f"{audit_counters['component_actions']}. Bundle actions: "
+            f"{audit_counters['bundle_actions']}. Common missing bundle fields: "
+            f"{audit_counters['common_missing_bundle_fields']}. I checked source support, "
+            "facility identity, role semantics, bundle completeness, and whether a bundle "
+            "should be allowed to drive address enrichment."
         ),
     )
     return {
@@ -977,6 +987,7 @@ def _run_address_for_manifest(
         "missing_count": missing_count,
         "missing_item_ids": missing_item_ids,
     }
+    bundle_counters = _component_bundle_review_counters(root, child_run_ids)
     append_harvest_log(root, parent_id, f"Address enrichment finished: {summary}.")
     append_dialogue(
         root,
@@ -984,13 +995,21 @@ def _run_address_for_manifest(
         speaker="Address Agent",
         stage="address_enrichment",
         message=(
-            f"I completed address research for {completed_count} child run(s) and returned "
-            f"{result_count} address result(s)."
+            f"I completed an address-target audit for {completed_count} child run(s): "
+            f"{expected_count} QAQC-approved target(s), {result_count} returned result(s), "
+            f"and {missing_count} reconciled missing result(s)."
         ),
         rationale=(
             f"{failed_count} child enrichment run(s) failed and {cancelled_count} were cancelled. "
-            "I limited the work to QAQC-approved leads and preserved ambiguous addresses for "
-            "human review."
+            f"Bundle QAQC status before addressing: {bundle_counters['approved']} approved "
+            f"and {bundle_counters['held']} held. "
+            + (
+                "No address research was run because QAQC produced no approved address "
+                "targets; held component bundles need supervisor review or gap fill first."
+                if expected_count == 0 and bundle_counters["held"] > 0
+                else "I limited the work to QAQC-approved observations and preserved "
+                "ambiguous or missing addresses for human review."
+            )
         ),
     )
     return {
@@ -1182,6 +1201,85 @@ def _approved_component_bundle_records_for_manifest(
     return tuple(records)
 
 
+def _manifest_has_component_bundles(root: Path, manifest: Any) -> bool:
+    for child_run_id in _manifest_child_run_ids(manifest):
+        child_manifest = _load_run_manifest(root, child_run_id)
+        if not Path(child_manifest.lead_path).is_file():
+            continue
+        evidence_set = load_evidence_set(Path(child_manifest.lead_path))
+        if evidence_set.component_bundles:
+            return True
+    return False
+
+
+def _component_bundle_review_counters(root: Path, child_run_ids: Sequence[str]) -> dict[str, int]:
+    counters = {
+        "total": 0,
+        "approved": 0,
+        "held": 0,
+        "review": 0,
+        "retry": 0,
+        "reject": 0,
+    }
+    for child_run_id in child_run_ids:
+        qaqc_path = _qaqc_output_path(root, child_run_id)
+        if not qaqc_path.is_file():
+            continue
+        review_set = load_qaqc_review_set(qaqc_path)
+        for review in review_set.component_bundle_reviews:
+            counters["total"] += 1
+            action = review.recommended_action.value
+            if action in counters:
+                counters[action] += 1
+            if _bundle_review_allows_target(bundle=None, review=review):
+                counters["approved"] += 1
+            else:
+                counters["held"] += 1
+    return counters
+
+
+def _qaqc_audit_counters(root: Path, child_run_ids: Sequence[str]) -> dict[str, Any]:
+    direct_actions: Counter[str] = Counter()
+    component_actions: Counter[str] = Counter()
+    bundle_actions: Counter[str] = Counter()
+    held_bundle_missing_fields: Counter[str] = Counter()
+    direct_total = 0
+    component_total = 0
+    bundle_total = 0
+    approved_bundle_count = 0
+    for child_run_id in child_run_ids:
+        qaqc_path = _qaqc_output_path(root, child_run_id)
+        if not qaqc_path.is_file():
+            continue
+        review_set = load_qaqc_review_set(qaqc_path)
+        direct_total += len(review_set.occupancy_reviews)
+        component_total += len(review_set.component_reviews)
+        bundle_total += len(review_set.component_bundle_reviews)
+        direct_actions.update(
+            review.recommended_action.value for review in review_set.occupancy_reviews
+        )
+        component_actions.update(
+            review.recommended_action.value for review in review_set.component_reviews
+        )
+        for review in review_set.component_bundle_reviews:
+            bundle_actions.update((review.recommended_action.value,))
+            if _bundle_review_allows_target(bundle=None, review=review):
+                approved_bundle_count += 1
+            else:
+                held_bundle_missing_fields.update(review.missing_component_types)
+    return {
+        "direct_total": direct_total,
+        "component_total": component_total,
+        "bundle_total": bundle_total,
+        "direct_actions": dict(direct_actions),
+        "component_actions": dict(component_actions),
+        "bundle_actions": dict(bundle_actions),
+        "approved_bundle_count": approved_bundle_count,
+        "held_bundle_count": bundle_total - approved_bundle_count,
+        "common_missing_bundle_fields": dict(held_bundle_missing_fields.most_common(5)),
+    }
+
+
 def _approved_component_records_for_manifest(
     root: Path,
     manifest: Any,
@@ -1263,6 +1361,40 @@ def _format_component_table_value(datum: dict[str, Any]) -> str:
     ]
     qualifier_text = ", ".join(qualifier for qualifier in qualifiers if qualifier)
     return f"{main} ({qualifier_text})" if qualifier_text else main
+
+
+def _count_column_key(group_type: str) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", "_", group_type.casefold()).strip("_")
+    return f"count_{normalized or 'other'}"
+
+
+def _count_values_from_occupancy_data(
+    occupancy_data: Sequence[dict[str, Any]],
+) -> dict[str, int | float | str]:
+    values: dict[str, int | float | str] = {}
+    for datum in occupancy_data:
+        group_type = str(datum.get("group_type") or "other")
+        key = _count_column_key(group_type)
+        count = datum.get("count", "")
+        existing = values.get(key)
+        if isinstance(existing, int | float) and isinstance(count, int | float):
+            values[key] = existing + count
+        elif existing not in {None, ""}:
+            values[key] = f"{existing}; {count}"
+        else:
+            values[key] = count
+    return values
+
+
+def _count_relationship(occupancy_data: Sequence[dict[str, Any]], notes: str) -> str:
+    if len(occupancy_data) <= 1:
+        return "single_count"
+    notes_folded = notes.casefold()
+    if any(term in notes_folded for term in ("do not add", "do not sum", "overlap")):
+        return "overlapping_or_non_additive"
+    if any(term in notes_folded for term in ("total", "subgroup", "avoid double counting")):
+        return "mixed_total_and_subgroups"
+    return "multiple_groups_unknown_additivity"
 
 
 def _append_component_value(
@@ -1929,6 +2061,9 @@ def _workflow_status_payload(
     review_count = 0
     verified_count = 0
     direct_verified_count = 0
+    address_target_count = 0
+    held_component_bundle_count = 0
+    approved_component_bundle_count = 0
     rejected_count = 0
     address_count = 0
     address_found_count = 0
@@ -1942,13 +2077,16 @@ def _workflow_status_payload(
             evidence_set = load_evidence_set(Path(child_manifest.lead_path))
             all_lead_count += len(evidence_set.occupancy_leads) + len(
                 evidence_set.component_leads
-            )
+            ) + len(evidence_set.component_bundles)
         qaqc_path = _qaqc_output_path(root, child_run_id)
         if qaqc_path.is_file():
             review_set = load_qaqc_review_set(qaqc_path)
             reviews = review_set.occupancy_reviews
             component_reviews = review_set.component_reviews
-            review_count += len(reviews) + len(component_reviews)
+            component_bundle_reviews = review_set.component_bundle_reviews
+            review_count += len(reviews) + len(component_reviews) + len(
+                component_bundle_reviews
+            )
             direct_keep_count = sum(
                 review.verification_status.value == "verified"
                 and review.recommended_action.value == "keep"
@@ -1959,8 +2097,19 @@ def _workflow_status_payload(
                 and review.recommended_action.value == "keep"
                 for review in component_reviews
             )
+            bundle_keep_count = sum(
+                review.verification_status == LeadQaqcVerificationStatus.VERIFIED
+                and review.recommended_action == LeadQaqcRecommendedAction.KEEP
+                and review.counts_toward_target_approved
+                for review in component_bundle_reviews
+            )
+            approved_component_bundle_count += bundle_keep_count
+            held_component_bundle_count += len(component_bundle_reviews) - bundle_keep_count
             direct_verified_count += direct_keep_count
-            verified_count += direct_keep_count + component_keep_count
+            has_bundle_reviews = bool(component_bundle_reviews)
+            verified_count += direct_keep_count + (
+                bundle_keep_count if has_bundle_reviews else component_keep_count
+            )
             rejected_count += sum(
                 review.recommended_action.value in {"reject", "retry"}
                 or review.verification_status.value != "verified"
@@ -1969,7 +2118,16 @@ def _workflow_status_payload(
                 review.recommended_action.value in {"reject", "retry"}
                 or review.verification_status.value != "verified"
                 for review in component_reviews
+            ) + sum(
+                review.recommended_action.value in {"reject", "retry"}
+                or review.verification_status.value != "verified"
+                or not review.counts_toward_target_approved
+                for review in component_bundle_reviews
             )
+            if child_manifest is not None:
+                address_target_count += len(
+                    approved_address_inputs(root=root, manifest=child_manifest)
+                )
         child_address_path = address_output_path(root, child_run_id)
         if child_address_path.is_file():
             address_results = load_address_results(child_address_path)
@@ -1987,11 +2145,11 @@ def _workflow_status_payload(
     else:
         qaqc_status = "blocked"
 
-    if verified_count > 0 and address_count >= verified_count:
+    if address_target_count > 0 and address_count >= address_target_count:
         address_status = "complete"
     elif address_count > 0:
         address_status = "attention"
-    elif qaqc_status == "complete" and verified_count > 0:
+    elif qaqc_status == "complete" and address_target_count > 0:
         address_status = "ready"
     else:
         address_status = "blocked"
@@ -2188,12 +2346,25 @@ def _workflow_status_payload(
             label="Enrich Addresses",
             status=address_status,
             current=address_count,
-            total=verified_count,
+            total=address_target_count,
             detail=(
-                f"{address_count}/{verified_count} verified facilities processed; "
-                f"{address_found_count} addresses found. Optional but recommended before mapping."
+                (
+                    f"{address_count}/{address_target_count} QAQC-approved address targets "
+                    f"processed; {address_found_count} addresses found."
+                )
+                if address_target_count
+                else (
+                    "No QAQC-approved address targets exist. "
+                    f"{held_component_bundle_count} component bundle(s) are held for "
+                    "supervisor review before address enrichment."
+                )
             ),
-            metrics={"found_count": address_found_count},
+            metrics={
+                "target_count": address_target_count,
+                "found_count": address_found_count,
+                "approved_component_bundle_count": approved_component_bundle_count,
+                "held_component_bundle_count": held_component_bundle_count,
+            },
             action_id="run_address" if address_status in {"ready", "attention"} else None,
             action_label=(
                 "Run Address Enrichment"
@@ -2575,51 +2746,59 @@ def _table_rows_from_records(records: Sequence[dict[str, Any]]) -> list[dict[str
         review = record.get("qaqc_review") or {}
         address = record.get("address_enrichment") or {}
         geometry = record.get("geometry") or {}
-        for count_index, datum in enumerate(lead["occupancy_data"]):
-            rows.append(
-                {
-                    "row_id": f"{record['item_id']}-{count_index}",
-                    "item_id": record["item_id"],
-                    "run_id": record["child_run_id"],
-                    "sample_set_id": record.get("sample_set_id", ""),
-                    "sample_round": record.get("sample_round", ""),
-                    "facility_type": record.get("facility_type", ""),
-                    "evidence_role": "direct_occupancy",
-                    "lead_index": record["lead_index"],
-                    "count_index": count_index,
-                    "facility_name": location["facility_name"],
-                    "count": datum["count"],
-                    "group_type": datum["group_type"],
-                    "component_type": "",
-                    "value": "",
-                    "unit": "",
-                    "time_basis": "",
-                    "geography_level": "",
-                    "incident_date": lead["incident_date"],
-                    "incident_time": lead["incident_time"],
-                    "strategy_id": lead.get("strategy_id") or "",
-                    "representativeness": lead.get("representativeness") or "",
-                    "confidence": lead.get("confidence") or "",
-                    "city_or_region": location["city_or_region"],
-                    "country": location["country"],
-                    "source_url": lead["source_url"],
-                    "qaqc_status": review.get("verification_status", ""),
-                    "recommended_action": review.get("recommended_action", ""),
-                    "address_status": record.get("address_status", ""),
-                    "enriched_address": address.get("formatted_address") or "",
-                    "geometry_status": record.get("geometry_status", ""),
-                    "area_m2": record.get("area_m2") or geometry.get("area_m2") or "",
-                    "review_notes": (
-                        review.get("review_notes")
-                        or address.get("review_notes")
-                        or lead.get("review_notes")
-                        or ""
-                    ),
-                    "excluded_from_dataset": False,
-                    "exclusion_reason_code": "",
-                    "exclusion_reason_note": "",
-                }
-            )
+        occupancy_data = lead["occupancy_data"]
+        count_values = _count_values_from_occupancy_data(occupancy_data)
+        count_notes = (
+            review.get("review_notes")
+            or address.get("review_notes")
+            or lead.get("review_notes")
+            or ""
+        )
+        row = {
+            "row_id": record["item_id"],
+            "item_id": record["item_id"],
+            "run_id": record["child_run_id"],
+            "sample_set_id": record.get("sample_set_id", ""),
+            "sample_round": record.get("sample_round", ""),
+            "facility_type": record.get("facility_type", ""),
+            "evidence_role": "direct_occupancy",
+            "lead_index": record["lead_index"],
+            "count_index": "",
+            "facility_name": location["facility_name"],
+            "count": sum(
+                datum["count"]
+                for datum in occupancy_data
+                if isinstance(datum.get("count"), int | float)
+            ),
+            "group_type": ", ".join(str(datum["group_type"]) for datum in occupancy_data),
+            "count_values": count_values,
+            "count_relationship": _count_relationship(occupancy_data, count_notes),
+            "component_type": "",
+            "value": "",
+            "unit": "",
+            "time_basis": "",
+            "geography_level": "",
+            "incident_date": lead["incident_date"],
+            "incident_time": lead["incident_time"],
+            "strategy_id": lead.get("strategy_id") or "",
+            "representativeness": lead.get("representativeness") or "",
+            "confidence": lead.get("confidence") or "",
+            "city_or_region": location["city_or_region"],
+            "country": location["country"],
+            "source_url": lead["source_url"],
+            "qaqc_status": review.get("verification_status", ""),
+            "recommended_action": review.get("recommended_action", ""),
+            "address_status": record.get("address_status", ""),
+            "enriched_address": address.get("formatted_address") or "",
+            "geometry_status": record.get("geometry_status", ""),
+            "area_m2": record.get("area_m2") or geometry.get("area_m2") or "",
+            "review_notes": count_notes,
+            "excluded_from_dataset": False,
+            "exclusion_reason_code": "",
+            "exclusion_reason_note": "",
+        }
+        row.update(count_values)
+        rows.append(row)
     return rows
 
 
@@ -2632,46 +2811,54 @@ def _all_lead_table_rows(root: Path, manifest: Any) -> list[dict[str, Any]]:
             lead_payload = lead.model_dump(mode="json")
             location = lead_payload["location"]
             item_id = f"{child_run_id}-{lead_index}"
-            for count_index, datum in enumerate(lead_payload["occupancy_data"]):
-                rows.append(
-                    {
-                        "row_id": f"{item_id}-{count_index}",
-                        "item_id": item_id,
-                        "run_id": child_run_id,
-                        "sample_set_id": "",
-                        "sample_round": "",
-                        "facility_type": child_manifest.profile_set,
-                        "evidence_role": "direct_occupancy",
-                        "lead_index": lead_index,
-                        "count_index": count_index,
-                        "facility_name": location["facility_name"],
-                        "count": datum["count"],
-                        "group_type": datum["group_type"],
-                        "component_type": "",
-                        "value": "",
-                        "unit": "",
-                        "time_basis": "",
-                        "geography_level": "",
-                        "incident_date": lead_payload["incident_date"],
-                        "incident_time": lead_payload["incident_time"],
-                        "strategy_id": lead_payload.get("strategy_id") or "",
-                        "representativeness": lead_payload.get("representativeness") or "",
-                        "confidence": lead_payload.get("confidence") or "",
-                        "city_or_region": location["city_or_region"],
-                        "country": location["country"],
-                        "source_url": lead_payload["source_url"],
-                        "qaqc_status": "",
-                        "recommended_action": "",
-                        "address_status": "",
-                        "enriched_address": "",
-                        "geometry_status": "",
-                        "area_m2": "",
-                        "review_notes": lead_payload.get("review_notes") or "",
-                        "excluded_from_dataset": False,
-                        "exclusion_reason_code": "",
-                        "exclusion_reason_note": "",
-                    }
-                )
+            occupancy_data = lead_payload["occupancy_data"]
+            count_values = _count_values_from_occupancy_data(occupancy_data)
+            review_notes = lead_payload.get("review_notes") or ""
+            row = {
+                "row_id": item_id,
+                "item_id": item_id,
+                "run_id": child_run_id,
+                "sample_set_id": "",
+                "sample_round": "",
+                "facility_type": child_manifest.profile_set,
+                "evidence_role": "direct_occupancy",
+                "lead_index": lead_index,
+                "count_index": "",
+                "facility_name": location["facility_name"],
+                "count": sum(
+                    datum["count"]
+                    for datum in occupancy_data
+                    if isinstance(datum.get("count"), int | float)
+                ),
+                "group_type": ", ".join(str(datum["group_type"]) for datum in occupancy_data),
+                "count_values": count_values,
+                "count_relationship": _count_relationship(occupancy_data, review_notes),
+                "component_type": "",
+                "value": "",
+                "unit": "",
+                "time_basis": "",
+                "geography_level": "",
+                "incident_date": lead_payload["incident_date"],
+                "incident_time": lead_payload["incident_time"],
+                "strategy_id": lead_payload.get("strategy_id") or "",
+                "representativeness": lead_payload.get("representativeness") or "",
+                "confidence": lead_payload.get("confidence") or "",
+                "city_or_region": location["city_or_region"],
+                "country": location["country"],
+                "source_url": lead_payload["source_url"],
+                "qaqc_status": "",
+                "recommended_action": "",
+                "address_status": "",
+                "enriched_address": "",
+                "geometry_status": "",
+                "area_m2": "",
+                "review_notes": review_notes,
+                "excluded_from_dataset": False,
+                "exclusion_reason_code": "",
+                "exclusion_reason_note": "",
+            }
+            row.update(count_values)
+            rows.append(row)
         rows.extend(
             _component_bundle_table_rows(
                 child_run_id=child_run_id,
@@ -2901,7 +3088,7 @@ def _run_table_payload(root: Path, run_id: str, *, mode: str) -> dict[str, Any]:
         )
         if bundle_records:
             rows.extend(_table_rows_from_component_bundle_records(bundle_records))
-        else:
+        elif not _manifest_has_component_bundles(root, manifest):
             component_records = merge_address_results(
                 root, _approved_component_records_for_manifest(root, manifest)
             )
@@ -2924,12 +3111,15 @@ def _sample_table_payload(root: Path, sample_set_id: str, *, mode: str) -> dict[
     records = sample_records(root, sample_set, include_excluded=True)
     component_records: list[dict[str, Any]] = []
     component_bundle_records: list[dict[str, Any]] = []
+    has_component_bundles = False
     round_by_child: dict[str, int] = {}
     for sample_round in sample_set.rounds:
         for child_run_id in sample_round.child_run_ids:
             round_by_child[child_run_id] = sample_round.round_number
     for child_run_id in sample_set.combined_child_run_ids:
         manifest = _load_run_manifest(root, child_run_id)
+        if load_evidence_set(Path(manifest.lead_path)).component_bundles:
+            has_component_bundles = True
         for record in _approved_component_bundle_records_for_child(root, manifest):
             payload = dict(record)
             payload["sample_set_id"] = sample_set.sample_set_id
@@ -2948,7 +3138,7 @@ def _sample_table_payload(root: Path, sample_set_id: str, *, mode: str) -> dict[
     )
     if component_bundle_records_with_addresses:
         rows.extend(_table_rows_from_component_bundle_records(component_bundle_records_with_addresses))
-    else:
+    elif not has_component_bundles:
         component_records_with_addresses = merge_address_results(root, tuple(component_records))
         rows.extend(_table_rows_from_component_records(component_records_with_addresses))
     for row in rows:

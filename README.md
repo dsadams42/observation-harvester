@@ -235,6 +235,12 @@ gates model-proposed data before export.
 6. Review coverage before deciding whether to run gap fill.
 7. Download only records that passed QAQC.
 
+Count mode should stay explicit: use **Direct count** for observed people-present
+records and **Subcomponent count** for facility-level component bundles such as
+enrollment, staffing, beds, rooms, or visitor inputs. To compare both evidence
+families, run two separate harvests for the same scope instead of mixing them in
+one run; older hybrid artifacts remain readable for compatibility.
+
 The modes are:
 
 - **Single:** one facility type and optional subtype.

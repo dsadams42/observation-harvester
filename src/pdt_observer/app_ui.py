@@ -138,8 +138,10 @@ INDEX_HTML = r"""<!doctype html>
           <option value="">Profile default</option>
           <option value="direct_count">Direct count</option>
           <option value="population_subcomponent">Subcomponent count</option>
-          <option value="hybrid">Hybrid</option>
         </select>
+        <p class="field-help">
+          To compare direct occupancy with subcomponent bundles, run the two modes separately.
+        </p>
       </div>
 
       <div class="row">

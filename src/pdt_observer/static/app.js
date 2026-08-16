@@ -906,6 +906,7 @@
       ['facility_name', 'Facility'],
       ['count', 'Count'],
       ['group_type', 'Group'],
+      ['count_relationship', 'Count Relationship'],
       ['component_type', 'Component'],
       ['value', 'Component Summary'],
       ['unit', 'Unit'],
@@ -949,10 +950,26 @@
         .map((label) => [`component_values.${label}`, label]);
     }
 
+    function countValueColumns(rows = state.tableRows) {
+      const labels = [];
+      const seen = new Set();
+      rows.forEach((row) => {
+        const values = row.count_values || {};
+        if (!values || typeof values !== 'object' || Array.isArray(values)) return;
+        Object.keys(values).forEach((label) => {
+          if (seen.has(label)) return;
+          seen.add(label);
+          labels.push(label);
+        });
+      });
+      return labels.sort((left, right) => left.localeCompare(right))
+        .map((label) => [`count_values.${label}`, label.replace(/^count_/, 'Count: ')]);
+    }
+
     function activeTableColumns() {
       const columns = [...tableColumns];
       const insertIndex = columns.findIndex(([key]) => key === 'incident_date');
-      const dynamicColumns = componentValueColumns();
+      const dynamicColumns = [...countValueColumns(), ...componentValueColumns()];
       if (insertIndex === -1 || !dynamicColumns.length) return columns;
       columns.splice(insertIndex, 0, ...dynamicColumns);
       return columns;
@@ -1090,6 +1107,11 @@
       if (key.startsWith('component_values.')) {
         const label = key.slice('component_values.'.length);
         const values = row.component_values || {};
+        return values && typeof values === 'object' ? (values[label] || '') : '';
+      }
+      if (key.startsWith('count_values.')) {
+        const label = key.slice('count_values.'.length);
+        const values = row.count_values || {};
         return values && typeof values === 'object' ? (values[label] || '') : '';
       }
       const value = row[key];

@@ -525,6 +525,13 @@ def run_harvest(
     lead_count = summary.get("lead_count", 0)
     budget_observation_count = summary.get("budget_observation_count", lead_count)
     counts_by_strategy = summary.get("counts_by_strategy", {})
+    component_lead_count = summary.get("component_lead_count", 0)
+    component_bundle_count = summary.get("component_bundle_count", 0)
+    countable_component_observations = summary.get("countable_component_observations", 0)
+    component_bundles_by_status = summary.get("component_bundles_by_status", {})
+    count_method_text = (
+        count_method_override.value if count_method_override is not None else "profile_default"
+    )
     if activity_path.is_file():
         try:
             activity_report = load_harvester_activity_report(activity_path)
@@ -556,13 +563,16 @@ def run_harvest(
         speaker="Harvester Agent",
         stage="lead_harvest",
         message=(
-            "I completed the search and returned "
-            f"{budget_observation_count} budget-countable observation(s) from "
-            f"{lead_count} direct lead(s) plus any component evidence."
+            "I completed the search audit and returned "
+            f"{budget_observation_count} budget-countable candidate observation(s): "
+            f"{lead_count} direct lead(s), {component_lead_count} component lead(s), and "
+            f"{component_bundle_count} component bundle(s)."
         ),
         rationale=(
-            f"The attributed lead counts by strategy were {counts_by_strategy}. "
-            "These are candidates; QAQC still decides whether their sources support them."
+            f"Evidence mode: {count_method_text}. Strategy counts: {counts_by_strategy}. "
+            f"Countable component bundles before QAQC: {countable_component_observations}; "
+            f"bundle statuses: {component_bundles_by_status}. These remain candidates until "
+            "QAQC verifies source support, role semantics, and bundle completeness."
         ),
     )
     return _write_manifest(

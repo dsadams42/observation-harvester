@@ -414,9 +414,14 @@ def test_index_page_contains_local_app_controls(tmp_path: Path) -> None:
     assert "updateActionAvailability" in js.text
     assert "setStatusMessage" in js.text
     assert "setPressedGroup" in js.text
+    assert "countValueColumns" in js.text
+    assert "Count Relationship" in js.text
     assert "defaultWorkflowStages" in js.text
     assert "Start Full Pipeline" in js.text
     assert "Run Full Pipeline" in html
+    assert '<option value="hybrid">Hybrid</option>' not in html
+    assert "run the two modes separately" in html
+    assert "run two separate harvests" in Path("README.md").read_text(encoding="utf-8")
     assert "Review dataset ready - approval required" in js.text
     assert "Approve Dataset &amp; Check Coverage" in html
     assert "approval with no exclusions is valid" in html.lower()
@@ -679,6 +684,21 @@ def test_harvest_run_endpoint_accepts_count_method_override(tmp_path: Path) -> N
     assert manifest["count_method_override"] == "population_subcomponent"
     prompt = Path(manifest["prompt_path"]).read_text(encoding="utf-8")
     assert "Count method: population_subcomponent" in prompt
+
+    hybrid_response = client.post(
+        "/api/harvest/run",
+        json={
+            "country": "US",
+            "locality": "Tennessee",
+            "profiles": "retail_service",
+            "profile": "hotels_motels",
+            "target": 5,
+            "run_id": "legacy-hybrid-compatibility",
+            "count_method_override": "hybrid",
+        },
+    )
+    assert hybrid_response.status_code == 200
+    assert hybrid_response.json()["manifest"]["count_method_override"] == "hybrid"
 
 
 def test_workflow_status_recommends_next_artifact_backed_stage(tmp_path: Path) -> None:
@@ -1542,7 +1562,7 @@ def test_geometry_review_endpoints_and_verified_exports(tmp_path: Path) -> None:
     assert footprints.json()["features"][0]["geometry"]["type"] == "Polygon"
 
 
-def test_run_table_endpoint_flattens_all_leads_by_occupancy_count(tmp_path: Path) -> None:
+def test_run_table_endpoint_pivots_occupancy_counts_wide(tmp_path: Path) -> None:
     client = TestClient(create_app(workspace=tmp_path, runner=multi_count_runner, background=False))
     created = client.post(
         "/api/harvest/run",
@@ -1562,11 +1582,21 @@ def test_run_table_endpoint_flattens_all_leads_by_occupancy_count(tmp_path: Path
     payload = response.json()
     assert payload["mode"] == "all"
     assert payload["context_type"] == "run"
-    assert payload["row_count"] == 2
-    assert [row["count"] for row in payload["rows"]] == [12, 4]
-    assert payload["rows"][0]["item_id"] == f"{run_id}-0"
-    assert payload["rows"][1]["count_index"] == 1
-    assert payload["rows"][0]["qaqc_status"] == ""
+    assert payload["row_count"] == 1
+    row = payload["rows"][0]
+    assert row["item_id"] == f"{run_id}-0"
+    assert row["row_id"] == f"{run_id}-0"
+    assert row["count"] == 16
+    assert row["count_index"] == ""
+    assert row["group_type"] == "workers evacuated, security staff"
+    assert row["count_values"] == {
+        "count_security_staff": 4,
+        "count_workers_evacuated": 12,
+    }
+    assert row["count_security_staff"] == 4
+    assert row["count_workers_evacuated"] == 12
+    assert row["count_relationship"] == "multiple_groups_unknown_additivity"
+    assert row["qaqc_status"] == ""
 
 
 def test_run_table_verified_includes_review_address_and_geometry_fields(
@@ -1937,6 +1967,204 @@ def test_component_bundle_address_reconciliation_and_verified_table(
     assert row["component_values"]["Staff"] == "44 people (school_year, facility, SY 2025)"
     assert row["address_status"] == "needs_review"
     assert row["bundle_qaqc_status"] == "verified"
+
+
+def test_held_component_bundles_do_not_fall_back_to_verified_component_rows(
+    tmp_path: Path,
+) -> None:
+    def held_bundle_runner(
+        command: Sequence[str],
+        prompt: str,
+        cwd: Path,
+    ) -> subprocess.CompletedProcess[str]:
+        output_path = Path(command[command.index("-o") + 1])
+        if "QAQC Verification" in prompt:
+            child_run_id = output_path.name.removesuffix("-qaqc.json")
+            output_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "occupancy_reviews": [],
+                        "component_reviews": [
+                            {
+                                "lead_index": 0,
+                                "source_url": "https://example.test/school-enrollment",
+                                "verification_status": "verified",
+                                "source_reachable": True,
+                                "evidence_role_match": True,
+                                "component_type_match": True,
+                                "geography_level_match": True,
+                                "recommended_action": "keep",
+                                "review_notes": "Student component is supported.",
+                            }
+                        ],
+                        "component_bundle_reviews": [
+                            {
+                                "bundle_index": 0,
+                                "item_id": f"{child_run_id}-component-bundle-0",
+                                "geography_name": "Example School",
+                                "verification_status": "ambiguous",
+                                "source_lead_indexes_valid": True,
+                                "same_facility_or_geography": True,
+                                "component_fields_match": True,
+                                "completion_status_match": True,
+                                "counts_toward_target_approved": False,
+                                "found_component_types": ["Students"],
+                                "missing_component_types": ["Staff"],
+                                "source_lead_indexes": [0],
+                                "recommended_action": "review",
+                                "review_notes": "Bundle is held because staff is missing.",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+        return successful_runner(command, prompt, cwd)
+
+    client = TestClient(create_app(workspace=tmp_path, runner=held_bundle_runner, background=False))
+    created = client.post(
+        "/api/harvest/run",
+        json={
+            "country": "US",
+            "locality": "Tennessee",
+            "profiles": "schools",
+            "profile": "primary_secondary_education",
+            "target": 1,
+        },
+    ).json()
+    run_id = created["manifest"]["run_id"]
+    lead_path = tmp_path / f"lead_runs/{run_id}.json"
+    qaqc_path = tmp_path / f"qaqc_runs/{run_id}-qaqc.json"
+    lead_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "occupancy_leads": [],
+                "component_leads": [
+                    {
+                        "is_valid_component_report": True,
+                        "source_url": "https://example.test/school-enrollment",
+                        "source_title": "School enrollment",
+                        "source_type": "official",
+                        "evidence_quote": "Enrollment was 512 students in SY 2025.",
+                        "component_data": [
+                            {
+                                "component_type": "Students",
+                                "value": 512,
+                                "unit": "people",
+                                "time_basis": "school_year",
+                                "geography_level": "facility",
+                                "period_label": "SY 2025",
+                            }
+                        ],
+                        "location": {
+                            "facility_name": "Example School",
+                            "specific_address_or_landmark": "10 Main Street",
+                            "city_or_region": "Tennessee",
+                            "country": "US",
+                        },
+                        "geography_name": "Example School",
+                        "country": "US",
+                        "strategy_id": "official_facility_statistics",
+                        "count_semantics": "component_input",
+                        "representativeness": "component_input",
+                    }
+                ],
+                "component_bundles": [
+                    {
+                        "geography_name": "Example School",
+                        "country": "US",
+                        "location": {
+                            "facility_name": "Example School",
+                            "specific_address_or_landmark": "10 Main Street",
+                            "city_or_region": "Tennessee",
+                            "country": "US",
+                        },
+                        "target_component_fields": ["Students", "Staff"],
+                        "found_component_types": ["Students"],
+                        "missing_component_types": ["Staff"],
+                        "source_lead_indexes": [0],
+                        "follow_up_searches_attempted": [],
+                        "completion_status": "partial",
+                        "counts_toward_target": False,
+                        "confidence": "medium",
+                        "completion_notes": "Staff component is missing.",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    qaqc_path.parent.mkdir(exist_ok=True)
+    qaqc_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "occupancy_reviews": [],
+                "component_reviews": [
+                    {
+                        "lead_index": 0,
+                        "source_url": "https://example.test/school-enrollment",
+                        "verification_status": "verified",
+                        "source_reachable": True,
+                        "evidence_role_match": True,
+                        "component_type_match": True,
+                        "geography_level_match": True,
+                        "recommended_action": "keep",
+                        "review_notes": "Student component is supported.",
+                    }
+                ],
+                "component_bundle_reviews": [
+                    {
+                        "bundle_index": 0,
+                        "item_id": f"{run_id}-component-bundle-0",
+                        "geography_name": "Example School",
+                        "verification_status": "ambiguous",
+                        "source_lead_indexes_valid": True,
+                        "same_facility_or_geography": True,
+                        "component_fields_match": True,
+                        "completion_status_match": True,
+                        "counts_toward_target_approved": False,
+                        "found_component_types": ["Students"],
+                        "missing_component_types": ["Staff"],
+                        "source_lead_indexes": [0],
+                        "recommended_action": "review",
+                        "review_notes": "Bundle is held because staff is missing.",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    qaqc = client.post(f"/api/runs/{run_id}/qaqc-run")
+    address = client.post(f"/api/runs/{run_id}/address-run")
+    workflow = client.get(f"/api/runs/{run_id}/workflow-status").json()
+    verified_table = client.get(f"/api/runs/{run_id}/table?mode=verified").json()
+    all_table = client.get(f"/api/runs/{run_id}/table?mode=all").json()
+    component_export = client.get(f"/api/runs/{run_id}/export.components.json").json()
+    transcript = client.get(f"/api/runs/{run_id}/dialogue").text
+
+    assert qaqc.status_code == 200
+    assert address.status_code == 200
+    assert address.json()["address"]["summary"]["expected_count"] == 0
+    assert verified_table["rows"] == []
+    assert all_table["rows"][0]["item_id"] == f"{run_id}-component-bundle-0"
+    assert len(component_export) == 1
+    assert component_export[0]["item_id"] == f"{run_id}-component-0"
+    address_stage = next(stage for stage in workflow["stages"] if stage["id"] == "address")
+    assert address_stage["status"] == "blocked"
+    assert "No QAQC-approved address targets exist" in address_stage["detail"]
+    assert address_stage["metrics"]["held_component_bundle_count"] == 1
+    assert "1 bundle(s) are approved" not in transcript
+    assert "0 bundle(s) are approved" in transcript
+    assert (
+        "No address research was run because QAQC produced no approved address targets"
+        in transcript
+    )
+    assert "Common missing bundle fields" in transcript
 
 
 def test_sample_table_endpoint_aggregates_verified_rows_across_rounds(

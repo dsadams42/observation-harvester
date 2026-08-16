@@ -37,6 +37,247 @@
     };
     const $ = (id) => document.getElementById(id);
     const terminalStatuses = ['completed', 'failed', 'cancelled'];
+    const workspaceTabs = [
+      ['workbenchTab', 'workbench'],
+      ['geometryTab', 'geometry'],
+      ['tableTab', 'table']
+    ];
+    const modeButtons = ['singleMode', 'batchMode', 'campaignMode'];
+    const tableModeButtons = ['tableVerifiedMode', 'tableAllMode'];
+    const curationFilterButtons = [
+      'curationIncludedFilter',
+      'curationExcludedFilter',
+      'curationAllFilter'
+    ];
+    const geometryQueueButtons = ['geocodedQueueTab', 'manualQueueTab'];
+
+    function setStatusMessage(elementId, message, kind = '') {
+      const element = $(elementId);
+      element.textContent = message;
+      element.className = `status ${kind}`.trim();
+      element.setAttribute('role', kind === 'error' ? 'alert' : 'status');
+      element.setAttribute('aria-live', kind === 'error' ? 'assertive' : 'polite');
+    }
+
+    function setHelpText(elementId, message = '', kind = '') {
+      const element = $(elementId);
+      if (!element) return;
+      element.textContent = message;
+      element.className = kind ? `control-help ${kind}` : 'control-help';
+    }
+
+    function setControlEnabled(id, enabled, reason = '') {
+      const element = $(id);
+      if (!element) return;
+      element.disabled = !enabled;
+      element.setAttribute('aria-disabled', String(!enabled));
+      if (enabled || !reason) {
+        element.removeAttribute('title');
+        delete element.dataset.disabledReason;
+      } else {
+        element.title = reason;
+        element.dataset.disabledReason = reason;
+      }
+    }
+
+    function setPressedGroup(activeId, groupIds) {
+      for (const id of groupIds) {
+        const active = id === activeId;
+        $(id).classList.toggle('active', active);
+        $(id).setAttribute('aria-pressed', String(active));
+      }
+    }
+
+    function workflowStage(id) {
+      return (state.workflow?.stages || []).find((stage) => stage.id === id) || null;
+    }
+
+    function workflowStageComplete(id) {
+      return workflowStage(id)?.status === 'complete';
+    }
+
+    function defaultWorkflowStages() {
+      return [
+        {
+          id: 'setup',
+          label: 'Setup Harvest',
+          status: 'ready',
+          detail: 'Choose geography, facility type, mode, and target count.'
+        },
+        {
+          id: 'harvest',
+          label: 'Run Harvest',
+          status: 'blocked',
+          detail: 'Start the guided pipeline or run only the harvest stage.'
+        },
+        {
+          id: 'qaqc',
+          label: 'QAQC',
+          status: 'blocked',
+          detail: 'Unlocks after a harvest is available.'
+        },
+        {
+          id: 'address',
+          label: 'Address Enrichment',
+          status: 'blocked',
+          detail: 'Unlocks after QAQC review.'
+        },
+        {
+          id: 'geometry',
+          label: 'Geocoding / Geometry',
+          status: 'blocked',
+          detail: 'Unlocks after address enrichment.'
+        },
+        {
+          id: 'sample',
+          label: 'Review Dataset / Coverage',
+          status: 'blocked',
+          detail: 'Assemble a dataset, curate rows, and check coverage.'
+        },
+        {
+          id: 'export',
+          label: 'Export',
+          status: 'blocked',
+          detail: 'Download verified records after review.'
+        }
+      ];
+    }
+
+    function actionTarget(actionId) {
+      const targets = {
+        start_full_pipeline: 'runFullPipelineButton',
+        run_qaqc: 'runQaqcButton',
+        run_address: 'runAddressButton',
+        load_geometry: 'loadApprovedButton',
+        create_sample: 'createSampleButton',
+        analyze_coverage: 'analyzeCoverageButton',
+        run_gap_fill: 'runGapFillButton',
+        export_json: state.currentSampleSetId
+          ? 'downloadSampleJsonButton'
+          : 'downloadVerifiedJsonButton'
+      };
+      return targets[actionId] || null;
+    }
+
+    function updateActionAvailability() {
+      const hasRun = Boolean(state.currentRunId);
+      const hasSample = Boolean(state.currentSampleSetId);
+      const hasSelectedGeometry = Boolean(selectedGeometryItem());
+      const hasGeometryItems = state.geometryItems.length > 0;
+      const hasVisibleRows = state.tableVisibleRows.length > 0;
+      const hasTableContext = hasRun || hasSample;
+      const busy = state.fullPipelineActive || Boolean(state.pollTimer) || Boolean(state.samplePollTimer);
+      const canRunQaqc = hasRun && !busy;
+      const canRunAddress = hasRun && workflowStageComplete('qaqc') && !busy;
+      const canGeocode = hasRun && workflowStageComplete('address') && !busy;
+      const canCreateSample = hasRun && workflowStageComplete('qaqc') && !busy;
+      const canUseSample = hasSample && !busy;
+      const canExportRun = hasRun && workflowStageComplete('qaqc');
+      const canLoadApproved = hasRun && workflowStageComplete('qaqc');
+
+      setControlEnabled('runFullPipelineButton', !busy, 'A pipeline or agent stage is already running.');
+      setControlEnabled('runButton', !busy, 'A pipeline or agent stage is already running.');
+      setControlEnabled('runQaqcButton', canRunQaqc, hasRun
+        ? 'Wait for the current job to finish.'
+        : 'Start or select a harvest before QAQC.');
+      setControlEnabled('runAddressButton', canRunAddress, hasRun
+        ? 'Run QAQC before address enrichment.'
+        : 'Start or select a harvest before address enrichment.');
+      setControlEnabled('geocodeButton', canGeocode, hasRun
+        ? 'Run address enrichment before geocoding.'
+        : 'Start or select a harvest before geocoding.');
+      setControlEnabled('copyButton', hasRun || hasGeometryItems || hasSample, 'No JSON output is loaded yet.');
+      setControlEnabled('copyQaqcButton', hasRun, 'Select a run before copying its QAQC prompt.');
+      setControlEnabled('downloadTranscriptButton', hasRun || hasSample, 'Select a run or review dataset first.');
+      setControlEnabled('downloadJsonButton', canExportRun, 'Run QAQC before downloading verified exports.');
+      setControlEnabled('downloadCsvButton', canExportRun, 'Run QAQC before downloading verified exports.');
+      setControlEnabled('createSampleButton', canCreateSample, hasRun
+        ? 'Run QAQC before assembling a review dataset.'
+        : 'Select a run before assembling a review dataset.');
+      setControlEnabled('analyzeCoverageButton', canUseSample, 'Assemble a review dataset before coverage.');
+      setControlEnabled('runGapFillButton', canUseSample, 'Check coverage on a review dataset before follow-ups.');
+      setControlEnabled('runSampleQaqcButton', canUseSample, 'Assemble a review dataset before repair actions.');
+      setControlEnabled('runSampleAddressButton', canUseSample, 'Assemble a review dataset before repair actions.');
+      setControlEnabled('downloadSampleJsonButton', hasSample, 'Assemble a review dataset before sample export.');
+      setControlEnabled('downloadSampleCsvButton', hasSample, 'Assemble a review dataset before sample export.');
+
+      setControlEnabled('loadApprovedButton', canLoadApproved, hasRun
+        ? 'Run QAQC before loading approved observations.'
+        : 'Select a run before loading approved observations.');
+      setControlEnabled('loadAugmentedSampleButton', hasSample, 'Select or assemble a review dataset first.');
+      setControlEnabled('saveFootprintButton', hasSelectedGeometry, 'Select an observation before saving a footprint.');
+      setControlEnabled('skipGeometryButton', hasSelectedGeometry, 'Select an observation before skipping geometry.');
+      setControlEnabled('researchFacilityButton', hasSelectedGeometry, 'Select an observation before research.');
+      setControlEnabled('previewCoordinatesButton', hasSelectedGeometry, 'Select an observation before previewing coordinates.');
+      setControlEnabled('searchAddressButton', hasSelectedGeometry, 'Select an observation before searching an address.');
+      setControlEnabled('placePointButton', hasSelectedGeometry, 'Select an observation before placing a point.');
+      setControlEnabled('useMapCenterButton', hasSelectedGeometry, 'Select an observation before placing a point.');
+      setControlEnabled('saveCoordinateButton', hasSelectedGeometry, 'Select an observation before saving a coordinate.');
+      setControlEnabled('showSampleExtentButton', hasGeometryItems, 'Load geometry observations before showing an extent.');
+      setControlEnabled('zoomSampleExtentButton', hasGeometryItems, 'Load geometry observations before zooming to extent.');
+      setControlEnabled('clearSampleExtentButton', hasGeometryItems, 'Load geometry observations before clearing extent.');
+      setControlEnabled('downloadVerifiedJsonButton', canExportRun, 'Run QAQC before downloading verified exports.');
+      setControlEnabled('downloadVerifiedCsvButton', canExportRun, 'Run QAQC before downloading verified exports.');
+      setControlEnabled('downloadFootprintsButton', hasRun && hasGeometryItems, 'Load geometry observations before footprint export.');
+      setControlEnabled('downloadSampleFootprintsButton', hasSample && hasGeometryItems, 'Load sample geometry before footprint export.');
+
+      setControlEnabled('tableVerifiedMode', hasTableContext, 'Select a run or review dataset first.');
+      setControlEnabled('tableAllMode', hasRun && !hasSample, hasSample
+        ? 'Review datasets show verified rows only.'
+        : 'Select a run before viewing all leads.');
+      setControlEnabled('tableSearch', hasTableContext, 'Select a run or review dataset first.');
+      setControlEnabled('tableClearSearchButton', Boolean($('tableSearch')?.value), 'No table search is active.');
+      setControlEnabled('tableRefreshButton', hasTableContext, 'Select a run or review dataset first.');
+      setControlEnabled('tableCopyButton', hasVisibleRows, 'Load visible rows before copying.');
+      setControlEnabled('tableCsvButton', hasVisibleRows, 'Load visible rows before downloading CSV.');
+      setControlEnabled('approveCurationButton', hasSample, 'Assemble a review dataset before approval.');
+      setControlEnabled('selectVisibleButton', hasVisibleRows, 'Load visible rows before selecting them.');
+      setControlEnabled('excludeSelectedButton', hasSample && state.selectedCurationItemIds.size > 0, 'Select review-dataset rows before excluding.');
+      setControlEnabled('restoreSelectedButton', hasSample && state.selectedCurationItemIds.size > 0, 'Select excluded rows before restoring.');
+
+      setHelpText('resultsActionHelp', hasRun
+        ? 'Manual stages unlock as upstream work completes; the workflow button shows the safest next step.'
+        : 'Start or select a harvest to unlock QAQC, address enrichment, and geocoding.');
+      setHelpText('exportActionHelp', canExportRun
+        ? 'Verified exports are available for this run.'
+        : 'Verified exports unlock after QAQC has produced keep decisions.');
+      setHelpText('geometryLoadHelp', canLoadApproved || hasSample
+        ? 'Load QAQC-approved run observations or review-dataset observations for map review.'
+        : 'Run QAQC first, then load approved observations for geometry review.');
+      setHelpText('geometryActionHelp', hasSelectedGeometry
+        ? 'Selected observation is ready for coordinate or footprint review.'
+        : 'Select an observation before saving a footprint or skipping geometry review.');
+      setHelpText('geometryResolverHelp', hasSelectedGeometry
+        ? 'Use search, pasted coordinates, or map placement, then save the confirmed coordinate.'
+        : 'Select an observation to unlock coordinate search, placement, and save actions.');
+      setHelpText('tableActionHelp', hasVisibleRows
+        ? `${state.tableVisibleRows.length} visible row(s) are ready to copy or download.`
+        : (hasTableContext
+          ? 'Refresh or switch table mode after QAQC to load rows.'
+          : 'Select a run or review dataset to load table rows.'));
+      setHelpText('sampleActionHelp', hasSample
+        ? 'Review-dataset actions are ready; approve curated rows before coverage when prompted.'
+        : (hasRun
+          ? 'Assemble a review dataset after QAQC, then check coverage.'
+          : 'Select a run before assembling a review dataset.'));
+      setHelpText('repairActionHelp', hasSample
+        ? 'Missing-stage fixes and sample exports are available for this review dataset.'
+        : 'Missing-stage fixes and sample exports unlock after review-dataset assembly.');
+      setHelpText('curationActionHelp', state.selectedCurationItemIds.size
+        ? `${state.selectedCurationItemIds.size} row(s) selected for curation.`
+        : 'Select rows only when you want to exclude or restore them; approval with no exclusions is valid.');
+
+      const nextAction = $('workflowNextButton').dataset.action;
+      const nextTarget = actionTarget(nextAction);
+      const nextEnabled = nextAction === 'review_curation' || (
+        nextAction && (!nextTarget || !$(nextTarget).disabled)
+      );
+      setControlEnabled(
+        'workflowNextButton',
+        Boolean(nextEnabled),
+        nextAction ? 'Complete the prerequisite stage first.' : 'No next workflow action is available.'
+      );
+    }
 
     function effectiveTheme(preference) {
       if (preference === 'light' || preference === 'dark') return preference;
@@ -62,14 +303,11 @@
       for (const panel of document.querySelectorAll('[data-workspace]')) {
         panel.classList.toggle('hidden', panel.dataset.workspace !== workspace);
       }
-      for (const [tabId, tabWorkspace] of [
-        ['workbenchTab', 'workbench'],
-        ['geometryTab', 'geometry'],
-        ['tableTab', 'table']
-      ]) {
+      for (const [tabId, tabWorkspace] of workspaceTabs) {
         const active = workspace === tabWorkspace;
         $(tabId).classList.toggle('active', active);
         $(tabId).setAttribute('aria-selected', String(active));
+        $(tabId).setAttribute('aria-pressed', String(active));
       }
       if (workspace === 'geometry') {
         initMap();
@@ -80,6 +318,7 @@
       } else if (workspace === 'table') {
         refreshDataTable().catch((error) => setTableStatus(error.message, 'error'));
       }
+      updateActionAvailability();
     }
 
     function setPipelineStatus(heading, message, kind = '') {
@@ -89,8 +328,7 @@
     }
 
     function setStatus(message, kind = '') {
-      $('status').textContent = message;
-      $('status').className = `status ${kind}`;
+      setStatusMessage('status', message, kind);
     }
 
     function selectedProfileSet() {
@@ -126,15 +364,17 @@
 
     function setMode(mode) {
       state.mode = mode;
-      $('singleMode').classList.toggle('active', mode === 'single');
-      $('batchMode').classList.toggle('active', mode === 'batch');
-      $('campaignMode').classList.toggle('active', mode === 'campaign');
+      const activeId = mode === 'batch'
+        ? 'batchMode'
+        : (mode === 'campaign' ? 'campaignMode' : 'singleMode');
+      setPressedGroup(activeId, modeButtons);
       $('singleLocalityBlock').classList.toggle('hidden', mode === 'campaign');
       $('campaignLocalitiesBlock').classList.toggle('hidden', mode !== 'campaign');
       $('singleFacilityBlock').classList.toggle('hidden', mode === 'campaign');
       $('campaignFacilityBlock').classList.toggle('hidden', mode !== 'campaign');
       $('subtypeBlock').classList.toggle('hidden', mode !== 'single');
       $('profile').disabled = mode !== 'single';
+      updateActionAvailability();
     }
 
     function splitLocalities() {
@@ -178,23 +418,16 @@
     }
 
     function workflowAction(actionId) {
+      if (actionId === 'start_full_pipeline') {
+        runFullPipeline();
+        return;
+      }
       if (actionId === 'review_curation') {
         setWorkspaceTab('table');
         refreshDataTable().catch((error) => setTableStatus(error.message, 'error'));
         return;
       }
-      const targets = {
-        run_qaqc: 'runQaqcButton',
-        run_address: 'runAddressButton',
-        load_geometry: 'loadApprovedButton',
-        create_sample: 'createSampleButton',
-        analyze_coverage: 'analyzeCoverageButton',
-        run_gap_fill: 'runGapFillButton',
-        export_json: state.currentSampleSetId
-          ? 'downloadSampleJsonButton'
-          : 'downloadVerifiedJsonButton'
-      };
-      const target = targets[actionId];
+      const target = actionTarget(actionId);
       if (target) {
         if (actionId === 'load_geometry') setWorkspaceTab('geometry');
         $(target).click();
@@ -203,8 +436,11 @@
 
     function renderWorkflow(payload) {
       state.workflow = payload;
-      const stages = payload?.stages || [];
-      const nextAction = payload?.next_action || null;
+      const stages = payload?.stages || defaultWorkflowStages();
+      const nextAction = payload?.next_action ||
+        (!state.currentRunId && !state.currentSampleSetId
+          ? { id: 'start_full_pipeline', label: 'Start Full Pipeline' }
+          : null);
       $('workflowSummary').textContent = nextAction
         ? `Recommended next: ${nextAction.label}`
         : (stages.length ? 'All available workflow stages are up to date.' :
@@ -246,6 +482,7 @@
           ${action}
         </div>`;
       }).join('');
+      updateActionAvailability();
     }
 
     function renderGeocodingProgress({
@@ -293,6 +530,7 @@
           coverage: 'coverage',
           'gap fill': 'gap_fill',
           'targeted follow-ups': 'gap_fill',
+          'coverage gap follow-ups': 'gap_fill',
           'missing QAQC': 'qaqc',
           'missing address': 'address'
         };
@@ -348,6 +586,7 @@
         : (summary.regional_aggregate_count || 0);
       $('jsonOutput').value = JSON.stringify(leads.length ? leads : { manifest }, null, 2);
       setTableBadge();
+      updateActionAvailability();
     }
 
     function resetResults() {
@@ -374,6 +613,7 @@
       renderGeometryList();
       renderWorkflow(null);
       resetTable('No tabular data loaded.');
+      updateActionAvailability();
     }
 
     async function loadLog(runId) {
@@ -421,6 +661,7 @@
       state.pollTimer = null;
       state.pollPurpose = 'harvest';
       $('cancelButton').disabled = true;
+      updateActionAvailability();
     }
 
     async function pollCurrentRun() {
@@ -437,6 +678,7 @@
       }
       renderResult(manifest, leads);
       $('cancelButton').disabled = !payload.active;
+      updateActionAvailability();
       await loadLog(state.currentRunId);
       await loadDialogue(state.currentRunId);
       await loadWorkflowStatus();
@@ -508,6 +750,7 @@
       state.pollTimer = window.setInterval(() => {
         pollCurrentRun().catch((error) => setStatus(error.message, 'error'));
       }, 1500);
+      updateActionAvailability();
       pollCurrentRun().catch((error) => setStatus(error.message, 'error'));
     }
 
@@ -585,7 +828,7 @@
         if (managed) throw error;
         return null;
       } finally {
-        button.disabled = state.fullPipelineActive;
+        updateActionAvailability();
       }
     }
 
@@ -606,16 +849,18 @@
       for (const button of $('history').querySelectorAll('button[data-run]')) {
         button.addEventListener('click', () => loadRun(button.dataset.run));
       }
+      updateActionAvailability();
     }
 
     async function clearRuns() {
-      if (!window.confirm('Clear recent harvest history and generated lead/log/prompt files?')) {
+      if (!window.confirm('Clear generated harvest history and lead/log/prompt files?')) {
         return;
       }
       const payload = await api('/api/runs/clear', { method: 'POST' });
       resetResults();
       await loadRuns();
       setStatus(`Cleared ${payload.deleted_files} generated file(s).`, 'ok');
+      updateActionAvailability();
     }
 
     async function loadRun(runId) {
@@ -644,6 +889,7 @@
       } else {
         setTableBadge();
       }
+      updateActionAvailability();
     }
 
     const tableColumns = [
@@ -713,8 +959,7 @@
     }
 
     function setTableStatus(message, kind = '') {
-      $('tableStatus').textContent = message;
-      $('tableStatus').className = `status ${kind}`;
+      setStatusMessage('tableStatus', message, kind);
     }
 
     function tableContextLabel() {
@@ -749,12 +994,15 @@
       $('tableEmpty').classList.remove('hidden');
       $('tableEmpty').textContent = message;
       setTableBadge();
+      updateActionAvailability();
     }
 
     function setTableMode(mode) {
       state.tableMode = mode === 'all' ? 'all' : 'verified';
-      $('tableVerifiedMode').classList.toggle('active', state.tableMode === 'verified');
-      $('tableAllMode').classList.toggle('active', state.tableMode === 'all');
+      setPressedGroup(
+        state.tableMode === 'all' ? 'tableAllMode' : 'tableVerifiedMode',
+        tableModeButtons
+      );
       refreshDataTable().catch((error) => setTableStatus(error.message, 'error'));
     }
 
@@ -775,6 +1023,12 @@
       $('curationIncludedFilter').classList.toggle('active', state.curationFilter === 'included');
       $('curationExcludedFilter').classList.toggle('active', state.curationFilter === 'excluded');
       $('curationAllFilter').classList.toggle('active', state.curationFilter === 'all');
+      setPressedGroup(
+        state.curationFilter === 'excluded'
+          ? 'curationExcludedFilter'
+          : (state.curationFilter === 'all' ? 'curationAllFilter' : 'curationIncludedFilter'),
+        curationFilterButtons
+      );
       renderDataTable();
     }
 
@@ -794,6 +1048,7 @@
       $('approveCurationButton').textContent = summary.approval_status === 'approved'
         ? 'Reapprove & Check Coverage'
         : 'Approve Dataset & Check Coverage';
+      updateActionAvailability();
     }
 
     async function refreshDataTable() {
@@ -802,8 +1057,7 @@
       $('tableAllMode').disabled = Boolean(state.currentSampleSetId);
       if (state.currentSampleSetId && state.tableMode === 'all') {
         state.tableMode = 'verified';
-        $('tableVerifiedMode').classList.add('active');
-        $('tableAllMode').classList.remove('active');
+        setPressedGroup('tableVerifiedMode', tableModeButtons);
       }
       if (!endpoint) {
         resetTable('No run or review dataset selected.');
@@ -829,6 +1083,7 @@
         );
         setTableStatus(error.message, 'error');
       }
+      updateActionAvailability();
     }
 
     function tableCellValue(row, key) {
@@ -926,6 +1181,7 @@
         return `<tr${rowClass} data-row-id="${escapeHtml(row.row_id || '')}">${cells}</tr>`;
       }).join('');
       renderCurationSummary();
+      updateActionAvailability();
     }
 
     function csvEscape(value) {
@@ -1085,7 +1341,7 @@
         if (managed) throw error;
         return null;
       } finally {
-        button.disabled = state.fullPipelineActive;
+        updateActionAvailability();
       }
     }
 
@@ -1115,18 +1371,18 @@
         if (managed) throw error;
         return null;
       } finally {
-        button.disabled = state.fullPipelineActive;
+        updateActionAvailability();
       }
     }
 
     function setSampleStatus(message, kind = '') {
-      $('sampleStatus').textContent = message;
-      $('sampleStatus').className = `status ${kind}`;
+      setStatusMessage('sampleStatus', message, kind);
     }
 
     function stopSamplePolling() {
       if (state.samplePollTimer) window.clearInterval(state.samplePollTimer);
       state.samplePollTimer = null;
+      updateActionAvailability();
     }
 
     async function loadSampleLog(sampleSetId) {
@@ -1161,6 +1417,7 @@
         setSampleStatus(`${state.samplePollPurpose} complete.`, 'ok');
       }
       if (state.activeWorkspace === 'table') await refreshDataTable();
+      updateActionAvailability();
       return payload;
     }
 
@@ -1171,6 +1428,7 @@
       state.samplePollTimer = window.setInterval(() => {
         pollSampleSet().catch((error) => setSampleStatus(error.message, 'error'));
       }, 1500);
+      updateActionAvailability();
       pollSampleSet().catch((error) => setSampleStatus(error.message, 'error'));
     }
 
@@ -1187,6 +1445,7 @@
       if (state.activeWorkspace === 'table') await refreshDataTable();
       await loadWorkflowStatus();
       await loadDialogue();
+      updateActionAvailability();
       return payload;
     }
 
@@ -1219,6 +1478,7 @@
       if (payload.started && !managed) {
         startSamplePolling(state.currentSampleSetId, 'coverage');
       }
+      updateActionAvailability();
       return payload;
     }
 
@@ -1260,6 +1520,7 @@
       ]) {
         $(id).disabled = disabled;
       }
+      updateActionAvailability();
     }
 
     async function runFullPipeline() {
@@ -1335,7 +1596,7 @@
         stopPolling();
         stopSamplePolling();
         state.fullPipelineActive = false;
-        setPipelineControlsDisabled(false);
+        updateActionAvailability();
       }
     }
 
@@ -1351,7 +1612,8 @@
       $('sampleOutput').value = JSON.stringify(payload, null, 2);
       setSampleStatus('Targeted follow-ups started.', 'ok');
       if (state.activeWorkspace === 'table') await refreshDataTable();
-      if (payload.started) startSamplePolling(state.currentSampleSetId, 'targeted follow-ups');
+      if (payload.started) startSamplePolling(state.currentSampleSetId, 'coverage gap follow-ups');
+      updateActionAvailability();
     }
 
     async function runSampleQaqcMissing() {
@@ -1368,6 +1630,7 @@
       );
       if (state.activeWorkspace === 'table') await refreshDataTable();
       if (payload.started) startSamplePolling(state.currentSampleSetId, 'missing QAQC');
+      updateActionAvailability();
     }
 
     async function runSampleAddressMissing() {
@@ -1384,11 +1647,11 @@
       );
       if (state.activeWorkspace === 'table') await refreshDataTable();
       if (payload.started) startSamplePolling(state.currentSampleSetId, 'missing address');
+      updateActionAvailability();
     }
 
     function setGeometryStatus(message, kind = '') {
-      $('geometryStatus').textContent = message;
-      $('geometryStatus').className = `status ${kind}`;
+      setStatusMessage('geometryStatus', message, kind);
     }
 
     function setAutomatedGeocodeStatus(message, kind = '') {
@@ -1466,7 +1729,7 @@
     function geometryRoundLabel(item) {
       const round = geometryRound(item);
       if (!round) return 'current run';
-      return round === 1 ? 'round 1' : `targeted follow-up round ${round}`;
+      return round === 1 ? 'round 1' : `coverage gap follow-up round ${round}`;
     }
 
     function geometryColor(item) {
@@ -1555,6 +1818,7 @@
     function setGeometryListTab(tab) {
       state.geometryListTab = tab === 'manual' ? 'manual' : 'geocoded';
       renderGeometryList();
+      updateActionAvailability();
     }
 
     function chooseGeometryListTabForLoadedItems() {
@@ -1575,6 +1839,10 @@
       $('manualQueueTab').setAttribute(
         'aria-selected',
         String(state.geometryListTab === 'manual')
+      );
+      setPressedGroup(
+        state.geometryListTab === 'manual' ? 'manualQueueTab' : 'geocodedQueueTab',
+        geometryQueueButtons
       );
     }
 
@@ -1600,6 +1868,7 @@
       renderInterventionQueue();
       renderGeometryQueueTabs();
       updateGeometrySummary();
+      updateActionAvailability();
     }
 
     function pointFromGeometry(item) {
@@ -1647,6 +1916,7 @@
       state.sampleExtentVisible = false;
       updateGeometrySummary();
       setGeometryStatus('Sample extent cleared.', 'ok');
+      updateActionAvailability();
     }
 
     function renderSampleExtent(fit = false) {
@@ -1724,7 +1994,10 @@
       state.selectedGeometryItemId = itemId;
       renderGeometryList();
       const item = selectedGeometryItem();
-      if (!item) return;
+      if (!item) {
+        updateActionAvailability();
+        return;
+      }
       state.coordinatePlacementMode = false;
       state.pendingCoordinatePreview = null;
       $('map').classList.remove('placement-active');
@@ -1768,6 +2041,7 @@
         state.drawnItems.addLayer(layer);
         state.map.fitBounds(layer.getBounds());
       }
+      updateActionAvailability();
     }
 
     function setResolutionLink(elementId, url) {
@@ -1932,6 +2206,7 @@
       }
       setGeometryStatus(`Loaded ${state.geometryItems.length} QAQC-approved observation(s).`, 'ok');
       if (state.sampleExtentVisible) renderSampleExtent(false);
+      updateActionAvailability();
     }
 
     async function loadGeometryItemsForAutomatedGeocoding() {
@@ -1954,6 +2229,7 @@
         `Prepared ${state.geometryItems.length} accepted observation(s) for geocoding.`,
         'ok'
       );
+      updateActionAvailability();
       return true;
     }
 
@@ -1986,10 +2262,11 @@
         renderCandidateOptions(null);
       }
       setGeometryStatus(
-        `Loaded ${state.geometryItems.length} augmented sample observation(s).`,
+        `Loaded ${state.geometryItems.length} review dataset observation(s).`,
         'ok'
       );
       if (state.sampleExtentVisible) renderSampleExtent(true);
+      updateActionAvailability();
     }
 
     function currentPointPayload(source = 'user') {
@@ -2049,6 +2326,7 @@
           : `Coordinate assignment requires human review: ${payload.spatial_validation.reason}`,
         payload.geocode_result ? 'ok' : ''
       );
+      updateActionAvailability();
     }
 
     async function researchSelectedFacility() {
@@ -2105,7 +2383,7 @@
           'ok'
         );
       } finally {
-        button.disabled = false;
+        updateActionAvailability();
       }
     }
 
@@ -2279,7 +2557,7 @@
           errors: errorCount
         };
       } finally {
-        button.disabled = state.fullPipelineActive;
+        updateActionAvailability();
       }
     }
 
@@ -2331,7 +2609,7 @@
           validation.warning ? 'error' : 'ok'
         );
       } finally {
-        button.disabled = false;
+        updateActionAvailability();
       }
     }
 
@@ -2348,6 +2626,7 @@
       $('coordinateDraftStatus').textContent =
         'Draft coordinate placed at the map center. Select Save Coordinate to confirm it.';
       setGeometryStatus('Point set from map center.', 'ok');
+      updateActionAvailability();
     }
 
     function startPointPlacement() {
@@ -2361,6 +2640,7 @@
       $('coordinateDraftStatus').textContent =
         'Placement mode active: click the facility location on the map.';
       setGeometryStatus('Click the facility location on the map.', 'ok');
+      updateActionAvailability();
     }
 
     async function saveCoordinate() {
@@ -2475,6 +2755,7 @@
       setGeometryStatus(`Geometry saved: ${item.geometry_status}.${areaMessage}`, 'ok');
       await loadWorkflowStatus();
       await loadDialogue();
+      updateActionAvailability();
     }
 
     async function exitApplication() {
@@ -2551,6 +2832,25 @@
       );
     }
 
+    function bindTabKeyboard(tabEntries, activate) {
+      const ids = tabEntries.map(([id]) => id);
+      for (const [id, value] of tabEntries) {
+        $(id).addEventListener('keydown', (event) => {
+          if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+          event.preventDefault();
+          const currentIndex = ids.indexOf(id);
+          let nextIndex = currentIndex;
+          if (event.key === 'Home') nextIndex = 0;
+          else if (event.key === 'End') nextIndex = ids.length - 1;
+          else if (event.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + ids.length) % ids.length;
+          else if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % ids.length;
+          const [nextId, nextValue] = tabEntries[nextIndex];
+          $(nextId).focus();
+          activate(nextValue);
+        });
+      }
+    }
+
     async function boot() {
       initTheme();
       setWorkspaceTab('workbench');
@@ -2566,6 +2866,7 @@
       $('workbenchTab').addEventListener('click', () => setWorkspaceTab('workbench'));
       $('geometryTab').addEventListener('click', () => setWorkspaceTab('geometry'));
       $('tableTab').addEventListener('click', () => setWorkspaceTab('table'));
+      bindTabKeyboard(workspaceTabs, setWorkspaceTab);
       $('profileSet').addEventListener('change', renderProfiles);
       $('singleMode').addEventListener('click', () => setMode('single'));
       $('batchMode').addEventListener('click', () => setMode('batch'));
@@ -2643,7 +2944,10 @@
           (error) => setTableStatus(error.message, 'error')
         );
       });
-      $('tableSearch').addEventListener('input', renderDataTable);
+      $('tableSearch').addEventListener('input', () => {
+        renderDataTable();
+        updateActionAvailability();
+      });
       $('tableClearSearchButton').addEventListener('click', () => {
         $('tableSearch').value = '';
         renderDataTable();
@@ -2681,6 +2985,7 @@
         if (checkbox.checked) state.selectedCurationItemIds.add(itemId);
         else state.selectedCurationItemIds.delete(itemId);
         renderCurationSummary();
+        updateActionAvailability();
       });
       $('loadApprovedButton').addEventListener('click', () => {
         loadApprovedGeometry().catch((error) => setGeometryStatus(error.message, 'error'));

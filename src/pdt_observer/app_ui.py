@@ -35,13 +35,23 @@ INDEX_HTML = r"""<!doctype html>
         </div>
       </div>
     </div>
-    <div class="theme-control">
-      <label for="themeSelect">Theme</label>
-      <select id="themeSelect">
-        <option value="system">System</option>
-        <option value="light">Light</option>
-        <option value="dark">Dark</option>
-      </select>
+    <div class="header-actions">
+      <div class="theme-control">
+        <label for="themeSelect">Theme</label>
+        <select id="themeSelect">
+          <option value="system">System</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+      </div>
+      <button
+        id="exitButton"
+        class="secondary"
+        type="button"
+        title="Closes the local OASIS server; closing this tab only closes the browser view."
+      >
+        Exit OASIS
+      </button>
     </div>
   </header>
   <nav class="workspace-tabs" role="tablist" aria-label="Application workspaces">
@@ -51,6 +61,7 @@ INDEX_HTML = r"""<!doctype html>
       type="button"
       role="tab"
       aria-selected="true"
+      aria-pressed="true"
       aria-controls="harvestSetup resultsPanel samplePanel"
     >
       Agentic Workbench
@@ -60,6 +71,7 @@ INDEX_HTML = r"""<!doctype html>
       type="button"
       role="tab"
       aria-selected="false"
+      aria-pressed="false"
       aria-controls="geometryPanel"
     >
       Geometry Studio <span id="geometryTabBadge" class="tab-badge">0</span>
@@ -69,14 +81,24 @@ INDEX_HTML = r"""<!doctype html>
       type="button"
       role="tab"
       aria-selected="false"
+      aria-pressed="false"
       aria-controls="dataTablePanel"
     >
       Tabular Data <span id="tableTabBadge" class="tab-badge">0</span>
     </button>
   </nav>
   <main>
-    <section id="harvestSetup" data-workspace="workbench">
-      <h2>New Harvest</h2>
+    <section
+      id="harvestSetup"
+      data-workspace="workbench"
+      role="tabpanel"
+      aria-labelledby="workbenchTab"
+    >
+      <h2>Setup Harvest</h2>
+      <div class="friendly-empty">
+        Start with <strong>Run Full Pipeline</strong> for the guided pilot workflow. Manual
+        harvest-only controls are available in advanced options.
+      </div>
       <label for="country">Country</label>
       <input id="country" value="US" autocomplete="off">
 
@@ -127,31 +149,48 @@ INDEX_HTML = r"""<!doctype html>
         </div>
         <div>
           <label>Mode</label>
-          <div class="mode">
-            <button id="singleMode" class="active" type="button">Single</button>
-            <button id="batchMode" type="button">Batch</button>
-            <button id="campaignMode" type="button">Campaign</button>
+          <div class="mode" role="group" aria-label="Harvest mode">
+            <button id="singleMode" class="active" type="button" aria-pressed="true">Single</button>
+            <button id="batchMode" type="button" aria-pressed="false">Batch</button>
+            <button id="campaignMode" type="button" aria-pressed="false">Campaign</button>
           </div>
         </div>
       </div>
 
       <div class="actions">
         <button id="runFullPipelineButton" type="button">Run Full Pipeline</button>
-        <button id="runButton" type="button">Run Harvest</button>
         <button id="refreshButton" class="secondary" type="button">Refresh Runs</button>
-        <button id="clearRunsButton" class="secondary" type="button">Clear All</button>
+        <button id="clearRunsButton" class="secondary" type="button">Clear Generated Runs</button>
+      </div>
+      <div id="setupActionHelp" class="control-help">
+        Guided mode will pause before coverage approval so you can review the dataset.
       </div>
       <div class="pipeline-callout">
         <strong id="fullPipelineHeading">Guided end-to-end workflow</strong>
-        <span id="fullPipelineStatus">
+        <span id="fullPipelineStatus" role="status" aria-live="polite">
           Runs through review dataset assembly, then pauses for optional exclusions and approval.
         </span>
       </div>
-      <div id="status" class="status">Ready.</div>
+      <details class="action-group">
+        <summary>Advanced manual stages</summary>
+        <div class="actions">
+          <button id="runButton" class="secondary" type="button">Run Harvest Only</button>
+        </div>
+        <div class="control-help">
+          Use harvest-only when you want to run discovery first, then manually trigger QAQC,
+          address enrichment, geometry review, and coverage steps.
+        </div>
+      </details>
+      <div id="status" class="status" role="status" aria-live="polite">Ready.</div>
       <div class="history" id="history"></div>
     </section>
 
-    <section id="resultsPanel" data-workspace="workbench">
+    <section
+      id="resultsPanel"
+      data-workspace="workbench"
+      role="tabpanel"
+      aria-labelledby="workbenchTab"
+    >
       <h2>Results</h2>
       <div class="workflow-panel">
         <div class="workflow-header">
@@ -161,7 +200,7 @@ INDEX_HTML = r"""<!doctype html>
               Start or select a harvest to see the full workflow.
             </div>
           </div>
-          <button id="workflowNextButton" class="secondary" type="button" disabled>
+          <button id="workflowNextButton" type="button">
             Next action
           </button>
         </div>
@@ -178,97 +217,137 @@ INDEX_HTML = r"""<!doctype html>
         </div>
       </div>
       <div class="actions">
-        <button id="runQaqcButton" class="secondary" type="button">Run QAQC</button>
-        <button id="runAddressButton" class="secondary" type="button">
+        <button id="runQaqcButton" class="secondary" type="button" disabled>Run QAQC</button>
+        <button id="runAddressButton" class="secondary" type="button" disabled>
           Run Address Enrichment
         </button>
-        <button id="geocodeButton" class="secondary" type="button">
-          Geocode All Accepted
+        <button id="geocodeButton" class="secondary" type="button" disabled>
+          Geocode QAQC-Approved Observations
         </button>
       </div>
+      <div id="resultsActionHelp" class="control-help">
+        Start or select a completed harvest to unlock QAQC, address enrichment, and geocoding.
+      </div>
       <details class="action-group">
-        <summary>Prompts, JSON, and exports</summary>
+        <summary>Raw outputs and prompts</summary>
         <div class="actions">
-          <button id="copyButton" class="secondary" type="button">Copy JSON</button>
-          <button id="copyQaqcButton" class="secondary" type="button">Copy QAQC Prompt</button>
-          <button id="downloadJsonButton" class="secondary" type="button">
+          <button id="copyButton" class="secondary" type="button" disabled>Copy JSON</button>
+          <button id="copyQaqcButton" class="secondary" type="button" disabled>
+            Copy QAQC Prompt
+          </button>
+        </div>
+        <textarea
+          id="jsonOutput"
+          class="output-panel"
+          spellcheck="false"
+          placeholder="Harvest JSON will appear here."
+        ></textarea>
+      </details>
+      <details class="action-group">
+        <summary>Exports</summary>
+        <div class="actions">
+          <button id="downloadJsonButton" class="secondary" type="button" disabled>
             Download Verified JSON
           </button>
-          <button id="downloadCsvButton" class="secondary" type="button">
+          <button id="downloadCsvButton" class="secondary" type="button" disabled>
             Download Verified CSV
           </button>
         </div>
+        <div id="exportActionHelp" class="control-help">
+          Verified exports unlock after QAQC has produced keep decisions.
+        </div>
       </details>
-      <textarea
-        id="jsonOutput"
-        spellcheck="false"
-        placeholder="Harvest JSON will appear here."
-      ></textarea>
 
-      <div class="section-heading">
-        <h2>Full Pipeline Transcript</h2>
-        <button id="downloadTranscriptButton" class="secondary" type="button">
-          Download Transcript (.txt)
-        </button>
-      </div>
-      <textarea
-        id="dialogueOutput"
-        class="dialogue"
-        spellcheck="false"
-        readonly
-        placeholder="The geographer, harvester, and review agents will report their findings here."
-      ></textarea>
+      <details class="action-group">
+        <summary>Agent transcript and activity</summary>
+        <div class="section-heading">
+          <h2>Full Pipeline Transcript</h2>
+          <button id="downloadTranscriptButton" class="secondary" type="button" disabled>
+            Download Transcript (.txt)
+          </button>
+        </div>
+        <textarea
+          id="dialogueOutput"
+          class="dialogue output-panel"
+          spellcheck="false"
+          readonly
+          aria-label="Full pipeline transcript"
+          placeholder="Pipeline transcript will appear here."
+        ></textarea>
 
-      <h2>Agent Activity</h2>
-      <div class="actions">
-        <button id="cancelButton" class="secondary" type="button" disabled>Cancel Run</button>
-        <button id="exitButton" class="secondary" type="button">Exit Application</button>
-      </div>
-      <textarea
-        id="activityOutput"
-        class="activity"
-        spellcheck="false"
-        readonly
-        placeholder="Agent activity will appear here while a harvest runs."
-      ></textarea>
+        <h2>Agent Activity</h2>
+        <div class="actions">
+          <button id="cancelButton" class="secondary" type="button" disabled>Cancel Run</button>
+        </div>
+        <textarea
+          id="activityOutput"
+          class="activity output-panel"
+          spellcheck="false"
+          readonly
+          aria-label="Agent activity log"
+          placeholder="Agent activity will appear here while a harvest runs."
+        ></textarea>
+      </details>
     </section>
 
-    <section id="geometryPanel" class="wide hidden" data-workspace="geometry">
+    <section
+      id="geometryPanel"
+      class="wide hidden"
+      data-workspace="geometry"
+      role="tabpanel"
+      aria-labelledby="geometryTab"
+    >
       <h2>Geometry Studio</h2>
       <div class="workflow-summary">
         Resolve coordinates, inspect spatial placement, digitize building footprints, and
         calculate planar area.
       </div>
+      <div class="friendly-empty">
+        Load approved observations after QAQC and address enrichment, then resolve only the
+        locations that need human judgment.
+      </div>
       <div class="actions">
-        <button id="loadApprovedButton" class="secondary" type="button">Load Approved</button>
-        <button id="loadAugmentedSampleButton" class="secondary" type="button">
-          Load Augmented Sample
+        <button id="loadApprovedButton" class="secondary" type="button" disabled>
+          Load QAQC-Approved Observations
         </button>
-        <button id="saveFootprintButton" class="secondary" type="button">Save Footprint</button>
-        <button id="skipGeometryButton" class="secondary" type="button">Skip</button>
+        <button id="loadAugmentedSampleButton" class="secondary" type="button" disabled>
+          Load Review Dataset Observations
+        </button>
+      </div>
+      <div id="geometryLoadHelp" class="control-help">
+        Select a run or review dataset before loading geometry items.
+      </div>
+      <div class="actions">
+        <button id="saveFootprintButton" class="secondary" type="button" disabled>
+          Save Footprint
+        </button>
+        <button id="skipGeometryButton" class="secondary" type="button" disabled>Skip</button>
+      </div>
+      <div id="geometryActionHelp" class="control-help">
+        Select an observation before saving a footprint or skipping geometry review.
       </div>
       <details class="action-group">
-        <summary>Map view and geometry exports</summary>
+        <summary>Map view and exports</summary>
         <div class="actions">
-          <button id="showSampleExtentButton" class="secondary" type="button">
+          <button id="showSampleExtentButton" class="secondary" type="button" disabled>
             Show Sample Extent
           </button>
-          <button id="zoomSampleExtentButton" class="secondary" type="button">
+          <button id="zoomSampleExtentButton" class="secondary" type="button" disabled>
             Zoom To Extent
           </button>
-          <button id="clearSampleExtentButton" class="secondary" type="button">
+          <button id="clearSampleExtentButton" class="secondary" type="button" disabled>
             Clear Extent
           </button>
-          <button id="downloadVerifiedJsonButton" class="secondary" type="button">
+          <button id="downloadVerifiedJsonButton" class="secondary" type="button" disabled>
             Download Verified JSON
           </button>
-          <button id="downloadVerifiedCsvButton" class="secondary" type="button">
+          <button id="downloadVerifiedCsvButton" class="secondary" type="button" disabled>
             Download Verified CSV
           </button>
-          <button id="downloadFootprintsButton" class="secondary" type="button">
+          <button id="downloadFootprintsButton" class="secondary" type="button" disabled>
             Download Footprints GeoJSON
           </button>
-          <button id="downloadSampleFootprintsButton" class="secondary" type="button">
+          <button id="downloadSampleFootprintsButton" class="secondary" type="button" disabled>
             Download Sample Footprints
           </button>
         </div>
@@ -276,7 +355,9 @@ INDEX_HTML = r"""<!doctype html>
       <div class="extent-summary" id="geometryExtentSummary">
         Extent: load approved observations, then geocode or save points to map the sample.
       </div>
-      <div class="status" id="geometryStatus">Load QAQC-approved observations to begin.</div>
+      <div id="geometryStatus" class="status" role="status" aria-live="polite">
+        Load approved observations after QAQC and address enrichment.
+      </div>
       <div class="intervention-panel">
         <h3>Coordinate Assignment Required - <span id="interventionCount">0</span></h3>
         <div class="workflow-summary">
@@ -296,6 +377,7 @@ INDEX_HTML = r"""<!doctype html>
               type="button"
               role="tab"
               aria-selected="true"
+              aria-pressed="true"
             >
               Geocoded <span id="geocodedQueueCount">0</span>
             </button>
@@ -304,6 +386,7 @@ INDEX_HTML = r"""<!doctype html>
               type="button"
               role="tab"
               aria-selected="false"
+              aria-pressed="false"
             >
               Needs Manual Geocoding <span id="manualQueueCount">0</span>
             </button>
@@ -329,7 +412,7 @@ INDEX_HTML = r"""<!doctype html>
               </a>
             </div>
             <div class="actions">
-              <button id="researchFacilityButton" class="secondary" type="button">
+              <button id="researchFacilityButton" class="secondary" type="button" disabled>
                 Research This Facility
               </button>
             </div>
@@ -344,34 +427,37 @@ INDEX_HTML = r"""<!doctype html>
               placeholder="33.7490, -84.3880 or paste a Google Maps URL"
             >
             <div class="actions">
-              <button id="previewCoordinatesButton" class="secondary" type="button">
+              <button id="previewCoordinatesButton" class="secondary" type="button" disabled>
                 Preview Coordinate
               </button>
             </div>
-            <div id="coordinatePasteStatus" class="status">
+            <div id="coordinatePasteStatus" class="status" role="status" aria-live="polite">
               Preview pasted coordinates before saving them.
             </div>
             <label for="manualAddress">Corrected Address or Place</label>
             <input id="manualAddress" placeholder="Enter a corrected facility address">
             <div class="actions">
-              <button id="searchAddressButton" class="secondary" type="button">
+              <button id="searchAddressButton" class="secondary" type="button" disabled>
                 Search Corrected Address
               </button>
-              <button id="placePointButton" class="secondary" type="button">
+              <button id="placePointButton" class="secondary" type="button" disabled>
                 Place Point on Map
               </button>
-              <button id="useMapCenterButton" class="secondary" type="button">
+              <button id="useMapCenterButton" class="secondary" type="button" disabled>
                 Place at Map Center
               </button>
-              <button id="saveCoordinateButton" type="button">Save Coordinate</button>
+              <button id="saveCoordinateButton" type="button" disabled>Save Coordinate</button>
             </div>
             <label for="coordinateReviewNotes">Coordinate Review Notes</label>
             <input
               id="coordinateReviewNotes"
               placeholder="Optional evidence or reasoning for the manual assignment"
             >
-            <div id="coordinateDraftStatus" class="status">
+            <div id="coordinateDraftStatus" class="status" role="status" aria-live="polite">
               No coordinate change is waiting to be saved.
+            </div>
+            <div id="geometryResolverHelp" class="control-help">
+              Select an observation to unlock coordinate search, placement, and save actions.
             </div>
           </div>
           <label for="geometryDetail">Selected Observation</label>
@@ -386,27 +472,54 @@ INDEX_HTML = r"""<!doctype html>
       </div>
     </section>
 
-    <section id="dataTablePanel" class="wide hidden" data-workspace="table">
+    <section
+      id="dataTablePanel"
+      class="wide hidden"
+      data-workspace="table"
+      role="tabpanel"
+      aria-labelledby="tableTab"
+    >
       <h2>Tabular Data</h2>
       <div class="workflow-summary" id="tableContext">
-        Select a run or review dataset to inspect collected observations as rows.
+        Select or assemble a review dataset to inspect collected observations as rows.
+      </div>
+      <div class="friendly-empty">
+        This workspace becomes most useful after QAQC or review-dataset assembly. Use it to
+        search, curate, copy, and export visible rows.
       </div>
       <div class="table-toolbar">
         <div>
           <label>Rows</label>
-          <div class="table-mode">
-            <button id="tableVerifiedMode" class="active" type="button">Verified Only</button>
-            <button id="tableAllMode" type="button">All Leads</button>
+          <div class="table-mode" role="group" aria-label="Table row mode">
+            <button
+              id="tableVerifiedMode"
+              class="active"
+              type="button"
+              aria-pressed="true"
+              disabled
+            >
+              Verified Only
+            </button>
+            <button id="tableAllMode" type="button" aria-pressed="false" disabled>All Leads</button>
           </div>
         </div>
         <div>
           <label for="tableSearch">Search</label>
-          <input id="tableSearch" placeholder="Filter visible rows">
+          <input id="tableSearch" placeholder="Filter visible rows" disabled>
         </div>
-        <button id="tableClearSearchButton" class="secondary" type="button">Clear Search</button>
-        <button id="tableRefreshButton" class="secondary" type="button">Refresh Table</button>
-        <button id="tableCopyButton" class="secondary" type="button">Copy Visible Rows</button>
-        <button id="tableCsvButton" class="secondary" type="button">Download CSV</button>
+        <button id="tableClearSearchButton" class="secondary" type="button" disabled>
+          Clear Search
+        </button>
+        <button id="tableRefreshButton" class="secondary" type="button" disabled>
+          Refresh Table
+        </button>
+        <button id="tableCopyButton" class="secondary" type="button" disabled>
+          Copy Visible Rows
+        </button>
+        <button id="tableCsvButton" class="secondary" type="button" disabled>Download CSV</button>
+      </div>
+      <div id="tableActionHelp" class="control-help">
+        Select a run or review dataset to load table rows.
       </div>
       <div id="curationPanel" class="curation-panel hidden">
         <div class="workflow-header">
@@ -416,22 +529,38 @@ INDEX_HTML = r"""<!doctype html>
               Approve all observations, or select only those that should be excluded.
             </div>
           </div>
-          <button id="approveCurationButton" type="button">
+          <button id="approveCurationButton" type="button" disabled>
             Approve Dataset &amp; Check Coverage
           </button>
         </div>
         <div class="curation-controls">
           <div>
             <label>Show</label>
-            <div class="curation-filter">
-              <button id="curationIncludedFilter" class="secondary active" type="button">
+            <div class="curation-filter" role="group" aria-label="Curation filter">
+              <button
+                id="curationIncludedFilter"
+                class="secondary active"
+                type="button"
+                aria-pressed="true"
+              >
                 Included
               </button>
-              <button id="curationExcludedFilter" class="secondary" type="button">Excluded</button>
-              <button id="curationAllFilter" class="secondary" type="button">All</button>
+              <button
+                id="curationExcludedFilter"
+                class="secondary"
+                type="button"
+                aria-pressed="false"
+              >
+                Excluded
+              </button>
+              <button id="curationAllFilter" class="secondary" type="button" aria-pressed="false">
+                All
+              </button>
             </div>
           </div>
-          <button id="selectVisibleButton" class="secondary" type="button">Select Visible</button>
+          <button id="selectVisibleButton" class="secondary" type="button" disabled>
+            Select Visible
+          </button>
           <div>
             <label for="exclusionReason">Exclusion reason</label>
             <select id="exclusionReason">
@@ -450,15 +579,19 @@ INDEX_HTML = r"""<!doctype html>
             <label for="exclusionNote">Reasoning (optional)</label>
             <input id="exclusionNote" placeholder="Brief context for the coverage agent">
           </div>
-          <button id="excludeSelectedButton" class="secondary" type="button">
+          <button id="excludeSelectedButton" class="secondary" type="button" disabled>
             Exclude Selected
           </button>
-          <button id="restoreSelectedButton" class="secondary" type="button">
+          <button id="restoreSelectedButton" class="secondary" type="button" disabled>
             Restore Selected
           </button>
         </div>
-        <div id="curationStatus" class="status">
+        <div id="curationStatus" class="status" role="status" aria-live="polite">
           No individual review is required. Approval with no exclusions is valid.
+        </div>
+        <div id="curationActionHelp" class="control-help">
+          Select rows only when you want to exclude or restore them; approval with no
+          exclusions is valid.
         </div>
       </div>
       <div class="summary">
@@ -467,7 +600,7 @@ INDEX_HTML = r"""<!doctype html>
         <div class="metric"><span>Rows</span><strong id="tableMetricRows">0</strong></div>
         <div class="metric"><span>Visible</span><strong id="tableMetricVisible">0</strong></div>
       </div>
-      <div id="tableStatus" class="status">Ready.</div>
+      <div id="tableStatus" class="status" role="status" aria-live="polite">Ready.</div>
       <div id="tableEmpty" class="table-empty">
         No tabular data loaded.
       </div>
@@ -479,45 +612,58 @@ INDEX_HTML = r"""<!doctype html>
       </div>
     </section>
 
-    <section id="samplePanel" class="wide" data-workspace="workbench">
+    <section
+      id="samplePanel"
+      class="wide"
+      data-workspace="workbench"
+      role="tabpanel"
+      aria-labelledby="workbenchTab"
+    >
       <h2>Review Dataset / Coverage</h2>
       <div class="actions">
-        <button id="createSampleButton" class="secondary" type="button">
+        <button id="createSampleButton" class="secondary" type="button" disabled>
           Assemble Review Dataset
         </button>
-        <button id="analyzeCoverageButton" class="secondary" type="button">
+        <button id="analyzeCoverageButton" class="secondary" type="button" disabled>
           Check Coverage
         </button>
-        <button id="runGapFillButton" class="secondary" type="button">
-          Run Targeted Follow-ups
+        <button id="runGapFillButton" class="secondary" type="button" disabled>
+          Run Coverage Gap Follow-ups
         </button>
       </div>
+      <div id="sampleActionHelp" class="control-help">
+        Assemble a review dataset from a selected run before coverage or follow-up work.
+      </div>
       <details class="action-group">
-        <summary>Repair passes and review dataset exports</summary>
+        <summary>Fix Missing Pipeline Stages</summary>
         <div class="actions">
-          <button id="runSampleQaqcButton" class="secondary" type="button">
+          <button id="runSampleQaqcButton" class="secondary" type="button" disabled>
             Run QAQC Missing
           </button>
-          <button id="runSampleAddressButton" class="secondary" type="button">
+          <button id="runSampleAddressButton" class="secondary" type="button" disabled>
             Run Address Missing
           </button>
-          <button id="downloadSampleJsonButton" class="secondary" type="button">
+          <button id="downloadSampleJsonButton" class="secondary" type="button" disabled>
             Download Sample JSON
           </button>
-          <button id="downloadSampleCsvButton" class="secondary" type="button">
+          <button id="downloadSampleCsvButton" class="secondary" type="button" disabled>
             Download Sample CSV
           </button>
         </div>
+        <div id="repairActionHelp" class="control-help">
+          Missing-stage fixes and sample exports unlock after review-dataset assembly.
+        </div>
       </details>
-      <div class="status" id="sampleStatus">
+      <div class="status" id="sampleStatus" role="status" aria-live="polite">
         Assemble a review dataset after geometry review; coverage works best once approved
         observations have geocoded points.
       </div>
       <textarea
         id="sampleOutput"
-        class="compact"
+        class="compact output-panel"
         spellcheck="false"
         readonly
+        aria-label="Review dataset and coverage output"
         placeholder="Review dataset and coverage output will appear here."
       ></textarea>
     </section>

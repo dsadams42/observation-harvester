@@ -5,6 +5,7 @@
       --panel-soft: #fbfcfd;
       --input-bg: #ffffff;
       --button-text: #ffffff;
+      --primary-bg: #176b87;
       --selected: #edf8fb;
       --activity-bg: #111827;
       --activity-text: #e5e7eb;
@@ -23,6 +24,7 @@
       --panel-soft: #151a20;
       --input-bg: #111820;
       --button-text: #ffffff;
+      --primary-bg: #2d6578;
       --selected: #12313b;
       --activity-bg: #070b10;
       --activity-text: #d7dee8;
@@ -51,6 +53,7 @@
       align-items: center;
       justify-content: space-between;
       gap: 16px;
+      flex-wrap: wrap;
     }
     h1 {
       margin: 0;
@@ -206,25 +209,51 @@
       padding: 9px;
     }
     .mode button.active {
-      background: var(--accent);
+      background: var(--primary-bg);
       color: var(--button-text);
     }
     button {
-      border: 1px solid var(--accent);
+      border: 1px solid var(--primary-bg);
       border-radius: 6px;
-      background: var(--accent);
+      background: var(--primary-bg);
       color: var(--button-text);
       cursor: pointer;
       font-weight: 650;
       padding: 9px 12px;
     }
+    button,
+    a,
+    input,
+    select,
+    textarea,
+    summary {
+      transition:
+        border-color 140ms ease,
+        box-shadow 140ms ease,
+        background 140ms ease,
+        color 140ms ease;
+    }
+    button:focus-visible,
+    a:focus-visible,
+    input:focus-visible,
+    select:focus-visible,
+    textarea:focus-visible,
+    summary:focus-visible {
+      outline: 3px solid color-mix(in srgb, var(--accent) 45%, transparent);
+      outline-offset: 2px;
+      box-shadow: 0 0 0 1px var(--accent);
+    }
     button.secondary {
       background: var(--input-bg);
       color: var(--accent);
+      border-color: var(--accent);
     }
     button:disabled {
-      cursor: wait;
+      cursor: not-allowed;
       opacity: .6;
+    }
+    button[aria-disabled="true"] {
+      cursor: not-allowed;
     }
     .actions {
       display: flex;
@@ -249,6 +278,30 @@
       background: var(--panel-soft);
       margin: 12px 0;
       padding: 10px;
+    }
+    .friendly-empty {
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--accent);
+      border-radius: 6px;
+      background: var(--panel-soft);
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.45;
+      margin: 0 0 12px;
+      padding: 10px;
+    }
+    .control-help {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.4;
+      margin: -4px 0 10px;
+      min-height: 17px;
+    }
+    .control-help.error {
+      color: var(--danger);
+    }
+    .output-panel {
+      margin-top: 10px;
     }
     .pipeline-callout strong {
       display: block;
@@ -329,7 +382,7 @@
       font-weight: 750;
     }
     .workflow-step.complete .workflow-marker { background: var(--ok); color: white; }
-    .workflow-step.running .workflow-marker { background: var(--accent); color: white; }
+    .workflow-step.running .workflow-marker { background: var(--primary-bg); color: white; }
     .workflow-step.attention .workflow-marker { background: var(--danger); color: white; }
     .workflow-title { font-weight: 700; }
     .workflow-detail { color: var(--muted); font-size: 12px; margin-top: 2px; }
@@ -342,7 +395,7 @@
     }
     .workflow-progress-fill {
       height: 100%;
-      background: var(--accent);
+      background: var(--primary-bg);
       transition: width 180ms ease;
     }
     .workflow-progress-fill.indeterminate {
@@ -418,7 +471,7 @@
       padding: 8px 10px;
     }
     .table-mode button.active {
-      background: var(--accent);
+      background: var(--primary-bg);
       color: var(--button-text);
     }
     .table-mode button:disabled {
@@ -494,7 +547,7 @@
       align-items: end;
     }
     .curation-filter { display: flex; gap: 6px; }
-    .curation-filter button.active { background: var(--accent); color: var(--button-text); }
+    .curation-filter button.active { background: var(--primary-bg); color: var(--button-text); }
     .data-table tr.excluded td { opacity: 0.7; background: var(--panel-soft); }
     .data-table .selection-cell { text-align: center; }
     .geometry-queue-tabs {
@@ -514,7 +567,7 @@
       min-height: 42px;
     }
     .geometry-queue-tabs button.active {
-      background: var(--accent);
+      background: var(--primary-bg);
       color: var(--button-text);
     }
     .extent-summary {
@@ -611,6 +664,19 @@
     .theme-control label {
       margin: 0;
     }
+    .header-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .header-actions .theme-control {
+      min-width: 0;
+    }
+    .header-actions button {
+      white-space: nowrap;
+    }
     .map {
       min-height: 520px;
       border: 1px solid var(--line);
@@ -620,6 +686,7 @@
     @media (max-width: 860px) {
       main { grid-template-columns: 1fr; padding: 12px; }
       .workspace-tabs { padding-left: 12px; padding-right: 12px; }
+      .header-actions { justify-content: flex-start; }
       .summary { grid-template-columns: repeat(2, 1fr); }
       .geometry-layout { grid-template-columns: 1fr; }
       .workflow-header { flex-direction: column; }

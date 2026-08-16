@@ -399,19 +399,36 @@ def test_index_page_contains_local_app_controls(tmp_path: Path) -> None:
     assert "javascript" in js.headers["content-type"]
     assert "function runHarvest" in js.text
     assert 'role="tablist"' in html
+    assert 'role="tabpanel"' in html
+    assert 'aria-labelledby="workbenchTab"' in html
+    assert 'aria-labelledby="geometryTab"' in html
+    assert 'aria-labelledby="tableTab"' in html
+    assert 'aria-live="polite"' in html
+    assert 'aria-pressed="true"' in html
     assert 'data-workspace="workbench"' in html
     assert 'data-workspace="geometry"' in html
     assert 'data-workspace="table"' in html
     assert "setWorkspaceTab" in js.text
+    assert "bindTabKeyboard(workspaceTabs, setWorkspaceTab)" in js.text
+    assert "setControlEnabled" in js.text
+    assert "updateActionAvailability" in js.text
+    assert "setStatusMessage" in js.text
+    assert "setPressedGroup" in js.text
+    assert "defaultWorkflowStages" in js.text
+    assert "Start Full Pipeline" in js.text
     assert "Run Full Pipeline" in html
     assert "Review dataset ready - approval required" in js.text
     assert "Approve Dataset &amp; Check Coverage" in html
     assert "approval with no exclusions is valid" in html.lower()
-    assert "Run Harvest" in html
+    assert "Run Harvest Only" in html
+    assert "Advanced manual stages" in html
+    assert html.index("Run Full Pipeline") < html.index("Advanced manual stages")
     assert "Copy JSON" in html
     assert "Copy QAQC Prompt" in html
     assert "Run QAQC" in html
+    assert 'id="runQaqcButton" class="secondary" type="button" disabled' in html
     assert "Run Address Enrichment" in html
+    assert 'id="runAddressButton" class="secondary" type="button" disabled' in html
     assert "Download Verified CSV" in html
     assert "Coordinate Assignment Required" in html
     assert 'id="interventionList"' in html
@@ -423,7 +440,7 @@ def test_index_page_contains_local_app_controls(tmp_path: Path) -> None:
     assert "needsManualGeocoding" in js.text
     assert "setGeometryListTab('geocoded')" in js.text
     assert "setGeometryListTab('manual')" in js.text
-    assert "Geocode All" in html
+    assert "Geocode QAQC-Approved Observations" in html
     assert "Project Workflow" in html
     assert "Recommended next:" in js.text
     assert "/workflow-status" in js.text
@@ -432,12 +449,12 @@ def test_index_page_contains_local_app_controls(tmp_path: Path) -> None:
     assert html.index("Geometry Studio") < html.index("Review Dataset / Coverage")
     assert "Assemble Review Dataset" in html
     assert "Check Coverage" in html
-    assert "Run Targeted Follow-ups" in html
+    assert "Run Coverage Gap Follow-ups" in html
     assert "Run QAQC Missing" in html
     assert "Run Address Missing" in html
     assert "leaflet.draw" in html
-    assert "Load Approved" in html
-    assert "Load Augmented Sample" in html
+    assert "Load QAQC-Approved Observations" in html
+    assert "Load Review Dataset Observations" in html
     assert "Show Sample Extent" in html
     assert "Zoom To Extent" in html
     assert "Clear Extent" in html
@@ -452,7 +469,8 @@ def test_index_page_contains_local_app_controls(tmp_path: Path) -> None:
     assert "Search Corrected Address" in html
     assert "Save Footprint" in html
     assert "Download Footprints GeoJSON" in html
-    assert "Clear All" in html
+    assert "Clear Generated Runs" in html
+    assert "Clear All" not in html
     assert "Agent Activity" in html
     assert "Full Pipeline Transcript" in html
     assert "Download Transcript (.txt)" in html
@@ -476,10 +494,24 @@ def test_index_page_contains_local_app_controls(tmp_path: Path) -> None:
     assert "'dialogue'" in js.text
     assert "'transcript.txt'" in js.text
     assert "Cancel Run" in html
-    assert "Exit Application" in html
+    assert "Exit OASIS" in html
+    assert "closing this tab only closes the browser view" in html
+    assert html.index("Exit OASIS") < html.index("Agent transcript and activity")
     assert "Theme" in html
     assert "observationHarvesterTheme" in js.text
     assert "data-theme" in css.text
+    assert "--primary-bg: #2d6578" in css.text
+    assert ":focus-visible" in css.text
+    assert ".friendly-empty" in css.text
+    assert ".control-help" in css.text
+    assert "Raw outputs and prompts" in html
+    assert "Agent transcript and activity" in html
+    assert "Fix Missing Pipeline Stages" in html
+    assert "Start with <strong>Run Full Pipeline</strong>" in html
+    assert "Load approved observations after QAQC and address enrichment" in html
+    assert "Select or assemble a review dataset" in html
+    assert 'id="tableCopyButton" class="secondary" type="button" disabled' in html
+    assert 'id="saveCoordinateButton" type="button" disabled' in html
     assert "/api/runs/${runId}/log" in js.text
     assert "/api/runs/${state.currentRunId}/status" in js.text
     assert "/api/runs/${state.currentRunId}/cancel" in js.text
@@ -1869,10 +1901,10 @@ def test_sample_set_coverage_and_gap_fill_api_flow(tmp_path: Path) -> None:
     assert workflow_stages["coverage"]["label"] == "Check Coverage"
     assert workflow_stages["coverage"]["display_mode"] == "gate"
     assert "Coverage gaps found" in workflow_stages["coverage"]["detail"]
-    assert workflow_stages["gap_fill"]["label"] == "Run Targeted Follow-ups"
+    assert workflow_stages["gap_fill"]["label"] == "Run Coverage Gap Follow-ups"
     assert workflow_stages["gap_fill"]["display_mode"] == "job_progress"
     assert workflow_stages["gap_fill"]["action_id"] == "run_gap_fill"
-    assert workflow_stages["gap_fill"]["action_label"] == "Run Targeted Follow-ups"
+    assert workflow_stages["gap_fill"]["action_label"] == "Run Coverage Gap Follow-ups"
     assert coverage_results.json()["review"]["recommended_child_jobs"][0]["locality"] == (
         "Western Tennessee"
     )
@@ -1911,12 +1943,12 @@ def test_workflow_status_marks_targeted_follow_ups_not_needed(tmp_path: Path) ->
     assert sample.status_code == 200
     assert coverage.status_code == 200
     assert stages["coverage"]["detail"] == (
-        "Coverage sufficient. No targeted follow-ups recommended."
+        "Coverage sufficient. No coverage gap follow-ups recommended."
     )
     assert stages["coverage"]["display_mode"] == "gate"
     assert stages["gap_fill"]["status"] == "complete"
     assert stages["gap_fill"]["detail"] == (
-        "Not needed. No targeted follow-ups are currently recommended."
+        "Not needed. No coverage gap follow-ups are currently recommended."
     )
     assert stages["gap_fill"]["display_mode"] == "gate"
     assert stages["gap_fill"]["action_id"] is None

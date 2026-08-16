@@ -1944,12 +1944,12 @@ def _workflow_status_payload(
                 recommended_count = len(coverage_review.recommended_child_jobs)
                 if recommended_count:
                     coverage_detail = (
-                        f"Coverage gaps found: {recommended_count} targeted follow-up "
+                        f"Coverage gaps found: {recommended_count} coverage gap follow-up "
                         "search(es) recommended."
                     )
                 else:
                     coverage_detail = (
-                        "Coverage sufficient. No targeted follow-ups recommended."
+                        "Coverage sufficient. No coverage gap follow-ups recommended."
                     )
             else:
                 coverage_status = "ready"
@@ -2149,18 +2149,18 @@ def _workflow_status_payload(
         ),
         _workflow_stage(
             stage_id="gap_fill",
-            label="Run Targeted Follow-ups",
+            label="Run Coverage Gap Follow-ups",
             status=gap_status,
             current=gap_completed,
             total=recommended_jobs,
             detail=(
-                f"{gap_completed}/{recommended_jobs} targeted follow-up job(s) complete."
+                f"{gap_completed}/{recommended_jobs} coverage gap follow-up job(s) complete."
                 if recommended_jobs
-                else "Not needed. No targeted follow-ups are currently recommended."
+                else "Not needed. No coverage gap follow-ups are currently recommended."
             ),
             action_id="run_gap_fill" if gap_status in {"ready", "attention"} else None,
             action_label=(
-                "Run Targeted Follow-ups" if gap_status in {"ready", "attention"} else None
+                "Run Coverage Gap Follow-ups" if gap_status in {"ready", "attention"} else None
             ),
             indeterminate=gap_status == "running",
             display_mode="job_progress" if recommended_jobs or gap_status == "running" else "gate",
@@ -3571,7 +3571,7 @@ def create_app(
                 ),
                 rationale=(
                     "No item-by-item feedback was required; only explicit exclusions affect "
-                    "coverage and targeted follow-up guidance."
+                    "coverage and coverage gap follow-up guidance."
                 ),
             )
             return JSONResponse(_sample_curation_payload(root, sample_set_id))

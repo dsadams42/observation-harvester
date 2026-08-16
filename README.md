@@ -202,6 +202,27 @@ compatibility identifiers in this release. The launchers accept `OASIS_PORT` and
 Windows, `OASIS_CODEX_BIN`; the previous `OBSERVATION_HARVESTER_*` names remain valid
 fallbacks.
 
+## Implementation Layout
+
+The current codebase keeps external behavior behind small typed seams while separating
+browser UI, durable storage, geocoding, and geometry-specific logic:
+
+- `ports.py` defines protocol boundaries for search, document fetching, and spatial
+  geocoding.
+- `geocoding.py` implements the Nominatim-backed geocoder and local response cache
+  behind the `SpatialGeocoder` protocol.
+- `geometry.py` keeps reusable geometry parsing, validation, and area calculations.
+- `app_geometry.py` contains browser-app coordinate ranking and retry helpers.
+- `storage.py` provides shared atomic JSON writes for durable local artifacts.
+- `app.py` owns the Starlette routes, app job orchestration, and asset endpoints.
+- `app_ui.py` renders the HTML shell, while `static/app.css` and `static/app.js` hold
+  the browser presentation and interaction code.
+- `artifact_migrations.py` inspects and upgrades legacy runtime JSON with backups.
+
+This structure is intentionally still local-first and file-backed. External services
+remain behind interfaces, tests stay offline by default, and deterministic validation
+gates model-proposed data before export.
+
 ## Using the Browser Application
 
 ### Agentic Workbench
@@ -389,11 +410,13 @@ The ordinary test suite is offline and does not require API credentials:
 ```powershell
 pytest
 ruff check .
-mypy src
+mypy
 ```
 
 Tests must not make unapproved network calls. External services remain behind typed
-interfaces, and model output must pass deterministic validation.
+interfaces, and model output must pass deterministic validation. The development extra
+includes `httpx2` so Starlette route tests can exercise the browser app without relying
+on deprecated client behavior.
 
 ## Current Boundaries and Next Development Areas
 

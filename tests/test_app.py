@@ -230,6 +230,24 @@ def blocking_successful_runner(
     return runner
 
 
+class FunctionSpatialGeocoder:
+    def __init__(
+        self,
+        geocode: Callable[[str], dict[str, object] | None],
+        reverse: Callable[[float, float], dict[str, object] | None] | None = None,
+    ) -> None:
+        self._geocode = geocode
+        self._reverse = reverse
+
+    def geocode(self, query: str) -> dict[str, object] | None:
+        return self._geocode(query)
+
+    def reverse(self, latitude: float, longitude: float) -> dict[str, object] | None:
+        if self._reverse is None:
+            return None
+        return self._reverse(latitude, longitude)
+
+
 def test_active_codex_registry_sends_prompts_as_utf8(tmp_path: Path) -> None:
     prompt = "Georgia’s GEMA/HS technical college search"
     registry = ActiveCodexRegistry(tmp_path)
@@ -365,18 +383,28 @@ def test_index_page_contains_local_app_controls(tmp_path: Path) -> None:
     assert "Agentic Workbench" in html
     assert "Geometry Studio" in html
     assert "Tabular Data" in html
+    assert 'href="/assets/app.css"' in html
+    assert 'src="/assets/app.js"' in html
 
     logo = client.get("/assets/oasis-logo.jpg")
     assert logo.status_code == 200
     assert logo.headers["content-type"] == "image/jpeg"
     assert logo.content.startswith(b"\xff\xd8\xff")
+    css = client.get("/assets/app.css")
+    assert css.status_code == 200
+    assert "text/css" in css.headers["content-type"]
+    assert ".workspace-tabs" in css.text
+    js = client.get("/assets/app.js")
+    assert js.status_code == 200
+    assert "javascript" in js.headers["content-type"]
+    assert "function runHarvest" in js.text
     assert 'role="tablist"' in html
     assert 'data-workspace="workbench"' in html
     assert 'data-workspace="geometry"' in html
     assert 'data-workspace="table"' in html
-    assert "setWorkspaceTab" in html
+    assert "setWorkspaceTab" in js.text
     assert "Run Full Pipeline" in html
-    assert "Review dataset ready - approval required" in html
+    assert "Review dataset ready - approval required" in js.text
     assert "Approve Dataset &amp; Check Coverage" in html
     assert "approval with no exclusions is valid" in html.lower()
     assert "Run Harvest" in html
@@ -391,15 +419,15 @@ def test_index_page_contains_local_app_controls(tmp_path: Path) -> None:
     assert 'id="manualQueueTab"' in html
     assert "Geocoded" in html
     assert "Needs Manual Geocoding" in html
-    assert "geometryItemsForActiveTab" in html
-    assert "needsManualGeocoding" in html
-    assert "setGeometryListTab('geocoded')" in html
-    assert "setGeometryListTab('manual')" in html
+    assert "geometryItemsForActiveTab" in js.text
+    assert "needsManualGeocoding" in js.text
+    assert "setGeometryListTab('geocoded')" in js.text
+    assert "setGeometryListTab('manual')" in js.text
     assert "Geocode All" in html
     assert "Project Workflow" in html
-    assert "Recommended next:" in html
-    assert "/workflow-status" in html
-    assert "Geocoding ${index + 1}/${pending.length}" in html
+    assert "Recommended next:" in js.text
+    assert "/workflow-status" in js.text
+    assert "Geocoding ${index + 1}/${pending.length}" in js.text
     assert "Review Dataset / Coverage" in html
     assert html.index("Geometry Studio") < html.index("Review Dataset / Coverage")
     assert "Assemble Review Dataset" in html
@@ -414,12 +442,12 @@ def test_index_page_contains_local_app_controls(tmp_path: Path) -> None:
     assert "Zoom To Extent" in html
     assert "Clear Extent" in html
     assert "geometryExtentSummary" in html
-    assert "overviewPointLayer" in html
-    assert "overviewFootprintLayer" in html
-    assert "overviewExtentLayer" in html
-    assert "renderSampleExtent" in html
-    assert "geometryRoundLabel" in html
-    assert "selectGeometryItem(item.item_id)" in html
+    assert "overviewPointLayer" in js.text
+    assert "overviewFootprintLayer" in js.text
+    assert "overviewExtentLayer" in js.text
+    assert "renderSampleExtent" in js.text
+    assert "geometryRoundLabel" in js.text
+    assert "selectGeometryItem(item.item_id)" in js.text
     assert "Corrected Address or Place" in html
     assert "Search Corrected Address" in html
     assert "Save Footprint" in html
@@ -432,54 +460,54 @@ def test_index_page_contains_local_app_controls(tmp_path: Path) -> None:
     assert "Search Corrected Address" in html
     assert "Research This Facility" in html
     assert "Search Google Maps" in html
-    assert "Accept this location" in html
+    assert "Accept this location" in js.text
     assert "Paste Google Maps Coordinates" in html
     assert "Preview Coordinate" in html
-    assert "/api/geometry/coordinate-preview" in html
-    assert "human_pasted_coordinate" in html
-    assert "renderCandidateOptions" in html
-    assert "/api/geometry/research" in html
+    assert "/api/geometry/coordinate-preview" in js.text
+    assert "human_pasted_coordinate" in js.text
+    assert "renderCandidateOptions" in js.text
+    assert "/api/geometry/research" in js.text
     assert "Place Point on Map" in html
     assert "Save Coordinate" in html
-    assert "renderGeocodingProgress" in html
-    assert "allow_address_retry: true" in html
+    assert "renderGeocodingProgress" in js.text
+    assert "allow_address_retry: true" in js.text
     assert 'id="dialogueOutput"' in html
-    assert "/api/geographer/plan" in html
-    assert "'dialogue'" in html
-    assert "'transcript.txt'" in html
+    assert "/api/geographer/plan" in js.text
+    assert "'dialogue'" in js.text
+    assert "'transcript.txt'" in js.text
     assert "Cancel Run" in html
     assert "Exit Application" in html
     assert "Theme" in html
-    assert "observationHarvesterTheme" in html
-    assert "data-theme" in html
-    assert "/api/runs/${runId}/log" in html
-    assert "/api/runs/${state.currentRunId}/status" in html
-    assert "/api/runs/${state.currentRunId}/cancel" in html
-    assert "/api/runs/${state.currentRunId}/qaqc-prompt" in html
-    assert "/api/runs/${state.currentRunId}/qaqc-run" in html
-    assert "/api/runs/${state.currentRunId}/qaqc-reviews" in html
-    assert "/api/runs/${state.currentRunId}/address-run" in html
-    assert "/api/runs/${state.currentRunId}/address-results" in html
-    assert "/api/runs/${state.currentRunId}/geometry-items" in html
-    assert "/api/runs/${state.currentRunId}/table?mode=${state.tableMode}" in html
-    assert "/api/samples/${state.currentSampleSetId}/table?mode=verified" in html
+    assert "observationHarvesterTheme" in js.text
+    assert "data-theme" in css.text
+    assert "/api/runs/${runId}/log" in js.text
+    assert "/api/runs/${state.currentRunId}/status" in js.text
+    assert "/api/runs/${state.currentRunId}/cancel" in js.text
+    assert "/api/runs/${state.currentRunId}/qaqc-prompt" in js.text
+    assert "/api/runs/${state.currentRunId}/qaqc-run" in js.text
+    assert "/api/runs/${state.currentRunId}/qaqc-reviews" in js.text
+    assert "/api/runs/${state.currentRunId}/address-run" in js.text
+    assert "/api/runs/${state.currentRunId}/address-results" in js.text
+    assert "/api/runs/${state.currentRunId}/geometry-items" in js.text
+    assert "/api/runs/${state.currentRunId}/table?mode=${state.tableMode}" in js.text
+    assert "/api/samples/${state.currentSampleSetId}/table?mode=verified" in js.text
     assert "Verified Only" in html
     assert "All Leads" in html
     assert "Copy Visible Rows" in html
-    assert "downloadVisibleTableCsv" in html
-    assert "openTableRowInGeometry" in html
-    assert "/api/samples/from-run" in html
-    assert "/api/samples/${state.currentSampleSetId}/coverage-run" in html
-    assert "/api/samples/${state.currentSampleSetId}/gap-fill-run" in html
-    assert "/api/samples/${state.currentSampleSetId}/qaqc-missing" in html
-    assert "/api/samples/${state.currentSampleSetId}/address-missing" in html
-    assert "/api/samples/${state.currentSampleSetId}/geometry-items" in html
-    assert "/api/geometry/geocode" in html
-    assert "/api/runs/${state.currentRunId}/export.verified.${format}" in html
-    assert "/api/runs/${state.currentRunId}/export.footprints.geojson" in html
-    assert "QAQC still running" in html
-    assert "/api/runs/clear" in html
-    assert "/api/app/exit" in html
+    assert "downloadVisibleTableCsv" in js.text
+    assert "openTableRowInGeometry" in js.text
+    assert "/api/samples/from-run" in js.text
+    assert "/api/samples/${state.currentSampleSetId}/coverage-run" in js.text
+    assert "/api/samples/${state.currentSampleSetId}/gap-fill-run" in js.text
+    assert "/api/samples/${state.currentSampleSetId}/qaqc-missing" in js.text
+    assert "/api/samples/${state.currentSampleSetId}/address-missing" in js.text
+    assert "/api/samples/${state.currentSampleSetId}/geometry-items" in js.text
+    assert "/api/geometry/geocode" in js.text
+    assert "/api/runs/${state.currentRunId}/export.verified.${format}" in js.text
+    assert "/api/runs/${state.currentRunId}/export.footprints.geojson" in js.text
+    assert "QAQC still running" in js.text
+    assert "/api/runs/clear" in js.text
+    assert "/api/app/exit" in js.text
     assert "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" in html
     assert "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" in html
     assert "https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" in html
@@ -934,7 +962,7 @@ def test_geocode_can_retry_address_research_after_spatial_failure(tmp_path: Path
         create_app(
             workspace=tmp_path,
             runner=correction_runner,
-            geocoder=geocoder,
+            geocoder=FunctionSpatialGeocoder(geocoder),
             background=False,
         )
     )
@@ -1005,7 +1033,7 @@ def test_geocode_skips_address_retry_for_plausible_same_country_candidate(
         create_app(
             workspace=tmp_path,
             runner=runner,
-            geocoder=geocoder,
+            geocoder=FunctionSpatialGeocoder(geocoder),
             background=False,
         )
     )
@@ -1060,7 +1088,7 @@ def test_geometry_geocode_prefers_enriched_address(tmp_path: Path) -> None:
         create_app(
             workspace=tmp_path,
             runner=successful_runner,
-            geocoder=geocoder,
+            geocoder=FunctionSpatialGeocoder(geocoder),
             background=False,
         )
     )
@@ -1109,7 +1137,7 @@ def test_geometry_geocode_uses_geographer_country_aliases(tmp_path: Path) -> Non
         create_app(
             workspace=tmp_path,
             runner=geographer_and_harvest_runner,
-            geocoder=geocoder,
+            geocoder=FunctionSpatialGeocoder(geocoder),
             background=False,
         )
     )
@@ -1172,7 +1200,7 @@ def test_geometry_geocode_routes_same_country_uncertain_candidate_to_human_queue
         create_app(
             workspace=tmp_path,
             runner=successful_runner,
-            geocoder=geocoder,
+            geocoder=FunctionSpatialGeocoder(geocoder),
             background=False,
         )
     )
@@ -1231,7 +1259,7 @@ def test_geometry_research_reruns_address_agent_for_one_selected_item(
         create_app(
             workspace=tmp_path,
             runner=successful_runner,
-            geocoder=geocoder,
+            geocoder=FunctionSpatialGeocoder(geocoder),
             background=False,
         )
     )
@@ -1269,7 +1297,7 @@ def test_coordinate_preview_parses_and_spatially_checks_google_maps_coordinates(
     tmp_path: Path,
 ) -> None:
     class PreviewGeocoder:
-        def __call__(self, query: str) -> dict[str, object] | None:
+        def geocode(self, query: str) -> dict[str, object] | None:
             return None
 
         def reverse(self, latitude: float, longitude: float) -> dict[str, object]:
@@ -1360,7 +1388,7 @@ def test_geometry_geocode_all_reports_successes_and_not_found(tmp_path: Path) ->
         create_app(
             workspace=tmp_path,
             runner=successful_runner,
-            geocoder=geocoder,
+            geocoder=FunctionSpatialGeocoder(geocoder),
             background=False,
         )
     )
@@ -1415,7 +1443,7 @@ def test_geometry_review_endpoints_and_verified_exports(tmp_path: Path) -> None:
         create_app(
             workspace=tmp_path,
             runner=successful_runner,
-            geocoder=geocoder,
+            geocoder=FunctionSpatialGeocoder(geocoder),
             background=False,
         )
     )

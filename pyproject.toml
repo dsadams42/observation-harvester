@@ -21,6 +21,7 @@ app = [
     "uvicorn>=0.30",
 ]
 dev = [
+    "httpx2>=0.1",
     "mypy>=1.13",
     "openai-agents>=0.6.0",
     "pytest>=8.3",
@@ -37,6 +38,8 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 pdt_observer = [
+    "static/*.css",
+    "static/*.js",
     "static/*.jpg",
 ]
 

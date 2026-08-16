@@ -15,6 +15,7 @@ from pdt_observer.models import (
     LeadQaqcRecommendedAction,
     LeadQaqcVerificationStatus,
 )
+from pdt_observer.storage import write_json_file
 
 ADDRESS_RESULT_LIST_ADAPTER: TypeAdapter[tuple[AddressEnrichmentResult, ...]] = TypeAdapter(
     tuple[AddressEnrichmentResult, ...]
@@ -50,11 +51,7 @@ def upsert_address_result(
         existing.append(result)
     else:
         existing[index] = result
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        address_results_to_json(tuple(existing)),
-        encoding="utf-8",
-    )
+    write_json_file(path, [item.model_dump(mode="json") for item in existing])
     return tuple(existing)
 
 

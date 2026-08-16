@@ -5,6 +5,8 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from pdt_observer.storage import write_json_file
+
 VERSIONED_DIRECTORIES = {
     "harvest_runs": ("*.json",),
     "sample_sets": ("*.json",),
@@ -82,10 +84,7 @@ def migrate_workspace(root: Path, *, dry_run: bool = True) -> dict[str, Any]:
                     backup = path.with_suffix(path.suffix + ".bak")
                     if not backup.exists():
                         shutil.copy2(path, backup)
-                    path.write_text(
-                        json.dumps(migrated, indent=2, sort_keys=True),
-                        encoding="utf-8",
-                    )
+                    write_json_file(path, migrated, sort_keys=True)
             else:
                 unchanged += 1
             changes.append(

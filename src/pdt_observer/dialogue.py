@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
@@ -8,6 +7,7 @@ from pathlib import Path
 from pydantic import TypeAdapter
 
 from pdt_observer.models import AgentDialogueEntry
+from pdt_observer.storage import write_json_file
 
 _ENTRY_LIST_ADAPTER: TypeAdapter[tuple[AgentDialogueEntry, ...]] = TypeAdapter(
     tuple[AgentDialogueEntry, ...]
@@ -65,7 +65,7 @@ def append_dialogue(
     with _DIALOGUE_LOCK:
         entries = load_dialogue(root, conversation_id)
         payload = [item.model_dump(mode="json") for item in (*entries, entry)]
-        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        write_json_file(path, payload)
     return entry
 
 

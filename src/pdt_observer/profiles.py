@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from pdt_observer.models import BuildingProfileSet, BuildingTypeProfile, CountMethod
+from pdt_observer.storage import write_json_file
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -318,8 +319,7 @@ def get_builtin_profile(profile_id: str) -> BuildingTypeProfile:
 
 
 def write_profile_set(profile_set: BuildingProfileSet, path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(profile_set.model_dump_json(indent=2), encoding="utf-8")
+    write_json_file(path, profile_set.model_dump(mode="json"))
 
 
 def profile_set_to_json(profile_set: BuildingProfileSet) -> str:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from pdt_observer.models import (
@@ -23,6 +24,7 @@ from pdt_observer.workflow import (
     record_run,
     record_source_outcome,
     save_work_item,
+    write_model,
 )
 
 
@@ -48,6 +50,16 @@ def test_create_batch_writes_public_venue_work_items(tmp_path: Path) -> None:
         recommendation.strategy_id.value == "temporary_use_occupancy"
         for recommendation in retail_events.strategy_plan.recommendations
     )
+
+
+def test_write_model_replaces_json_without_temp_artifact(tmp_path: Path) -> None:
+    target = tmp_path / "artifacts" / "example.json"
+
+    write_model(target, {"status": "queued"})
+    write_model(target, {"status": "completed"})
+
+    assert json.loads(target.read_text(encoding="utf-8")) == {"status": "completed"}
+    assert list(target.parent.glob("*.tmp")) == []
 
 
 def test_create_batch_applies_custom_quota(tmp_path: Path) -> None:

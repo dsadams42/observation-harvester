@@ -7,8 +7,9 @@ import json
 import re
 import time
 import webbrowser
-from collections.abc import Callable, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
 from functools import partial
 from pathlib import Path
 from typing import Any, cast
@@ -113,6 +114,7 @@ from pdt_observer.models import (
     HarvestCampaignRunManifest,
     HarvestRunManifest,
     HarvestRunStatus,
+    JobRecord,
     JobStatus,
     JobType,
     LeadQaqcRecommendedAction,
@@ -3044,6 +3046,52 @@ def create_app(
     app_runner = runner or registry.runner
     app_geocoder = geocoder or NominatimGeocoder(root)
 
+    def _create_and_submit_background_job(
+        *,
+        identity: str,
+        job_id: str,
+        job_factory: Callable[[], JobRecord],
+        log: Callable[[str], None],
+        task: Callable[[], Any],
+        manifest_path: Callable[[Any], str | None] | None = None,
+        summary: Callable[[Any], dict[str, object] | None] | None = None,
+        on_error: Callable[[Exception], None] | None = None,
+    ) -> JobRecord | None:
+        if not registry.try_mark_task_active(identity, job_id=job_id):
+            return None
+        try:
+            job = job_factory()
+            executor.submit(
+                run_background_job,
+                root=root,
+                registry=registry,
+                identity=identity,
+                job_id=job.job_id,
+                log=log,
+                task=task,
+                manifest_path=manifest_path,
+                summary=summary,
+                on_error=on_error,
+            )
+            return job
+        except Exception:
+            registry.mark_task_inactive(identity)
+            raise
+
+    def _active_work_error(label: str, identity: str) -> JSONResponse:
+        return _json_error(f"{label} already has active work: {identity}", status_code=409)
+
+    def _shutdown_background() -> None:
+        registry.cancel_all()
+        executor.shutdown(wait=False, cancel_futures=True)
+
+    @asynccontextmanager
+    async def _lifespan(_app: Starlette) -> AsyncIterator[None]:
+        try:
+            yield
+        finally:
+            _shutdown_background()
+
     async def index(request: Request) -> HTMLResponse:
         return HTMLResponse(INDEX_HTML)
 
@@ -3139,19 +3187,16 @@ def create_app(
                 geographer_plan=geographer,
             )
             if background:
-                job = create_job(
-                    root,
-                    job_id=run_id,
-                    job_type=JobType.HARVEST,
-                    manifest_path=str(_run_manifest_path(root, run_id)),
-                    log_path=str(log_path_for_run(root, run_id)),
-                )
-                executor.submit(
-                    run_background_job,
-                    root=root,
-                    registry=registry,
+                job = _create_and_submit_background_job(
                     identity=run_id,
-                    job_id=job.job_id,
+                    job_id=run_id,
+                    job_factory=lambda: create_job(
+                        root,
+                        job_id=run_id,
+                        job_type=JobType.HARVEST,
+                        manifest_path=str(_run_manifest_path(root, run_id)),
+                        log_path=str(log_path_for_run(root, run_id)),
+                    ),
                     log=lambda message: append_harvest_log(
                         root,
                         run_id,
@@ -3172,6 +3217,9 @@ def create_app(
                         error_message=str(exc),
                     ),
                 )
+                if job is None:
+                    return _active_work_error("Run", run_id)
+                append_harvest_log(root, run_id, "Manifest prepared as queued background job.")
                 return JSONResponse(
                     {
                         "started": True,
@@ -3224,19 +3272,16 @@ def create_app(
                 geographer_plan=geographer,
             )
             if background:
-                job = create_job(
-                    root,
-                    job_id=batch_id,
-                    job_type=JobType.BATCH,
-                    manifest_path=str(_batch_manifest_path(root, batch_id)),
-                    log_path=str(log_path_for_run(root, batch_id)),
-                )
-                executor.submit(
-                    run_background_job,
-                    root=root,
-                    registry=registry,
+                job = _create_and_submit_background_job(
                     identity=batch_id,
-                    job_id=job.job_id,
+                    job_id=batch_id,
+                    job_factory=lambda: create_job(
+                        root,
+                        job_id=batch_id,
+                        job_type=JobType.BATCH,
+                        manifest_path=str(_batch_manifest_path(root, batch_id)),
+                        log_path=str(log_path_for_run(root, batch_id)),
+                    ),
                     log=lambda message: append_harvest_log(
                         root,
                         batch_id,
@@ -3256,6 +3301,8 @@ def create_app(
                         error_message=str(exc),
                     ),
                 )
+                if job is None:
+                    return _active_work_error("Run", batch_id)
                 return JSONResponse(
                     {
                         "started": True,
@@ -3299,19 +3346,16 @@ def create_app(
                 geographer_plan=geographer,
             )
             if background:
-                job = create_job(
-                    root,
-                    job_id=campaign_id,
-                    job_type=JobType.CAMPAIGN,
-                    manifest_path=str(_campaign_manifest_path(root, campaign_id)),
-                    log_path=str(log_path_for_run(root, campaign_id)),
-                )
-                executor.submit(
-                    run_background_job,
-                    root=root,
-                    registry=registry,
+                job = _create_and_submit_background_job(
                     identity=campaign_id,
-                    job_id=job.job_id,
+                    job_id=campaign_id,
+                    job_factory=lambda: create_job(
+                        root,
+                        job_id=campaign_id,
+                        job_type=JobType.CAMPAIGN,
+                        manifest_path=str(_campaign_manifest_path(root, campaign_id)),
+                        log_path=str(log_path_for_run(root, campaign_id)),
+                    ),
                     log=lambda message: append_harvest_log(
                         root,
                         campaign_id,
@@ -3333,6 +3377,8 @@ def create_app(
                         error_message=str(exc),
                     ),
                 )
+                if job is None:
+                    return _active_work_error("Run", campaign_id)
                 return JSONResponse(
                     {
                         "started": True,
@@ -3540,26 +3586,26 @@ def create_app(
             runner=app_runner,
         )
         if background:
-            job = create_job(
-                root,
-                job_id=_qaqc_id_for_run(identity),
-                job_type=JobType.QAQC,
-                parent_id=identity,
-                log_path=str(log_path_for_run(root, _qaqc_id_for_run(identity))),
-                active_child_ids=_manifest_child_run_ids(manifest),
-            )
-            executor.submit(
-                run_background_job,
-                root=root,
-                registry=registry,
+            job_id = _qaqc_id_for_run(identity)
+            job = _create_and_submit_background_job(
                 identity=identity,
-                job_id=job.job_id,
+                job_id=job_id,
+                job_factory=lambda: create_job(
+                    root,
+                    job_id=job_id,
+                    job_type=JobType.QAQC,
+                    parent_id=identity,
+                    log_path=str(log_path_for_run(root, job_id)),
+                    active_child_ids=_manifest_child_run_ids(manifest),
+                ),
                 log=lambda message: append_harvest_log(root, identity, f"QAQC failed: {message}."),
                 task=task,
                 summary=lambda result: (
                     result.get("summary", {}) if isinstance(result, dict) else {}
                 ),
             )
+            if job is None:
+                return _active_work_error("Run", identity)
             return JSONResponse(
                 {
                     "started": True,
@@ -3607,20 +3653,18 @@ def create_app(
             runner=app_runner,
         )
         if background:
-            job = create_job(
-                root,
-                job_id=_address_id_for_run(identity),
-                job_type=JobType.ADDRESS,
-                parent_id=identity,
-                log_path=str(log_path_for_run(root, _address_id_for_run(identity))),
-                active_child_ids=_manifest_child_run_ids(manifest),
-            )
-            executor.submit(
-                run_background_job,
-                root=root,
-                registry=registry,
+            job_id = _address_id_for_run(identity)
+            job = _create_and_submit_background_job(
                 identity=identity,
-                job_id=job.job_id,
+                job_id=job_id,
+                job_factory=lambda: create_job(
+                    root,
+                    job_id=job_id,
+                    job_type=JobType.ADDRESS,
+                    parent_id=identity,
+                    log_path=str(log_path_for_run(root, job_id)),
+                    active_child_ids=_manifest_child_run_ids(manifest),
+                ),
                 log=lambda message: append_harvest_log(
                     root,
                     identity,
@@ -3631,6 +3675,8 @@ def create_app(
                     result.get("summary", {}) if isinstance(result, dict) else {}
                 ),
             )
+            if job is None:
+                return _active_work_error("Run", identity)
             return JSONResponse(
                 {
                     "started": True,
@@ -3867,19 +3913,17 @@ def create_app(
             runner=app_runner,
         )
         if background:
-            job = create_job(
-                root,
-                job_id=f"{sample_set_id}-coverage",
-                job_type=JobType.COVERAGE,
-                parent_id=sample_set_id,
-                log_path=str(log_path_for_run(root, sample_set_id)),
-            )
-            executor.submit(
-                run_background_job,
-                root=root,
-                registry=registry,
+            job_id = f"{sample_set_id}-coverage"
+            job = _create_and_submit_background_job(
                 identity=sample_set_id,
-                job_id=job.job_id,
+                job_id=job_id,
+                job_factory=lambda: create_job(
+                    root,
+                    job_id=job_id,
+                    job_type=JobType.COVERAGE,
+                    parent_id=sample_set_id,
+                    log_path=str(log_path_for_run(root, sample_set_id)),
+                ),
                 log=lambda message: append_harvest_log(
                     root,
                     sample_set_id,
@@ -3890,6 +3934,8 @@ def create_app(
                     result.get("summary", {}) if isinstance(result, dict) else {}
                 ),
             )
+            if job is None:
+                return _active_work_error("Sample set", sample_set_id)
             return JSONResponse(
                 {
                     "started": True,
@@ -3947,19 +3993,17 @@ def create_app(
             runner=app_runner,
         )
         if background:
-            job = create_job(
-                root,
-                job_id=f"{sample_set_id}-gap-fill",
-                job_type=JobType.GAP_FILL,
-                parent_id=sample_set_id,
-                log_path=str(log_path_for_run(root, sample_set_id)),
-            )
-            executor.submit(
-                run_background_job,
-                root=root,
-                registry=registry,
+            job_id = f"{sample_set_id}-gap-fill"
+            job = _create_and_submit_background_job(
                 identity=sample_set_id,
-                job_id=job.job_id,
+                job_id=job_id,
+                job_factory=lambda: create_job(
+                    root,
+                    job_id=job_id,
+                    job_type=JobType.GAP_FILL,
+                    parent_id=sample_set_id,
+                    log_path=str(log_path_for_run(root, sample_set_id)),
+                ),
                 log=lambda message: append_harvest_log(
                     root,
                     sample_set_id,
@@ -3971,6 +4015,8 @@ def create_app(
                 ),
                 summary=lambda result: result.stage_summary or {},
             )
+            if job is None:
+                return _active_work_error("Sample set", sample_set_id)
             return JSONResponse(
                 {
                     "started": True,
@@ -3997,19 +4043,17 @@ def create_app(
             runner=app_runner,
         )
         if background:
-            job = create_job(
-                root,
-                job_id=f"{sample_set_id}-qaqc-missing",
-                job_type=JobType.SAMPLE_QAQC_MISSING,
-                parent_id=sample_set_id,
-                log_path=str(log_path_for_run(root, sample_set_id)),
-            )
-            executor.submit(
-                run_background_job,
-                root=root,
-                registry=registry,
+            job_id = f"{sample_set_id}-qaqc-missing"
+            job = _create_and_submit_background_job(
                 identity=sample_set_id,
-                job_id=job.job_id,
+                job_id=job_id,
+                job_factory=lambda: create_job(
+                    root,
+                    job_id=job_id,
+                    job_type=JobType.SAMPLE_QAQC_MISSING,
+                    parent_id=sample_set_id,
+                    log_path=str(log_path_for_run(root, sample_set_id)),
+                ),
                 log=lambda message: append_harvest_log(
                     root,
                     sample_set_id,
@@ -4022,6 +4066,8 @@ def create_app(
                     else {}
                 ),
             )
+            if job is None:
+                return _active_work_error("Sample set", sample_set_id)
             return JSONResponse(
                 {
                     "started": True,
@@ -4051,19 +4097,17 @@ def create_app(
             runner=app_runner,
         )
         if background:
-            job = create_job(
-                root,
-                job_id=f"{sample_set_id}-address-missing",
-                job_type=JobType.SAMPLE_ADDRESS_MISSING,
-                parent_id=sample_set_id,
-                log_path=str(log_path_for_run(root, sample_set_id)),
-            )
-            executor.submit(
-                run_background_job,
-                root=root,
-                registry=registry,
+            job_id = f"{sample_set_id}-address-missing"
+            job = _create_and_submit_background_job(
                 identity=sample_set_id,
-                job_id=job.job_id,
+                job_id=job_id,
+                job_factory=lambda: create_job(
+                    root,
+                    job_id=job_id,
+                    job_type=JobType.SAMPLE_ADDRESS_MISSING,
+                    parent_id=sample_set_id,
+                    log_path=str(log_path_for_run(root, sample_set_id)),
+                ),
                 log=lambda message: append_harvest_log(
                     root,
                     sample_set_id,
@@ -4076,6 +4120,8 @@ def create_app(
                     else {}
                 ),
             )
+            if job is None:
+                return _active_work_error("Sample set", sample_set_id)
             return JSONResponse(
                 {
                     "started": True,
@@ -4804,7 +4850,7 @@ def create_app(
         ),
         Route("/api/app/exit", exit_app, methods=["POST"]),
     ]
-    return Starlette(routes=routes)
+    return Starlette(routes=routes, lifespan=_lifespan)
 
 
 def _export_response(root: Path, run_id: str, *, output_format: str) -> Response:

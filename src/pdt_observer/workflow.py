@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import tempfile
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -79,7 +80,26 @@ def claim_lock(root: Path, *, timeout_seconds: float = 10.0) -> Iterator[None]:
 def write_model(path: Path, model: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = model.model_dump(mode="json") if isinstance(model, BaseModel) else model
-    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    text = json.dumps(payload, indent=2)
+    with tempfile.NamedTemporaryFile(
+        "w",
+        encoding="utf-8",
+        delete=False,
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+    ) as handle:
+        handle.write(text)
+        temp_path = Path(handle.name)
+    for attempt in range(5):
+        try:
+            temp_path.replace(path)
+            break
+        except PermissionError:
+            if attempt == 4:
+                temp_path.unlink(missing_ok=True)
+                raise
+            time.sleep(0.02 * (attempt + 1))
 
 
 def load_work_item(path: Path) -> WorkItem:

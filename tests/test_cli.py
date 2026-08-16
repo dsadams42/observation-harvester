@@ -1,13 +1,29 @@
 from __future__ import annotations
 
 import json
+import os
 import stat
+import sys
 from pathlib import Path
 
 import pytest
 
 from pdt_observer.cli import main
 from pdt_observer.models import InvestigationResult
+
+
+def _write_fake_codex(tmp_path: Path, script: str) -> Path:
+    fake_codex = tmp_path / "fake_codex.py"
+    fake_codex.write_text(script, encoding="utf-8")
+    if os.name == "nt":
+        launcher = tmp_path / "fake_codex.cmd"
+        launcher.write_text(
+            f'@echo off\r\n"{sys.executable}" "%~dp0{fake_codex.name}" %*\r\n',
+            encoding="utf-8",
+        )
+        return launcher
+    fake_codex.chmod(fake_codex.stat().st_mode | stat.S_IXUSR)
+    return fake_codex
 
 
 def test_cli_demo_output_is_valid_json(capsys) -> None:
@@ -296,8 +312,8 @@ def test_cli_leads_validate_and_summarize(capsys) -> None:
 
 
 def test_cli_harvest_run_invokes_codex_and_writes_manifest(tmp_path, capsys) -> None:
-    fake_codex = tmp_path / "fake_codex.py"
-    fake_codex.write_text(
+    fake_codex = _write_fake_codex(
+        tmp_path,
         """#!/usr/bin/env python3
 import json
 import pathlib
@@ -330,9 +346,7 @@ output.write_text(json.dumps([
   }
 ]))
 """,
-        encoding="utf-8",
     )
-    fake_codex.chmod(fake_codex.stat().st_mode | stat.S_IXUSR)
 
     exit_code = main(
         [
@@ -368,8 +382,8 @@ output.write_text(json.dumps([
 
 
 def test_cli_harvest_campaign_run_invokes_codex_for_each_child(tmp_path, capsys) -> None:
-    fake_codex = tmp_path / "fake_codex.py"
-    fake_codex.write_text(
+    fake_codex = _write_fake_codex(
+        tmp_path,
         """#!/usr/bin/env python3
 import json
 import pathlib
@@ -402,9 +416,7 @@ output.write_text(json.dumps([
   }
 ]))
 """,
-        encoding="utf-8",
     )
-    fake_codex.chmod(fake_codex.stat().st_mode | stat.S_IXUSR)
 
     exit_code = main(
         [

@@ -72,19 +72,31 @@ class ActiveCodexRegistry:
 
     def is_active(self, run_id: str) -> bool:
         with self._lock:
-            if any(
-                active_id == run_id or active_id.startswith(f"{run_id}-")
-                for active_id in self._tasks
-            ):
-                return True
-            return any(
-                active_id == run_id or active_id.startswith(f"{run_id}-")
-                for active_id in self._processes
-            )
+            return self._is_active_locked(run_id)
+
+    def _is_active_locked(self, run_id: str) -> bool:
+        if any(
+            active_id == run_id or active_id.startswith(f"{run_id}-")
+            for active_id in self._tasks
+        ):
+            return True
+        return any(
+            active_id == run_id or active_id.startswith(f"{run_id}-")
+            for active_id in self._processes
+        )
 
     def active_count(self) -> int:
         with self._lock:
-            return len(self._processes) + len(self._tasks)
+            return len(set(self._processes) | self._tasks)
+
+    def try_mark_task_active(self, run_id: str, job_id: str | None = None) -> bool:
+        with self._lock:
+            if self._is_active_locked(run_id):
+                return False
+            self._tasks.add(run_id)
+            if job_id is not None:
+                self._task_jobs[run_id] = job_id
+            return True
 
     def mark_task_active(self, run_id: str, job_id: str | None = None) -> None:
         with self._lock:
@@ -157,6 +169,11 @@ def run_background_job[T](
     summary: Callable[[T], dict[str, object] | None] | None = None,
     on_error: Callable[[Exception], None] | None = None,
 ) -> None:
+    if registry.is_cancel_requested(identity):
+        log("Background job skipped after cancellation")
+        mark_job_cancelled(root, job_id)
+        registry.mark_task_inactive(identity)
+        return
     mark_job_starting(root, job_id)
     registry.mark_task_active(identity, job_id=job_id)
     try:

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 import stat
 import subprocess
+import sys
+import threading
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from unittest.mock import patch
 
@@ -13,6 +16,21 @@ from starlette.testclient import TestClient
 from pdt_observer.app import ActiveCodexRegistry, create_app
 from pdt_observer.jobs import create_job, mark_job_running
 from pdt_observer.models import JobType
+
+
+def _write_fake_codex(tmp_path: Path, script: str) -> Path:
+    fake_codex = tmp_path / "fake_codex.py"
+    fake_codex.write_text(script, encoding="utf-8")
+    if os.name == "nt":
+        launcher = tmp_path / "fake_codex.cmd"
+        launcher.write_text(
+            f'@echo off\r\n"{sys.executable}" "%~dp0{fake_codex.name}" %*\r\n',
+            encoding="utf-8",
+        )
+        return launcher
+    fake_codex.chmod(fake_codex.stat().st_mode | stat.S_IXUSR)
+    return fake_codex
+
 
 LEAD_PAYLOAD = [
     {
@@ -198,6 +216,20 @@ def raising_runner(
     raise RuntimeError("runner exploded")
 
 
+def blocking_successful_runner(
+    release: threading.Event,
+) -> Callable[[Sequence[str], str, Path], subprocess.CompletedProcess[str]]:
+    def runner(
+        command: Sequence[str],
+        prompt: str,
+        cwd: Path,
+    ) -> subprocess.CompletedProcess[str]:
+        release.wait(timeout=5)
+        return successful_runner(command, prompt, cwd)
+
+    return runner
+
+
 def test_active_codex_registry_sends_prompts_as_utf8(tmp_path: Path) -> None:
     prompt = "Georgia’s GEMA/HS technical college search"
     registry = ActiveCodexRegistry(tmp_path)
@@ -217,6 +249,59 @@ def test_active_codex_registry_sends_prompts_as_utf8(tmp_path: Path) -> None:
     assert popen.call_args.kwargs["encoding"] == "utf-8"
     assert popen.call_args.kwargs["errors"] == "replace"
     process.communicate.assert_called_once_with(input=prompt)
+
+
+def test_harvest_run_rejects_duplicate_active_submission(tmp_path: Path) -> None:
+    release = threading.Event()
+    app = create_app(workspace=tmp_path, runner=blocking_successful_runner(release))
+    with TestClient(app) as client:
+        first = client.post(
+            "/api/harvest/run",
+            json={
+                "country": "US",
+                "locality": "Tennessee",
+                "profiles": "schools",
+                "target": 5,
+                "run_id": "duplicate-run",
+            },
+        )
+        second = client.post(
+            "/api/harvest/run",
+            json={
+                "country": "US",
+                "locality": "Tennessee",
+                "profiles": "schools",
+                "target": 5,
+                "run_id": "duplicate-run",
+            },
+        )
+        release.set()
+
+    assert first.status_code == 200
+    assert first.json()["job"]["active"] is True
+    assert second.status_code == 409
+    assert second.json()["error"] == "Run already has active work: duplicate-run"
+
+
+def test_campaign_run_rejects_duplicate_active_submission(tmp_path: Path) -> None:
+    release = threading.Event()
+    app = create_app(workspace=tmp_path, runner=blocking_successful_runner(release))
+    with TestClient(app) as client:
+        payload = {
+            "country": "US",
+            "localities": ["Tennessee"],
+            "facility_types": ["schools"],
+            "target": 3,
+            "campaign_id": "duplicate-campaign",
+        }
+        first = client.post("/api/harvest/campaign-run", json=payload)
+        second = client.post("/api/harvest/campaign-run", json=payload)
+        release.set()
+
+    assert first.status_code == 200
+    assert first.json()["job"]["active"] is True
+    assert second.status_code == 409
+    assert second.json()["error"] == "Run already has active work: duplicate-campaign"
 
 
 def geographer_and_harvest_runner(
@@ -1999,8 +2084,8 @@ def test_harvest_run_endpoint_returns_failed_manifest_for_codex_error(tmp_path: 
 
 
 def test_run_status_log_cancel_and_exit_endpoints(tmp_path: Path) -> None:
-    fake_codex = tmp_path / "fake_codex.py"
-    fake_codex.write_text(
+    fake_codex = _write_fake_codex(
+        tmp_path,
         """#!/usr/bin/env python3
 import pathlib
 import sys
@@ -2012,9 +2097,7 @@ time.sleep(10)
 output.parent.mkdir(parents=True, exist_ok=True)
 output.write_text("[]")
 """,
-        encoding="utf-8",
     )
-    fake_codex.chmod(fake_codex.stat().st_mode | stat.S_IXUSR)
     exit_called = False
 
     def shutdown_callback() -> None:

@@ -5,6 +5,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
+
 from pdt_observer.models import JobRecord, JobStatus, JobType
 from pdt_observer.workflow import utc_now_text, write_model
 
@@ -38,7 +40,7 @@ def list_jobs(root: Path) -> tuple[JobRecord, ...]:
     for path in sorted(directory.glob("*.job.json")):
         try:
             jobs.append(JobRecord.model_validate_json(path.read_text(encoding="utf-8")))
-        except Exception:
+        except (OSError, json.JSONDecodeError, ValidationError, ValueError):
             continue
     return tuple(jobs)
 
@@ -205,13 +207,14 @@ def run_managed_job[T](
     except Exception as exc:
         message = str(exc) or exc.__class__.__name__
         log(message)
+        mark_job_failed(root, job_id, message)
         if on_error is not None:
             try:
                 on_error(exc)
             except Exception as finalizer_exc:
                 message = f"{message}; finalizer failed: {finalizer_exc}"
                 log(f"Failure finalizer failed: {finalizer_exc}")
-        mark_job_failed(root, job_id, message)
+                mark_job_failed(root, job_id, message)
         return None
     result_status = _result_status(result)
     resolved_manifest_path = manifest_path(result) if manifest_path is not None else None

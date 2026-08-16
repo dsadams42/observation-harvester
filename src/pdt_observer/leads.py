@@ -12,6 +12,7 @@ from pdt_observer.geographer import geographer_prompt_guidance
 from pdt_observer.models import (
     BuildingProfileSet,
     CandidateObservation,
+    ComponentBundleQaqcReview,
     ComponentBundleStatus,
     ComponentQaqcReview,
     CountMethod,
@@ -54,6 +55,9 @@ QAQC_REVIEW_LIST_ADAPTER: TypeAdapter[tuple[LeadQaqcReview, ...]] = TypeAdapter(
 COMPONENT_QAQC_REVIEW_LIST_ADAPTER: TypeAdapter[tuple[ComponentQaqcReview, ...]] = TypeAdapter(
     tuple[ComponentQaqcReview, ...]
 )
+COMPONENT_BUNDLE_QAQC_REVIEW_LIST_ADAPTER: TypeAdapter[
+    tuple[ComponentBundleQaqcReview, ...]
+] = TypeAdapter(tuple[ComponentBundleQaqcReview, ...])
 QAQC_REVIEW_SET_ADAPTER: TypeAdapter[HarvestQaqcReviewSet] = TypeAdapter(HarvestQaqcReviewSet)
 
 
@@ -87,6 +91,7 @@ def load_qaqc_review_set(path: Path) -> HarvestQaqcReviewSet:
         return HarvestQaqcReviewSet(
             occupancy_reviews=QAQC_REVIEW_LIST_ADAPTER.validate_python(payload),
             component_reviews=(),
+            component_bundle_reviews=(),
         )
     return QAQC_REVIEW_SET_ADAPTER.validate_python(payload)
 
@@ -97,6 +102,10 @@ def load_qaqc_reviews(path: Path) -> tuple[LeadQaqcReview, ...]:
 
 def load_component_qaqc_reviews(path: Path) -> tuple[ComponentQaqcReview, ...]:
     return load_qaqc_review_set(path).component_reviews
+
+
+def load_component_bundle_qaqc_reviews(path: Path) -> tuple[ComponentBundleQaqcReview, ...]:
+    return load_qaqc_review_set(path).component_bundle_reviews
 
 
 def leads_to_json(leads: tuple[OccupancyLead, ...]) -> str:
@@ -501,6 +510,13 @@ For each facility bundle in `component_bundles`:
   `mostly_complete`.
 - Partial and seed-only bundles may remain in the artifact as useful notes, but they should not
   be counted as completed observations.
+- Treat a facility-level component bundle as the observation unit. The individual component leads
+  are supporting evidence fields attached to that facility observation.
+- For facility-level bundles, verify that the bundle identity is specific enough to support one
+  facility address later. For locality, region, or country bundles, do not pretend a specific
+  store/building/campus address is available.
+- Return one `component_bundle_reviews[]` item per component bundle. Do not put bundle-level
+  decisions into `component_reviews[]`.
 
 ## Status And Action Rules
 
@@ -577,6 +593,25 @@ exact schema:
       "supporting_quote": "Best exact quote supporting the component values, or null",
       "recommended_action": "keep",
       "review_notes": "Short explanation of the verification decision"
+    }}
+  ],
+  "component_bundle_reviews": [
+    {{
+      "bundle_index": 0,
+      "item_id": "child-run-id-component-bundle-0",
+      "geography_name": "String",
+      "verification_status": "verified",
+      "source_lead_indexes_valid": true,
+      "same_facility_or_geography": true,
+      "component_fields_match": true,
+      "completion_status_match": true,
+      "counts_toward_target_approved": true,
+      "found_component_types": ["String"],
+      "missing_component_types": ["String"],
+      "source_lead_indexes": [0],
+      "supporting_quote": "Short bundle-level quote or null",
+      "recommended_action": "keep",
+      "review_notes": "Short explanation of the bundle-level verification decision"
     }}
   ]
 }}

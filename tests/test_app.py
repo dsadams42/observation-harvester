@@ -1736,6 +1736,209 @@ def test_run_table_and_exports_include_verified_component_rows(tmp_path: Path) -
     assert "Students" in component_csv.text
 
 
+def test_component_bundle_address_reconciliation_and_verified_table(
+    tmp_path: Path,
+) -> None:
+    def skipped_address_runner(
+        command: Sequence[str],
+        prompt: str,
+        cwd: Path,
+    ) -> subprocess.CompletedProcess[str]:
+        output_path = Path(command[command.index("-o") + 1])
+        if "Facility Address Enrichment" in prompt:
+            output_path.write_text("[]", encoding="utf-8")
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+        return successful_runner(command, prompt, cwd)
+
+    client = TestClient(
+        create_app(workspace=tmp_path, runner=skipped_address_runner, background=False)
+    )
+    created = client.post(
+        "/api/harvest/run",
+        json={
+            "country": "US",
+            "locality": "Tennessee",
+            "profiles": "schools",
+            "profile": "primary_secondary_education",
+            "target": 1,
+        },
+    ).json()
+    run_id = created["manifest"]["run_id"]
+    lead_path = tmp_path / f"lead_runs/{run_id}.json"
+    qaqc_path = tmp_path / f"qaqc_runs/{run_id}-qaqc.json"
+    lead_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "occupancy_leads": [],
+                "component_leads": [
+                    {
+                        "is_valid_component_report": True,
+                        "source_url": "https://example.test/school-enrollment",
+                        "source_title": "School enrollment",
+                        "source_type": "official",
+                        "evidence_quote": "Enrollment was 512 students in SY 2025.",
+                        "component_data": [
+                            {
+                                "component_type": "Students",
+                                "value": 512,
+                                "unit": "people",
+                                "time_basis": "school_year",
+                                "geography_level": "facility",
+                                "period_label": "SY 2025",
+                            }
+                        ],
+                        "location": {
+                            "facility_name": "Example School",
+                            "specific_address_or_landmark": "10 Main Street",
+                            "city_or_region": "Tennessee",
+                            "country": "US",
+                        },
+                        "geography_name": "Example School",
+                        "country": "US",
+                        "strategy_id": "official_facility_statistics",
+                        "count_semantics": "component_input",
+                        "representativeness": "component_input",
+                    },
+                    {
+                        "is_valid_component_report": True,
+                        "source_url": "https://example.test/school-staff",
+                        "source_title": "School staffing",
+                        "source_type": "official",
+                        "evidence_quote": "The school employed 44 staff in SY 2025.",
+                        "component_data": [
+                            {
+                                "component_type": "Staff",
+                                "value": 44,
+                                "unit": "people",
+                                "time_basis": "school_year",
+                                "geography_level": "facility",
+                                "period_label": "SY 2025",
+                            }
+                        ],
+                        "location": {
+                            "facility_name": "Example School",
+                            "specific_address_or_landmark": "10 Main Street",
+                            "city_or_region": "Tennessee",
+                            "country": "US",
+                        },
+                        "geography_name": "Example School",
+                        "country": "US",
+                        "strategy_id": "official_facility_statistics",
+                        "count_semantics": "component_input",
+                        "representativeness": "component_input",
+                    },
+                ],
+                "component_bundles": [
+                    {
+                        "geography_name": "Example School",
+                        "country": "US",
+                        "location": {
+                            "facility_name": "Example School",
+                            "specific_address_or_landmark": "10 Main Street",
+                            "city_or_region": "Tennessee",
+                            "country": "US",
+                        },
+                        "target_component_fields": ["Students", "Staff"],
+                        "found_component_types": ["Students", "Staff"],
+                        "missing_component_types": [],
+                        "source_lead_indexes": [0, 1],
+                        "follow_up_searches_attempted": [
+                            '"Example School" staff',
+                        ],
+                        "completion_status": "complete",
+                        "counts_toward_target": True,
+                        "confidence": "high",
+                        "completion_notes": "Enrollment and staff were both found.",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    qaqc_path.parent.mkdir(exist_ok=True)
+    qaqc_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "occupancy_reviews": [],
+                "component_reviews": [
+                    {
+                        "lead_index": 0,
+                        "source_url": "https://example.test/school-enrollment",
+                        "verification_status": "verified",
+                        "source_reachable": True,
+                        "evidence_role_match": True,
+                        "component_type_match": True,
+                        "geography_level_match": True,
+                        "recommended_action": "keep",
+                        "review_notes": "Student component is supported.",
+                    },
+                    {
+                        "lead_index": 1,
+                        "source_url": "https://example.test/school-staff",
+                        "verification_status": "verified",
+                        "source_reachable": True,
+                        "evidence_role_match": True,
+                        "component_type_match": True,
+                        "geography_level_match": True,
+                        "recommended_action": "keep",
+                        "review_notes": "Staff component is supported.",
+                    },
+                ],
+                "component_bundle_reviews": [
+                    {
+                        "bundle_index": 0,
+                        "item_id": f"{run_id}-component-bundle-0",
+                        "geography_name": "Example School",
+                        "verification_status": "verified",
+                        "source_lead_indexes_valid": True,
+                        "same_facility_or_geography": True,
+                        "component_fields_match": True,
+                        "completion_status_match": True,
+                        "counts_toward_target_approved": True,
+                        "found_component_types": ["Students", "Staff"],
+                        "missing_component_types": [],
+                        "source_lead_indexes": [0, 1],
+                        "recommended_action": "keep",
+                        "review_notes": (
+                            "Bundle is a complete facility-level component observation."
+                        ),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    address = client.post(f"/api/runs/{run_id}/address-run")
+    address_results = client.get(f"/api/runs/{run_id}/address-results")
+    reviews = client.get(f"/api/runs/{run_id}/qaqc-reviews")
+    table = client.get(f"/api/runs/{run_id}/table?mode=verified")
+
+    assert address.status_code == 200
+    assert address.json()["address"]["summary"]["expected_count"] == 1
+    assert address.json()["address"]["summary"]["missing_count"] == 1
+    assert address.json()["address"]["summary"]["missing_item_ids"] == [
+        f"{run_id}-component-bundle-0"
+    ]
+    assert address_results.json()["reconciliation"]["expected_count"] == 1
+    assert address_results.json()["reconciliation"]["missing_item_ids"] == []
+    saved_address = address_results.json()["results"][0]
+    assert saved_address["item_id"] == f"{run_id}-component-bundle-0"
+    assert saved_address["status"] == "needs_review"
+    assert reviews.json()["component_bundle_reviews"][0]["item_id"] == (
+        f"{run_id}-component-bundle-0"
+    )
+    row = table.json()["rows"][0]
+    assert row["evidence_role"] == "component_bundle"
+    assert row["item_id"] == f"{run_id}-component-bundle-0"
+    assert row["component_values"]["Students"] == "512 people (school_year, facility, SY 2025)"
+    assert row["component_values"]["Staff"] == "44 people (school_year, facility, SY 2025)"
+    assert row["address_status"] == "needs_review"
+    assert row["bundle_qaqc_status"] == "verified"
+
+
 def test_sample_table_endpoint_aggregates_verified_rows_across_rounds(
     tmp_path: Path,
 ) -> None:

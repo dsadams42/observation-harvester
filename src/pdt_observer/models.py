@@ -526,10 +526,29 @@ class ComponentQaqcReview(StrictModel):
     review_notes: str = Field(min_length=1)
 
 
+class ComponentBundleQaqcReview(StrictModel):
+    bundle_index: int = Field(ge=0)
+    item_id: str = Field(min_length=1)
+    geography_name: str = Field(min_length=1)
+    verification_status: LeadQaqcVerificationStatus
+    source_lead_indexes_valid: bool
+    same_facility_or_geography: bool
+    component_fields_match: bool
+    completion_status_match: bool
+    counts_toward_target_approved: bool
+    found_component_types: tuple[str, ...] = ()
+    missing_component_types: tuple[str, ...] = ()
+    source_lead_indexes: tuple[int, ...] = ()
+    supporting_quote: str | None = None
+    recommended_action: LeadQaqcRecommendedAction
+    review_notes: str = Field(min_length=1)
+
+
 class HarvestQaqcReviewSet(StrictModel):
     schema_version: int = Field(default=1, ge=1)
     occupancy_reviews: tuple[LeadQaqcReview, ...] = ()
     component_reviews: tuple[ComponentQaqcReview, ...] = ()
+    component_bundle_reviews: tuple[ComponentBundleQaqcReview, ...] = ()
 
 
 class AddressEnrichmentResult(StrictModel):

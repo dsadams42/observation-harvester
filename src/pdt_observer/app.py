@@ -34,6 +34,7 @@ from pdt_observer.addresses import (
     approved_address_inputs,
     load_address_results,
     merge_address_results,
+    reconcile_address_results,
     render_address_correction_prompt,
     render_address_enrichment_prompt,
     upsert_address_result,
@@ -681,7 +682,11 @@ def _run_qaqc_for_child(
         }
     try:
         review_set = load_qaqc_review_set(output_path)
-        review_count = len(review_set.occupancy_reviews) + len(review_set.component_reviews)
+        review_count = (
+            len(review_set.occupancy_reviews)
+            + len(review_set.component_reviews)
+            + len(review_set.component_bundle_reviews)
+        )
     except Exception as exc:
         append_harvest_log(root, parent_id, f"QAQC validation failed for {run_id}: {exc}.")
         return {
@@ -867,7 +872,13 @@ def _run_address_for_child(
             "error_message": result.stderr.strip() or result.stdout.strip(),
         }
     try:
-        results = load_address_results(output_path)
+        raw_results = load_address_results(output_path)
+        results, reconciliation = reconcile_address_results(
+            root=root,
+            child_run_id=run_id,
+            expected_records=records,
+            results=raw_results,
+        )
     except Exception as exc:
         append_harvest_log(
             root,
@@ -886,7 +897,8 @@ def _run_address_for_child(
     append_harvest_log(
         root,
         parent_id,
-        f"Address validation completed for {run_id}: {len(results)} result(s).",
+        f"Address validation completed for {run_id}: {len(results)} result(s); "
+        f"reconciliation={reconciliation}.",
     )
     return {
         "run_id": run_id,
@@ -895,6 +907,10 @@ def _run_address_for_child(
         "prompt_path": str(prompt_path),
         "address_path": str(output_path),
         "result_count": len(results),
+        "expected_count": reconciliation["expected_count"],
+        "returned_count": reconciliation["returned_count"],
+        "missing_count": reconciliation["missing_count"],
+        "missing_item_ids": reconciliation["missing_item_ids"],
         "error_message": None,
     }
 
@@ -939,6 +955,16 @@ def _run_address_for_manifest(
         for result in child_results
         if isinstance(result["result_count"], int)
     )
+    expected_count = sum(
+        int(result.get("expected_count") or result.get("result_count") or 0)
+        for result in child_results
+    )
+    missing_count = sum(int(result.get("missing_count") or 0) for result in child_results)
+    missing_item_ids = [
+        item_id
+        for result in child_results
+        for item_id in result.get("missing_item_ids", ())
+    ]
     status = "cancelled" if cancelled_count else ("failed" if failed_count else "completed")
     summary = {
         "status": status,
@@ -947,6 +973,9 @@ def _run_address_for_manifest(
         "failed_count": failed_count,
         "cancelled_count": cancelled_count,
         "result_count": result_count,
+        "expected_count": expected_count,
+        "missing_count": missing_count,
+        "missing_item_ids": missing_item_ids,
     }
     append_harvest_log(root, parent_id, f"Address enrichment finished: {summary}.")
     append_dialogue(
@@ -976,6 +1005,7 @@ def _qaqc_reviews_payload(root: Path, child_run_ids: Sequence[str]) -> dict[str,
     child_reviews: list[dict[str, Any]] = []
     all_reviews: list[dict[str, Any]] = []
     all_component_reviews: list[dict[str, Any]] = []
+    all_component_bundle_reviews: list[dict[str, Any]] = []
     for child_run_id in child_run_ids:
         output_path = _qaqc_output_path(root, child_run_id)
         if not output_path.is_file():
@@ -983,26 +1013,71 @@ def _qaqc_reviews_payload(root: Path, child_run_ids: Sequence[str]) -> dict[str,
         review_set = load_qaqc_review_set(output_path)
         reviews = review_set.occupancy_reviews
         component_reviews = review_set.component_reviews
+        component_bundle_reviews = review_set.component_bundle_reviews
         review_payload = [review.model_dump(mode="json") for review in reviews]
         component_review_payload = [
             review.model_dump(mode="json") for review in component_reviews
+        ]
+        component_bundle_review_payload = [
+            review.model_dump(mode="json") for review in component_bundle_reviews
         ]
         child_reviews.append(
             {
                 "run_id": child_run_id,
                 "qaqc_path": str(output_path),
-                "review_count": len(reviews) + len(component_reviews),
+                "review_count": (
+                    len(reviews) + len(component_reviews) + len(component_bundle_reviews)
+                ),
                 "reviews": review_payload,
                 "component_reviews": component_review_payload,
+                "component_bundle_reviews": component_bundle_review_payload,
             }
         )
         all_reviews.extend(review_payload)
         all_component_reviews.extend(component_review_payload)
+        all_component_bundle_reviews.extend(component_bundle_review_payload)
     return {
-        "review_count": len(all_reviews) + len(all_component_reviews),
+        "review_count": (
+            len(all_reviews) + len(all_component_reviews) + len(all_component_bundle_reviews)
+        ),
         "child_reviews": child_reviews,
         "reviews": all_reviews,
         "component_reviews": all_component_reviews,
+        "component_bundle_reviews": all_component_bundle_reviews,
+    }
+
+
+def _address_reconciliation_payload(root: Path, child_run_ids: Sequence[str]) -> dict[str, Any]:
+    child_summaries: list[dict[str, Any]] = []
+    all_missing: list[str] = []
+    expected_count = 0
+    returned_count = 0
+    for child_run_id in child_run_ids:
+        manifest = _load_run_manifest(root, child_run_id)
+        expected = approved_address_inputs(root=root, manifest=manifest)
+        expected_item_ids = [str(record["item_id"]) for record in expected]
+        path = address_output_path(root, child_run_id)
+        results = load_address_results(path) if path.is_file() else ()
+        result_item_ids = [result.item_id for result in results]
+        missing = [item_id for item_id in expected_item_ids if item_id not in result_item_ids]
+        expected_count += len(expected_item_ids)
+        returned_count += len(result_item_ids)
+        all_missing.extend(missing)
+        child_summaries.append(
+            {
+                "run_id": child_run_id,
+                "expected_count": len(expected_item_ids),
+                "returned_count": len(result_item_ids),
+                "missing_count": len(missing),
+                "missing_item_ids": missing,
+            }
+        )
+    return {
+        "expected_count": expected_count,
+        "returned_count": returned_count,
+        "missing_count": len(all_missing),
+        "missing_item_ids": all_missing,
+        "child_reconciliation": child_summaries,
     }
 
 
@@ -1042,6 +1117,68 @@ def _approved_component_records_for_child(
                 "component_qaqc_review": review.model_dump(mode="json"),
             }
         )
+    return tuple(records)
+
+
+def _bundle_review_allows_target(bundle: Any, review: Any | None) -> bool:
+    if review is not None:
+        return (
+            review.verification_status == LeadQaqcVerificationStatus.VERIFIED
+            and review.recommended_action == LeadQaqcRecommendedAction.KEEP
+            and bool(review.counts_toward_target_approved)
+        )
+    return bool(bundle.counts_toward_target)
+
+
+def _approved_component_bundle_records_for_child(
+    root: Path,
+    manifest: HarvestRunManifest,
+) -> tuple[dict[str, Any], ...]:
+    qaqc_path = _qaqc_output_path(root, manifest.run_id)
+    if not qaqc_path.is_file():
+        raise FileNotFoundError(f"QAQC review not found for run: {manifest.run_id}")
+    evidence_set = load_evidence_set(Path(manifest.lead_path))
+    review_set = load_qaqc_review_set(qaqc_path)
+    reviews_by_index = {
+        review.bundle_index: review for review in review_set.component_bundle_reviews
+    }
+    records: list[dict[str, Any]] = []
+    component_leads = [lead.model_dump(mode="json") for lead in evidence_set.component_leads]
+    for bundle_index, bundle in enumerate(evidence_set.component_bundles):
+        review = reviews_by_index.get(bundle_index)
+        if not _bundle_review_allows_target(bundle, review):
+            continue
+        bundle_payload = bundle.model_dump(mode="json")
+        source_leads = [
+            component_leads[index]
+            for index in bundle.source_lead_indexes
+            if 0 <= index < len(component_leads)
+        ]
+        records.append(
+            {
+                "item_id": f"{manifest.run_id}-component-bundle-{bundle_index}",
+                "child_run_id": manifest.run_id,
+                "lead_index": bundle_index,
+                "bundle_index": bundle_index,
+                "facility_type": manifest.profile_set,
+                "component_bundle": bundle_payload,
+                "component_bundle_qaqc_review": (
+                    review.model_dump(mode="json") if review is not None else None
+                ),
+                "component_leads": source_leads,
+            }
+        )
+    return tuple(records)
+
+
+def _approved_component_bundle_records_for_manifest(
+    root: Path,
+    manifest: Any,
+) -> tuple[dict[str, Any], ...]:
+    records: list[dict[str, Any]] = []
+    for child_run_id in _manifest_child_run_ids(manifest):
+        child_manifest = _load_run_manifest(root, child_run_id)
+        records.extend(_approved_component_bundle_records_for_child(root, child_manifest))
     return tuple(records)
 
 
@@ -2660,6 +2797,98 @@ def _table_rows_from_component_records(records: Sequence[dict[str, Any]]) -> lis
     return rows
 
 
+def _table_rows_from_component_bundle_records(
+    records: Sequence[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for record in records:
+        bundle = record["component_bundle"]
+        review = record.get("component_bundle_qaqc_review") or {}
+        component_values: dict[str, str] = {}
+        source_urls: list[str] = []
+        strategies: set[str] = set()
+        confidences: set[str] = set()
+        for lead in record.get("component_leads", ()):
+            source_url = str(lead.get("source_url") or "")
+            if source_url and source_url not in source_urls:
+                source_urls.append(source_url)
+            if lead.get("strategy_id"):
+                strategies.add(str(lead["strategy_id"]))
+            if lead.get("confidence"):
+                confidences.add(str(lead["confidence"]))
+            for datum in lead.get("component_data", ()):
+                _append_component_value(component_values, datum)
+        location = bundle.get("location") or {}
+        fallback_lead = (record.get("component_leads") or [{}])[0]
+        fallback_facility, fallback_city, fallback_country, fallback_address = (
+            _component_location_values(fallback_lead)
+        )
+        facility_name = str(
+            location.get("facility_name") or bundle.get("geography_name") or fallback_facility
+        )
+        city_or_region = str(location.get("city_or_region") or fallback_city)
+        country = str(location.get("country") or bundle.get("country") or fallback_country)
+        reported_address = str(location.get("specific_address_or_landmark") or fallback_address)
+        address = record.get("address_enrichment")
+        address_status = str(record.get("address_status") or "not_run")
+        rows.append(
+            {
+                "row_id": record["item_id"],
+                "item_id": record["item_id"],
+                "run_id": record["child_run_id"],
+                "sample_set_id": record.get("sample_set_id", ""),
+                "sample_round": record.get("sample_round", ""),
+                "facility_type": record.get("facility_type", ""),
+                "evidence_role": "component_bundle",
+                "lead_index": ",".join(
+                    str(index) for index in bundle.get("source_lead_indexes", ())
+                ),
+                "count_index": "",
+                "facility_name": facility_name,
+                "count": "",
+                "group_type": "",
+                "component_type": ", ".join(component_values),
+                "component_values": component_values,
+                "value": "; ".join(f"{key}: {value}" for key, value in component_values.items()),
+                "unit": "",
+                "time_basis": "",
+                "geography_level": "",
+                "incident_date": "",
+                "incident_time": "",
+                "strategy_id": ", ".join(sorted(strategies)),
+                "representativeness": "component_input",
+                "confidence": bundle.get("confidence") or ", ".join(sorted(confidences)),
+                "city_or_region": city_or_region,
+                "country": country,
+                "source_url": source_urls[0] if source_urls else "",
+                "source_urls": "; ".join(source_urls),
+                "source_count": len(source_urls),
+                "qaqc_status": review.get("verification_status", ""),
+                "recommended_action": review.get("recommended_action", ""),
+                "bundle_qaqc_status": review.get("verification_status", ""),
+                "address_status": address_status,
+                "enriched_address": (
+                    address.get("formatted_address")
+                    if isinstance(address, dict)
+                    else reported_address
+                )
+                or reported_address,
+                "geometry_status": "not_applicable",
+                "area_m2": "",
+                "review_notes": review.get("review_notes") or bundle.get("completion_notes") or "",
+                "component_bundle_status": bundle.get("completion_status", ""),
+                "counts_toward_target": bundle.get("counts_toward_target", False),
+                "missing_component_types": ", ".join(
+                    bundle.get("missing_component_types", ())
+                ),
+                "excluded_from_dataset": False,
+                "exclusion_reason_code": "",
+                "exclusion_reason_note": "",
+            }
+        )
+    return rows
+
+
 def _run_table_payload(root: Path, run_id: str, *, mode: str) -> dict[str, Any]:
     manifest = _load_any_manifest(root, run_id)
     if mode == "all":
@@ -2667,10 +2896,16 @@ def _run_table_payload(root: Path, run_id: str, *, mode: str) -> dict[str, Any]:
     elif mode == "verified":
         records = merge_address_results(root, _approved_records_for_manifest(root, manifest))
         rows = _table_rows_from_records(tuple(merge_geometry_items(root, records)))
-        component_records = merge_address_results(
-            root, _approved_component_records_for_manifest(root, manifest)
+        bundle_records = merge_address_results(
+            root, _approved_component_bundle_records_for_manifest(root, manifest)
         )
-        rows.extend(_table_rows_from_component_records(component_records))
+        if bundle_records:
+            rows.extend(_table_rows_from_component_bundle_records(bundle_records))
+        else:
+            component_records = merge_address_results(
+                root, _approved_component_records_for_manifest(root, manifest)
+            )
+            rows.extend(_table_rows_from_component_records(component_records))
     else:
         raise ValueError(f"unsupported table mode: {mode}")
     return {
@@ -2688,12 +2923,18 @@ def _sample_table_payload(root: Path, sample_set_id: str, *, mode: str) -> dict[
     sample_set = refresh_sample_set(root, load_sample_set(root, sample_set_id))
     records = sample_records(root, sample_set, include_excluded=True)
     component_records: list[dict[str, Any]] = []
+    component_bundle_records: list[dict[str, Any]] = []
     round_by_child: dict[str, int] = {}
     for sample_round in sample_set.rounds:
         for child_run_id in sample_round.child_run_ids:
             round_by_child[child_run_id] = sample_round.round_number
     for child_run_id in sample_set.combined_child_run_ids:
         manifest = _load_run_manifest(root, child_run_id)
+        for record in _approved_component_bundle_records_for_child(root, manifest):
+            payload = dict(record)
+            payload["sample_set_id"] = sample_set.sample_set_id
+            payload["sample_round"] = round_by_child.get(child_run_id, "")
+            component_bundle_records.append(payload)
         for record in _approved_component_records_for_child(root, manifest):
             payload = dict(record)
             payload["sample_set_id"] = sample_set.sample_set_id
@@ -2702,8 +2943,14 @@ def _sample_table_payload(root: Path, sample_set_id: str, *, mode: str) -> dict[
     curation = load_curation(root, sample_set_id)
     decisions = {decision.item_id: decision for decision in curation.decisions}
     rows = _table_rows_from_records(records)
-    component_records_with_addresses = merge_address_results(root, tuple(component_records))
-    rows.extend(_table_rows_from_component_records(component_records_with_addresses))
+    component_bundle_records_with_addresses = merge_address_results(
+        root, tuple(component_bundle_records)
+    )
+    if component_bundle_records_with_addresses:
+        rows.extend(_table_rows_from_component_bundle_records(component_bundle_records_with_addresses))
+    else:
+        component_records_with_addresses = merge_address_results(root, tuple(component_records))
+        rows.extend(_table_rows_from_component_records(component_records_with_addresses))
     for row in rows:
         decision = decisions.get(str(row["item_id"]))
         if decision is None:
@@ -3466,7 +3713,10 @@ def create_app(
         run_id = request.path_params["run_id"]
         try:
             manifest = _load_any_manifest(root, run_id)
-            return JSONResponse(address_results_payload(root, _manifest_child_run_ids(manifest)))
+            child_run_ids = _manifest_child_run_ids(manifest)
+            payload = address_results_payload(root, child_run_ids)
+            payload["reconciliation"] = _address_reconciliation_payload(root, child_run_ids)
+            return JSONResponse(payload)
         except ValueError as exc:
             return _json_error(str(exc), status_code=404)
 

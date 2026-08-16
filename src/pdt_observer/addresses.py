@@ -9,7 +9,9 @@ from pydantic import TypeAdapter
 from pdt_observer.geometry import approved_records_for_child, item_id_for_lead
 from pdt_observer.leads import load_evidence_set, load_qaqc_review_set
 from pdt_observer.models import (
+    AddressConfidence,
     AddressEnrichmentResult,
+    AddressEnrichmentStatus,
     EvidenceRole,
     HarvestRunManifest,
     LeadQaqcRecommendedAction,
@@ -101,6 +103,8 @@ def approved_address_inputs_from_files(
             }
         )
     for component_review in review_set.component_reviews:
+        if evidence_set.component_bundles:
+            continue
         if component_review.lead_index >= len(evidence_set.component_leads):
             continue
         if component_review.verification_status != LeadQaqcVerificationStatus.VERIFIED:
@@ -141,6 +145,61 @@ def approved_address_inputs_from_files(
                 "component_summary": component_summary,
             }
         )
+    approved_bundle_reviews = {
+        review.bundle_index: review
+        for review in review_set.component_bundle_reviews
+        if review.verification_status == LeadQaqcVerificationStatus.VERIFIED
+        and review.recommended_action == LeadQaqcRecommendedAction.KEEP
+        and review.counts_toward_target_approved
+    }
+    for bundle_index, bundle in enumerate(evidence_set.component_bundles):
+        if bundle.location is None:
+            continue
+        if review_set.component_bundle_reviews:
+            bundle_review = approved_bundle_reviews.get(bundle_index)
+            if bundle_review is None:
+                continue
+        elif not bundle.counts_toward_target:
+            continue
+        source_leads = [
+            evidence_set.component_leads[index]
+            for index in bundle.source_lead_indexes
+            if 0 <= index < len(evidence_set.component_leads)
+        ]
+        component_parts: list[str] = []
+        for component_lead in source_leads:
+            for datum in component_lead.component_data:
+                component_parts.append(f"{datum.component_type}: {datum.value:g} {datum.unit}")
+        inputs.append(
+            {
+                "evidence_role": "component_bundle",
+                "lead_index": bundle_index,
+                "bundle_index": bundle_index,
+                "item_id": f"{run_id}-component-bundle-{bundle_index}",
+                "source_url": source_leads[0].source_url if source_leads else "",
+                "source_urls": [lead.source_url for lead in source_leads],
+                "source_title": source_leads[0].source_title if source_leads else "",
+                "facility_name": bundle.location.facility_name,
+                "reported_address_or_landmark": bundle.location.specific_address_or_landmark,
+                "city_or_region": bundle.location.city_or_region,
+                "country": bundle.location.country,
+                "qaqc_supporting_quote": (
+                    approved_bundle_reviews[bundle_index].supporting_quote
+                    if bundle_index in approved_bundle_reviews
+                    else None
+                ),
+                "qaqc_review_notes": (
+                    approved_bundle_reviews[bundle_index].review_notes
+                    if bundle_index in approved_bundle_reviews
+                    else bundle.completion_notes
+                ),
+                "component_summary": "; ".join(component_parts),
+                "source_lead_indexes": list(bundle.source_lead_indexes),
+                "target_component_fields": list(bundle.target_component_fields),
+                "found_component_types": list(bundle.found_component_types),
+                "missing_component_types": list(bundle.missing_component_types),
+            }
+        )
     return tuple(inputs)
 
 
@@ -172,6 +231,9 @@ For each input record:
 - `component_input` records are addressable facility examples, not direct occupancy observations.
   Enrich their facility address the same way, but do not infer an occupancy count from component
   facts.
+- `component_bundle` records are the facility observation for population-subcomponent harvests.
+  Find one address for the named facility/store/building/campus, not separate addresses for the
+  individual component values in the bundle.
 - Prefer a specific street/campus/site address over a broad city, district, or province.
 - Capture a short exact supporting quote or address snippet when found.
 - Do not invent an address. If multiple plausible addresses exist, mark the result `ambiguous`.
@@ -217,6 +279,56 @@ exact schema:
 
 {payload}
 """
+
+
+def reconcile_address_results(
+    *,
+    root: Path,
+    child_run_id: str,
+    expected_records: tuple[dict[str, Any], ...],
+    results: tuple[AddressEnrichmentResult, ...],
+) -> tuple[tuple[AddressEnrichmentResult, ...], dict[str, Any]]:
+    expected_by_item_id = {str(record["item_id"]): record for record in expected_records}
+    result_by_item_id = {result.item_id: result for result in results}
+    missing_item_ids = tuple(
+        item_id for item_id in expected_by_item_id if item_id not in result_by_item_id
+    )
+    reconciled = list(results)
+    for item_id in missing_item_ids:
+        record = expected_by_item_id[item_id]
+        reconciled.append(
+            AddressEnrichmentResult(
+                lead_index=int(record.get("lead_index") or 0),
+                item_id=item_id,
+                facility_name=str(record.get("facility_name") or item_id),
+                formatted_address=None,
+                address_line1=None,
+                address_line2=None,
+                city_or_region=str(record.get("city_or_region") or "") or None,
+                state_or_province=None,
+                postal_code=None,
+                country=str(record.get("country") or "") or None,
+                address_source_url=None,
+                address_evidence_quote=None,
+                confidence=AddressConfidence.UNKNOWN,
+                status=AddressEnrichmentStatus.NEEDS_REVIEW,
+                review_notes=(
+                    "Address enrichment agent did not return a result for this expected "
+                    "QAQC-approved address target."
+                ),
+            )
+        )
+    if missing_item_ids:
+        write_json_file(
+            address_output_path(root, child_run_id),
+            [result.model_dump(mode="json") for result in reconciled],
+        )
+    return tuple(reconciled), {
+        "expected_count": len(expected_records),
+        "returned_count": len(results),
+        "missing_count": len(missing_item_ids),
+        "missing_item_ids": list(missing_item_ids),
+    }
 
 
 def render_address_correction_prompt(

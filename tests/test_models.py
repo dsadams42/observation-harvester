@@ -343,6 +343,49 @@ def test_harvest_qaqc_review_set_accepts_component_reviews() -> None:
     assert review_set.component_reviews[0].component_checks[0].value == 512
 
 
+def test_harvest_qaqc_review_set_accepts_component_bundle_reviews() -> None:
+    review_set = HarvestQaqcReviewSet.model_validate(
+        {
+            "schema_version": 1,
+            "occupancy_reviews": [],
+            "component_reviews": [],
+            "component_bundle_reviews": [
+                {
+                    "bundle_index": 0,
+                    "item_id": "run-component-bundle-0",
+                    "geography_name": "Example Store",
+                    "verification_status": "verified",
+                    "source_lead_indexes_valid": True,
+                    "same_facility_or_geography": True,
+                    "component_fields_match": True,
+                    "completion_status_match": True,
+                    "counts_toward_target_approved": True,
+                    "found_component_types": ["employees", "customers"],
+                    "missing_component_types": [],
+                    "source_lead_indexes": [0, 1],
+                    "recommended_action": "keep",
+                    "review_notes": "Bundle components describe the same facility.",
+                }
+            ],
+        }
+    )
+
+    assert review_set.component_bundle_reviews[0].item_id == "run-component-bundle-0"
+    assert review_set.component_bundle_reviews[0].counts_toward_target_approved is True
+
+
+def test_harvest_qaqc_review_set_bundle_reviews_default_empty() -> None:
+    review_set = HarvestQaqcReviewSet.model_validate(
+        {
+            "schema_version": 1,
+            "occupancy_reviews": [],
+            "component_reviews": [],
+        }
+    )
+
+    assert review_set.component_bundle_reviews == ()
+
+
 def test_building_type_profile_count_method_defaults_are_backward_compatible() -> None:
     profile = BuildingTypeProfile.model_validate(
         {

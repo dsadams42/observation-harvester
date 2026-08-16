@@ -310,12 +310,44 @@ def verified_csv(records: Sequence[dict[str, Any]]) -> str:
     writer = csv.DictWriter(output, fieldnames=fieldnames)
     writer.writeheader()
     for record in records:
-        lead = record["lead"]
-        review = record["qaqc_review"]
         address = record.get("address_enrichment") or {}
-        counts = "; ".join(
-            f"{datum['count']} {datum['group_type']}" for datum in lead["occupancy_data"]
-        )
+        lead = record.get("lead")
+        review = record.get("qaqc_review") or record.get("component_bundle_qaqc_review") or {}
+        bundle = record.get("component_bundle")
+        if isinstance(lead, dict):
+            source_url = str(lead["source_url"])
+            location = lead["location"]
+            facility_name = str(location["facility_name"])
+            city_or_region = str(location["city_or_region"])
+            country = str(location["country"])
+            counts = "; ".join(
+                f"{datum['count']} {datum['group_type']}" for datum in lead["occupancy_data"]
+            )
+        elif isinstance(bundle, dict):
+            location = bundle.get("location") or {}
+            source_urls = [
+                str(component_lead.get("source_url") or "")
+                for component_lead in record.get("component_leads", ())
+                if isinstance(component_lead, dict) and component_lead.get("source_url")
+            ]
+            source_url = source_urls[0] if source_urls else ""
+            facility_name = str(
+                location.get("facility_name") or bundle.get("geography_name") or ""
+            )
+            city_or_region = str(location.get("city_or_region") or "")
+            country = str(location.get("country") or bundle.get("country") or "")
+            component_parts: list[str] = []
+            for component_lead in record.get("component_leads", ()):
+                if not isinstance(component_lead, dict):
+                    continue
+                for datum in component_lead.get("component_data", ()):
+                    component_parts.append(
+                        f"{datum.get('component_type')}: {datum.get('value')} "
+                        f"{datum.get('unit')}"
+                    )
+            counts = "; ".join(component_parts)
+        else:
+            continue
         writer.writerow(
             {
                 "item_id": record["item_id"],
@@ -324,12 +356,12 @@ def verified_csv(records: Sequence[dict[str, Any]]) -> str:
                 "child_run_id": record["child_run_id"],
                 "lead_index": record["lead_index"],
                 "facility_type": record.get("facility_type", ""),
-                "source_url": lead["source_url"],
-                "facility_name": lead["location"]["facility_name"],
-                "city_or_region": lead["location"]["city_or_region"],
-                "country": lead["location"]["country"],
+                "source_url": source_url,
+                "facility_name": facility_name,
+                "city_or_region": city_or_region,
+                "country": country,
                 "counts": counts,
-                "qaqc_status": review["verification_status"],
+                "qaqc_status": review.get("verification_status", ""),
                 "address_status": record.get("address_status", "not_run"),
                 "enriched_address": address.get("formatted_address", ""),
                 "address_confidence": address.get("confidence", ""),

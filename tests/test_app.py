@@ -154,7 +154,8 @@ def successful_runner(
     elif "Facility Address Enrichment" in prompt:
         item_id = "placeholder-0"
         try:
-            records_text = prompt.split("## Input Records", 1)[1].strip()
+            marker = "## Input Records" if "## Input Records" in prompt else "## Input"
+            records_text = prompt.split(marker, 1)[1].strip()
             records = json.loads(records_text)
             item_id = records[0]["item_id"]
         except (IndexError, KeyError, ValueError, json.JSONDecodeError):
@@ -1595,7 +1596,7 @@ def test_run_table_endpoint_pivots_occupancy_counts_wide(tmp_path: Path) -> None
     }
     assert row["count_security_staff"] == 4
     assert row["count_workers_evacuated"] == 12
-    assert row["count_relationship"] == "multiple_groups_unknown_additivity"
+    assert row["count_relationship"] == "additive_subgroups"
     assert row["qaqc_status"] == ""
 
 
@@ -1969,7 +1970,7 @@ def test_component_bundle_address_reconciliation_and_verified_table(
     assert row["bundle_qaqc_status"] == "verified"
 
 
-def test_held_component_bundles_do_not_fall_back_to_verified_component_rows(
+def test_partial_component_bundles_are_addressable_but_not_verified_rows(
     tmp_path: Path,
 ) -> None:
     def held_bundle_runner(
@@ -2013,7 +2014,7 @@ def test_held_component_bundles_do_not_fall_back_to_verified_component_rows(
                                 "missing_component_types": ["Staff"],
                                 "source_lead_indexes": [0],
                                 "recommended_action": "review",
-                                "review_notes": "Bundle is held because staff is missing.",
+                                "review_notes": "Bundle is partial because staff is missing.",
                             }
                         ],
                     }
@@ -2131,7 +2132,7 @@ def test_held_component_bundles_do_not_fall_back_to_verified_component_rows(
                         "missing_component_types": ["Staff"],
                         "source_lead_indexes": [0],
                         "recommended_action": "review",
-                        "review_notes": "Bundle is held because staff is missing.",
+                        "review_notes": "Bundle is partial because staff is missing.",
                     }
                 ],
             }
@@ -2146,24 +2147,43 @@ def test_held_component_bundles_do_not_fall_back_to_verified_component_rows(
     all_table = client.get(f"/api/runs/{run_id}/table?mode=all").json()
     component_export = client.get(f"/api/runs/{run_id}/export.components.json").json()
     transcript = client.get(f"/api/runs/{run_id}/dialogue").text
+    geometry = client.get(f"/api/runs/{run_id}/geometry-items").json()
+    sample = client.post("/api/samples/from-run", json={"run_id": run_id})
 
     assert qaqc.status_code == 200
     assert address.status_code == 200
-    assert address.json()["address"]["summary"]["expected_count"] == 0
+    assert address.json()["address"]["summary"]["expected_count"] == 1
     assert verified_table["rows"] == []
     assert all_table["rows"][0]["item_id"] == f"{run_id}-component-bundle-0"
+    assert all_table["rows"][0]["bundle_readiness"] == "partial_component_bundle"
+    assert all_table["rows"][0]["bundle_review_required"] is True
+    assert all_table["rows"][0]["address_status"] == "found"
+    assert geometry["item_count"] == 1
+    assert geometry["items"][0]["bundle_readiness"] == "partial_component_bundle"
     assert len(component_export) == 1
     assert component_export[0]["item_id"] == f"{run_id}-component-0"
     address_stage = next(stage for stage in workflow["stages"] if stage["id"] == "address")
-    assert address_stage["status"] == "blocked"
-    assert "No QAQC-approved address targets exist" in address_stage["detail"]
-    assert address_stage["metrics"]["held_component_bundle_count"] == 1
-    assert "1 bundle(s) are approved" not in transcript
-    assert "0 bundle(s) are approved" in transcript
-    assert (
-        "No address research was run because QAQC produced no approved address targets"
-        in transcript
-    )
+    assert address_stage["status"] == "complete"
+    assert "1 partial candidate bundle(s)" in address_stage["detail"]
+    assert address_stage["metrics"]["partial_component_bundle_count"] == 1
+    assert address_stage["metrics"]["held_component_bundle_count"] == 0
+    sample_stage = next(stage for stage in workflow["stages"] if stage["id"] == "sample")
+    assert sample_stage["status"] == "ready"
+    assert sample.status_code == 200
+    sample_id = sample.json()["sample_set"]["sample_set_id"]
+    sample_table = client.get(f"/api/samples/{sample_id}/table").json()
+    sample_workflow = client.get(f"/api/samples/{sample_id}/workflow-status").json()
+    sample_export = client.get(f"/api/samples/{sample_id}/export.verified.json")
+    assert sample_table["row_count"] == 1
+    assert sample_table["rows"][0]["bundle_readiness"] == "partial_component_bundle"
+    assert sample_table["rows"][0]["model_ready"] is False
+    assert sample_table["rows"][0]["bundle_review_required"] is True
+    assert sample_export.status_code == 200
+    assert sample_export.json() == []
+    export_stage = next(stage for stage in sample_workflow["stages"] if stage["id"] == "export")
+    assert export_stage["status"] == "blocked"
+    assert "1 partial candidate is addressable" in transcript
+    assert "partial candidate" in transcript
     assert "Common missing bundle fields" in transcript
 
 

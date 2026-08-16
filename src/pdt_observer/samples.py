@@ -10,7 +10,11 @@ from typing import Any
 
 from pydantic import TypeAdapter
 
-from pdt_observer.addresses import merge_address_results
+from pdt_observer.addresses import (
+    bundle_is_addressable_candidate,
+    bundle_readiness,
+    merge_address_results,
+)
 from pdt_observer.curation import (
     curation_summary,
     ensure_current_approval,
@@ -23,6 +27,7 @@ from pdt_observer.dialogue import append_dialogue
 from pdt_observer.geographer import run_geographer
 from pdt_observer.geometry import approved_records_for_child, merge_geometry_items
 from pdt_observer.harvest import CodexRunner, append_harvest_log, run_harvest
+from pdt_observer.leads import load_evidence_set, load_qaqc_review_set
 from pdt_observer.models import (
     CoverageDispersionStatus,
     CoverageSteeringReview,
@@ -181,6 +186,81 @@ def _unique(values: Sequence[str]) -> tuple[str, ...]:
     return tuple(seen)
 
 
+def _component_bundle_source_leads(
+    bundle: Any,
+    component_leads: Sequence[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    return [
+        component_leads[index]
+        for index in bundle.source_lead_indexes
+        if 0 <= index < len(component_leads)
+    ]
+
+
+def _addressable_component_bundle_records_for_child(
+    root: Path,
+    manifest: HarvestRunManifest,
+) -> tuple[dict[str, Any], ...]:
+    qaqc_path = root / "qaqc_runs" / f"{manifest.run_id}-qaqc.json"
+    if not qaqc_path.is_file():
+        raise FileNotFoundError(f"QAQC review not found for run: {manifest.run_id}")
+    evidence_set = load_evidence_set(Path(manifest.lead_path))
+    review_set = load_qaqc_review_set(qaqc_path)
+    reviews_by_index = {
+        review.bundle_index: review for review in review_set.component_bundle_reviews
+    }
+    component_leads = [lead.model_dump(mode="json") for lead in evidence_set.component_leads]
+    records: list[dict[str, Any]] = []
+    for bundle_index, bundle in enumerate(evidence_set.component_bundles):
+        review = reviews_by_index.get(bundle_index)
+        source_lead_models = [
+            evidence_set.component_leads[index]
+            for index in bundle.source_lead_indexes
+            if 0 <= index < len(evidence_set.component_leads)
+        ]
+        if review_set.component_bundle_reviews:
+            if not bundle_is_addressable_candidate(
+                bundle=bundle,
+                review=review,
+                source_leads=source_lead_models,
+            ):
+                continue
+        elif not bundle.counts_toward_target:
+            continue
+        readiness = bundle_readiness(
+            bundle=bundle,
+            review=review,
+            source_leads=source_lead_models,
+        )
+        records.append(
+            {
+                "item_id": f"{manifest.run_id}-component-bundle-{bundle_index}",
+                "child_run_id": manifest.run_id,
+                "lead_index": bundle_index,
+                "bundle_index": bundle_index,
+                "facility_type": manifest.profile_set,
+                "component_bundle": bundle.model_dump(mode="json"),
+                "component_bundle_qaqc_review": (
+                    review.model_dump(mode="json") if review is not None else None
+                ),
+                "component_leads": _component_bundle_source_leads(bundle, component_leads),
+                "bundle_readiness": readiness,
+                "model_ready": readiness == "model_ready_bundle",
+                "bundle_review_required": readiness != "model_ready_bundle",
+            }
+        )
+    return tuple(records)
+
+
+def _reviewable_records_for_child(
+    root: Path,
+    manifest: HarvestRunManifest,
+) -> tuple[dict[str, Any], ...]:
+    records = tuple(approved_records_for_child(root, manifest))
+    records += _addressable_component_bundle_records_for_child(root, manifest)
+    return tuple(merge_geometry_items(root, merge_address_results(root, records)))
+
+
 def _sample_stage_summary(root: Path, child_run_ids: Sequence[str]) -> dict[str, object]:
     approved_count = 0
     geocoded_count = 0
@@ -194,10 +274,7 @@ def _sample_stage_summary(root: Path, child_run_ids: Sequence[str]) -> dict[str,
             address_completed_count += 1
         try:
             manifest = load_any_harvest_manifest(root, child_run_id)
-            records = merge_geometry_items(
-                root,
-                merge_address_results(root, approved_records_for_child(root, manifest)),
-            )
+            records = _reviewable_records_for_child(root, manifest)
         except (FileNotFoundError, ValueError):
             continue
         approved_count += len(records)
@@ -277,10 +354,7 @@ def sample_records(
     for child_run_id in sample_set.combined_child_run_ids:
         try:
             manifest = load_any_harvest_manifest(root, child_run_id)
-            child_records = merge_geometry_items(
-                root,
-                merge_address_results(root, approved_records_for_child(root, manifest)),
-            )
+            child_records = _reviewable_records_for_child(root, manifest)
         except (FileNotFoundError, ValueError):
             continue
         for record in child_records:
@@ -292,6 +366,33 @@ def sample_records(
             payload["facility_type"] = getattr(manifest, "profile_set", "")
             records.append(payload)
     return tuple(records)
+
+
+def _record_location(record: dict[str, Any]) -> dict[str, Any]:
+    lead = record.get("lead")
+    if isinstance(lead, dict) and isinstance(lead.get("location"), dict):
+        return dict(lead["location"])
+    bundle = record.get("component_bundle")
+    if isinstance(bundle, dict) and isinstance(bundle.get("location"), dict):
+        return dict(bundle["location"])
+    address = record.get("address_enrichment")
+    if isinstance(address, dict):
+        return {
+            "facility_name": record.get("facility_name") or address.get("facility_name") or "",
+            "city_or_region": address.get("city_or_region") or "",
+            "country": address.get("country") or "",
+        }
+    return {}
+
+
+def _record_source_url(record: dict[str, Any]) -> str:
+    lead = record.get("lead")
+    if isinstance(lead, dict):
+        return str(lead.get("source_url") or "")
+    for component_lead in record.get("component_leads", ()):
+        if isinstance(component_lead, dict) and component_lead.get("source_url"):
+            return str(component_lead["source_url"])
+    return ""
 
 
 def compute_coverage_summary(
@@ -307,8 +408,7 @@ def compute_coverage_summary(
     duplicate_flags: list[dict[str, str | None]] = []
     duplicate_keys: dict[tuple[str, str], str] = {}
     for record in records:
-        lead = record["lead"]
-        location = lead["location"]
+        location = _record_location(record)
         city = str(location.get("city_or_region") or "Unknown")
         country = str(location.get("country") or "")
         city_counts[city] += 1
@@ -327,7 +427,7 @@ def compute_coverage_summary(
                 }
             )
         key = (
-            str(lead.get("source_url") or ""),
+            _record_source_url(record),
             str(location.get("facility_name") or "").casefold(),
         )
         if key in duplicate_keys:

@@ -241,6 +241,15 @@ enrollment, staffing, beds, rooms, or visitor inputs. To compare both evidence
 families, run two separate harvests for the same scope instead of mixing them in
 one run; older hybrid artifacts remain readable for compatibility.
 
+Subcomponent bundles have three review states. **Model-ready bundles** are complete
+or mostly complete, QAQC-approved, and safe for strict verified/model-ready export.
+**Partial component bundles** have a specific facility identity plus at least one
+source-backed population-bearing component; OASIS carries them forward for address
+and geometry review, but labels them as incomplete candidates rather than final
+occupancy observations. **Held bundles** lack a usable facility identity, source
+support, or population-bearing component and stay out of address and geometry work
+until a supervisor or follow-up search resolves them.
+
 The modes are:
 
 - **Single:** one facility type and optional subtype.
@@ -254,7 +263,8 @@ Their artifacts remain isolated and are consolidated in deterministic job order.
 
 ### Geometry Studio
 
-Geometry Studio loads QAQC-approved observations and supports:
+Geometry Studio loads QAQC-approved observations plus addressable partial component
+bundle candidates and supports:
 
 - Geocoding all accepted observations with visible progress and a result summary.
 - Rejecting coordinates outside the campaign country/region/locality extent.
@@ -273,12 +283,15 @@ human research aids; OASIS does not call the Google Maps API or scrape Google re
 
 ### Tabular Data
 
-Tabular Data turns the selected run, batch, campaign, or sample set into one row per
-occupancy count. It defaults to **Verified Only**, joining harvest leads with QAQC,
-address enrichment, and saved geometry. For run-level debugging, **All Leads** shows
-raw harvested leads before QAQC. Visible rows can be searched, sorted, copied, exported
-as CSV from the browser, or opened directly in Geometry Studio when a geometry item is
-available.
+Tabular Data turns the selected run, batch, campaign, or sample set into wide
+facility rows. Direct observations keep one row per lead with separate count-group
+columns; component bundles keep one row per facility with separate component-value
+columns and readiness labels. It defaults to **Verified Only**, joining strict
+model-ready harvest leads with QAQC, address enrichment, and saved geometry. For
+run-level debugging, **All Leads** shows raw and partial candidate records with
+bundle readiness, missing components, and review-required flags. Visible rows can
+be searched, sorted, copied, exported as CSV from the browser, or opened directly
+in Geometry Studio when a geometry item is available.
 
 For sample sets, Tabular Data is also the human curation checkpoint. A reviewer may
 approve the entire sample immediately without selecting individual rows or supplying

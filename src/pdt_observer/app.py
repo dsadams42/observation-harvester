@@ -33,6 +33,9 @@ from pdt_observer.addresses import (
     address_prompt_path,
     address_results_payload,
     approved_address_inputs,
+    bundle_is_addressable_candidate,
+    bundle_is_model_ready,
+    bundle_readiness,
     load_address_results,
     merge_address_results,
     reconcile_address_results,
@@ -150,6 +153,12 @@ from pdt_observer.workflow import utc_now_text, write_model
 
 def _json_error(message: str, *, status_code: int = 400) -> JSONResponse:
     return JSONResponse({"error": message}, status_code=status_code)
+
+
+def _count_phrase(count: int, singular: str, plural: str | None = None) -> str:
+    noun = singular if count == 1 else (plural or f"{singular}s")
+    verb = "is" if count == 1 else "are"
+    return f"{count} {noun} {verb}"
 
 
 async def _request_json(request: Request) -> dict[str, Any]:
@@ -772,8 +781,11 @@ def _run_qaqc_for_manifest(
             f"{audit_counters['direct_total']} direct review(s), "
             f"{audit_counters['component_total']} component review(s), and "
             f"{audit_counters['bundle_total']} bundle review(s). "
-            f"{audit_counters['approved_bundle_count']} bundle(s) are approved as "
-            f"countable facility observations; {audit_counters['held_bundle_count']} are held."
+            f"{_count_phrase(audit_counters['approved_bundle_count'], 'bundle')} "
+            "model-ready, "
+            f"{_count_phrase(audit_counters['partial_bundle_count'], 'partial candidate')} "
+            "addressable, and "
+            f"{_count_phrase(audit_counters['held_bundle_count'], 'bundle')} held."
         ),
         rationale=(
             f"{failed_count} child review(s) failed and {cancelled_count} were cancelled. "
@@ -782,7 +794,7 @@ def _run_qaqc_for_manifest(
             f"{audit_counters['bundle_actions']}. Common missing bundle fields: "
             f"{audit_counters['common_missing_bundle_fields']}. I checked source support, "
             "facility identity, role semantics, bundle completeness, and whether a bundle "
-            "should be allowed to drive address enrichment."
+            "is model-ready, partial-but-addressable, or held for supervisor review."
         ),
     )
     return {
@@ -812,7 +824,8 @@ def _run_address_for_child(
         append_harvest_log(
             root,
             parent_id,
-            f"No QAQC-approved leads found for {run_id}; address enrichment skipped.",
+            f"No model-ready or partial addressable targets found for {run_id}; "
+            "address enrichment skipped.",
         )
         return {
             "run_id": run_id,
@@ -823,7 +836,10 @@ def _run_address_for_child(
             "result_count": 0,
             "error_message": None,
         }
-    prompt = render_address_enrichment_prompt(records, source_label=f"{run_id} QAQC-approved leads")
+    prompt = render_address_enrichment_prompt(
+        records,
+        source_label=f"{run_id} model-ready and partial candidate targets",
+    )
     prompt_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     prompt_path.write_text(prompt, encoding="utf-8")
@@ -996,19 +1012,21 @@ def _run_address_for_manifest(
         stage="address_enrichment",
         message=(
             f"I completed an address-target audit for {completed_count} child run(s): "
-            f"{expected_count} QAQC-approved target(s), {result_count} returned result(s), "
+            f"{expected_count} addressable target(s), {result_count} returned result(s), "
             f"and {missing_count} reconciled missing result(s)."
         ),
         rationale=(
             f"{failed_count} child enrichment run(s) failed and {cancelled_count} were cancelled. "
             f"Bundle QAQC status before addressing: {bundle_counters['approved']} approved "
-            f"and {bundle_counters['held']} held. "
+            f"model-ready, {bundle_counters['partial']} partial candidate, and "
+            f"{bundle_counters['held']} held. "
             + (
-                "No address research was run because QAQC produced no approved address "
-                "targets; held component bundles need supervisor review or gap fill first."
+                "No address research was run because QAQC produced no model-ready or "
+                "partial addressable targets; held component bundles need supervisor review "
+                "or gap fill first."
                 if expected_count == 0 and bundle_counters["held"] > 0
-                else "I limited the work to QAQC-approved observations and preserved "
-                "ambiguous or missing addresses for human review."
+                else "I included strict model-ready observations and partial bundle "
+                "candidates, then preserved ambiguous or missing addresses for human review."
             )
         ),
     )
@@ -1141,12 +1159,19 @@ def _approved_component_records_for_child(
 
 def _bundle_review_allows_target(bundle: Any, review: Any | None) -> bool:
     if review is not None:
-        return (
-            review.verification_status == LeadQaqcVerificationStatus.VERIFIED
-            and review.recommended_action == LeadQaqcRecommendedAction.KEEP
-            and bool(review.counts_toward_target_approved)
-        )
+        return bundle_is_model_ready(review)
     return bool(bundle.counts_toward_target)
+
+
+def _component_bundle_source_leads(
+    bundle: Any,
+    component_leads: Sequence[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    return [
+        component_leads[index]
+        for index in bundle.source_lead_indexes
+        if 0 <= index < len(component_leads)
+    ]
 
 
 def _approved_component_bundle_records_for_child(
@@ -1168,11 +1193,16 @@ def _approved_component_bundle_records_for_child(
         if not _bundle_review_allows_target(bundle, review):
             continue
         bundle_payload = bundle.model_dump(mode="json")
-        source_leads = [
-            component_leads[index]
-            for index in bundle.source_lead_indexes
-            if 0 <= index < len(component_leads)
-        ]
+        source_leads = _component_bundle_source_leads(bundle, component_leads)
+        readiness = bundle_readiness(
+            bundle=bundle,
+            review=review,
+            source_leads=[
+                evidence_set.component_leads[index]
+                for index in bundle.source_lead_indexes
+                if 0 <= index < len(evidence_set.component_leads)
+            ],
+        )
         records.append(
             {
                 "item_id": f"{manifest.run_id}-component-bundle-{bundle_index}",
@@ -1185,8 +1215,90 @@ def _approved_component_bundle_records_for_child(
                     review.model_dump(mode="json") if review is not None else None
                 ),
                 "component_leads": source_leads,
+                "bundle_readiness": readiness,
+                "model_ready": readiness == "model_ready_bundle",
+                "bundle_review_required": readiness != "model_ready_bundle",
             }
         )
+    return tuple(records)
+
+
+def _addressable_component_bundle_records_for_child(
+    root: Path,
+    manifest: HarvestRunManifest,
+) -> tuple[dict[str, Any], ...]:
+    qaqc_path = _qaqc_output_path(root, manifest.run_id)
+    if not qaqc_path.is_file():
+        raise FileNotFoundError(f"QAQC review not found for run: {manifest.run_id}")
+    evidence_set = load_evidence_set(Path(manifest.lead_path))
+    review_set = load_qaqc_review_set(qaqc_path)
+    reviews_by_index = {
+        review.bundle_index: review for review in review_set.component_bundle_reviews
+    }
+    component_leads = [lead.model_dump(mode="json") for lead in evidence_set.component_leads]
+    records: list[dict[str, Any]] = []
+    for bundle_index, bundle in enumerate(evidence_set.component_bundles):
+        review = reviews_by_index.get(bundle_index)
+        source_lead_models = [
+            evidence_set.component_leads[index]
+            for index in bundle.source_lead_indexes
+            if 0 <= index < len(evidence_set.component_leads)
+        ]
+        if review_set.component_bundle_reviews:
+            if not bundle_is_addressable_candidate(
+                bundle=bundle,
+                review=review,
+                source_leads=source_lead_models,
+            ):
+                continue
+        elif not bundle.counts_toward_target:
+            continue
+        readiness = bundle_readiness(
+            bundle=bundle,
+            review=review,
+            source_leads=source_lead_models,
+        )
+        bundle_payload = bundle.model_dump(mode="json")
+        location = bundle_payload.get("location") or {}
+        geocode_query = ", ".join(
+            str(value or "").strip()
+            for value in (
+                location.get("facility_name") or bundle_payload.get("geography_name"),
+                location.get("specific_address_or_landmark"),
+                location.get("city_or_region"),
+                location.get("country") or bundle_payload.get("country"),
+            )
+            if str(value or "").strip()
+        )
+        records.append(
+            {
+                "item_id": f"{manifest.run_id}-component-bundle-{bundle_index}",
+                "child_run_id": manifest.run_id,
+                "lead_index": bundle_index,
+                "bundle_index": bundle_index,
+                "facility_type": manifest.profile_set,
+                "geocode_query": geocode_query,
+                "component_bundle": bundle_payload,
+                "component_bundle_qaqc_review": (
+                    review.model_dump(mode="json") if review is not None else None
+                ),
+                "component_leads": _component_bundle_source_leads(bundle, component_leads),
+                "bundle_readiness": readiness,
+                "model_ready": readiness == "model_ready_bundle",
+                "bundle_review_required": readiness != "model_ready_bundle",
+            }
+        )
+    return tuple(records)
+
+
+def _addressable_component_bundle_records_for_manifest(
+    root: Path,
+    manifest: Any,
+) -> tuple[dict[str, Any], ...]:
+    records: list[dict[str, Any]] = []
+    for child_run_id in _manifest_child_run_ids(manifest):
+        child_manifest = _load_run_manifest(root, child_run_id)
+        records.extend(_addressable_component_bundle_records_for_child(root, child_manifest))
     return tuple(records)
 
 
@@ -1216,6 +1328,7 @@ def _component_bundle_review_counters(root: Path, child_run_ids: Sequence[str]) 
     counters = {
         "total": 0,
         "approved": 0,
+        "partial": 0,
         "held": 0,
         "review": 0,
         "retry": 0,
@@ -1226,13 +1339,36 @@ def _component_bundle_review_counters(root: Path, child_run_ids: Sequence[str]) 
         if not qaqc_path.is_file():
             continue
         review_set = load_qaqc_review_set(qaqc_path)
+        manifest = _load_run_manifest(root, child_run_id)
+        evidence_set = load_evidence_set(Path(manifest.lead_path))
         for review in review_set.component_bundle_reviews:
             counters["total"] += 1
             action = review.recommended_action.value
             if action in counters:
                 counters[action] += 1
-            if _bundle_review_allows_target(bundle=None, review=review):
+            bundle = (
+                evidence_set.component_bundles[review.bundle_index]
+                if review.bundle_index < len(evidence_set.component_bundles)
+                else None
+            )
+            source_leads = (
+                [
+                    evidence_set.component_leads[index]
+                    for index in bundle.source_lead_indexes
+                    if 0 <= index < len(evidence_set.component_leads)
+                ]
+                if bundle is not None
+                else []
+            )
+            readiness = (
+                bundle_readiness(bundle=bundle, review=review, source_leads=source_leads)
+                if bundle is not None
+                else "held_component_bundle"
+            )
+            if readiness == "model_ready_bundle":
                 counters["approved"] += 1
+            elif readiness == "partial_component_bundle":
+                counters["partial"] += 1
             else:
                 counters["held"] += 1
     return counters
@@ -1247,11 +1383,14 @@ def _qaqc_audit_counters(root: Path, child_run_ids: Sequence[str]) -> dict[str, 
     component_total = 0
     bundle_total = 0
     approved_bundle_count = 0
+    partial_bundle_count = 0
     for child_run_id in child_run_ids:
         qaqc_path = _qaqc_output_path(root, child_run_id)
         if not qaqc_path.is_file():
             continue
         review_set = load_qaqc_review_set(qaqc_path)
+        manifest = _load_run_manifest(root, child_run_id)
+        evidence_set = load_evidence_set(Path(manifest.lead_path))
         direct_total += len(review_set.occupancy_reviews)
         component_total += len(review_set.component_reviews)
         bundle_total += len(review_set.component_bundle_reviews)
@@ -1263,8 +1402,29 @@ def _qaqc_audit_counters(root: Path, child_run_ids: Sequence[str]) -> dict[str, 
         )
         for review in review_set.component_bundle_reviews:
             bundle_actions.update((review.recommended_action.value,))
-            if _bundle_review_allows_target(bundle=None, review=review):
+            bundle = (
+                evidence_set.component_bundles[review.bundle_index]
+                if review.bundle_index < len(evidence_set.component_bundles)
+                else None
+            )
+            source_leads = (
+                [
+                    evidence_set.component_leads[index]
+                    for index in bundle.source_lead_indexes
+                    if 0 <= index < len(evidence_set.component_leads)
+                ]
+                if bundle is not None
+                else []
+            )
+            readiness = (
+                bundle_readiness(bundle=bundle, review=review, source_leads=source_leads)
+                if bundle is not None
+                else "held_component_bundle"
+            )
+            if readiness == "model_ready_bundle":
                 approved_bundle_count += 1
+            elif readiness == "partial_component_bundle":
+                partial_bundle_count += 1
             else:
                 held_bundle_missing_fields.update(review.missing_component_types)
     return {
@@ -1275,7 +1435,8 @@ def _qaqc_audit_counters(root: Path, child_run_ids: Sequence[str]) -> dict[str, 
         "component_actions": dict(component_actions),
         "bundle_actions": dict(bundle_actions),
         "approved_bundle_count": approved_bundle_count,
-        "held_bundle_count": bundle_total - approved_bundle_count,
+        "partial_bundle_count": partial_bundle_count,
+        "held_bundle_count": bundle_total - approved_bundle_count - partial_bundle_count,
         "common_missing_bundle_fields": dict(held_bundle_missing_fields.most_common(5)),
     }
 
@@ -1394,6 +1555,11 @@ def _count_relationship(occupancy_data: Sequence[dict[str, Any]], notes: str) ->
         return "overlapping_or_non_additive"
     if any(term in notes_folded for term in ("total", "subgroup", "avoid double counting")):
         return "mixed_total_and_subgroups"
+    group_types = [
+        str(datum.get("group_type") or "").strip().casefold() for datum in occupancy_data
+    ]
+    if all(group_types) and len(set(group_types)) == len(group_types):
+        return "additive_subgroups"
     return "multiple_groups_unknown_additivity"
 
 
@@ -1427,6 +1593,7 @@ def _component_location_values(
 
 def _component_bundle_table_rows(
     *,
+    root: Path,
     child_run_id: str,
     child_manifest: HarvestRunManifest,
     evidence_set: Any,
@@ -1435,6 +1602,22 @@ def _component_bundle_table_rows(
     component_leads = [
         lead.model_dump(mode="json") for lead in evidence_set.component_leads
     ]
+    review_set = None
+    qaqc_path = _qaqc_output_path(root, child_run_id)
+    if qaqc_path.is_file():
+        review_set = load_qaqc_review_set(qaqc_path)
+    bundle_reviews = (
+        {review.bundle_index: review for review in review_set.component_bundle_reviews}
+        if review_set is not None
+        else {}
+    )
+    address_by_item_id: dict[str, dict[str, Any]] = {}
+    address_path = address_output_path(root, child_run_id)
+    if address_path.is_file():
+        address_by_item_id = {
+            result.item_id: result.model_dump(mode="json")
+            for result in load_address_results(address_path)
+        }
     if evidence_set.component_bundles:
         for bundle_index, bundle in enumerate(evidence_set.component_bundles):
             bundle_payload = bundle.model_dump(mode="json")
@@ -1480,6 +1663,18 @@ def _component_bundle_table_rows(
                 location.get("specific_address_or_landmark") or fallback_address
             )
             item_id = f"{child_run_id}-component-bundle-{bundle_index}"
+            address = address_by_item_id.get(item_id)
+            review = bundle_reviews.get(bundle_index)
+            source_lead_models = [
+                evidence_set.component_leads[index]
+                for index in bundle.source_lead_indexes
+                if 0 <= index < len(evidence_set.component_leads)
+            ]
+            readiness = bundle_readiness(
+                bundle=bundle,
+                review=review,
+                source_leads=source_lead_models,
+            )
             rows.append(
                 {
                     "row_id": item_id,
@@ -1515,16 +1710,36 @@ def _component_bundle_table_rows(
                     "source_url": source_urls[0] if source_urls else "",
                     "source_urls": "; ".join(source_urls),
                     "source_count": len(source_urls),
-                    "qaqc_status": "",
-                    "recommended_action": "",
-                    "address_status": "not_run",
-                    "enriched_address": reported_address,
+                    "qaqc_status": (
+                        review.verification_status.value if review is not None else ""
+                    ),
+                    "recommended_action": (
+                        review.recommended_action.value if review is not None else ""
+                    ),
+                    "bundle_qaqc_status": (
+                        review.verification_status.value if review is not None else ""
+                    ),
+                    "address_status": (
+                        str(address.get("status")) if address is not None else "not_run"
+                    ),
+                    "enriched_address": (
+                        address.get("formatted_address")
+                        if address is not None
+                        else reported_address
+                    )
+                    or reported_address,
                     "geometry_status": "not_applicable",
                     "area_m2": "",
-                    "review_notes": bundle_payload.get("completion_notes")
-                    or "; ".join(review_notes),
+                    "review_notes": (
+                        review.review_notes
+                        if review is not None
+                        else bundle_payload.get("completion_notes") or "; ".join(review_notes)
+                    ),
                     "component_bundle_status": bundle_payload.get("completion_status", ""),
                     "counts_toward_target": bundle_payload.get("counts_toward_target", False),
+                    "bundle_readiness": readiness,
+                    "model_ready": readiness == "model_ready_bundle",
+                    "bundle_review_required": readiness != "model_ready_bundle",
                     "missing_component_types": ", ".join(
                         bundle_payload.get("missing_component_types", ())
                     ),
@@ -1607,7 +1822,10 @@ def _component_bundle_table_rows(
 
 def _geometry_items_payload(root: Path, manifest: Any) -> dict[str, Any]:
     records = merge_address_results(root, _approved_records_for_manifest(root, manifest))
-    items = tuple(merge_geometry_items(root, records))
+    bundle_records = merge_address_results(
+        root, _addressable_component_bundle_records_for_manifest(root, manifest)
+    )
+    items = tuple(merge_geometry_items(root, tuple(records) + tuple(bundle_records)))
     return {"item_count": len(items), "items": items}
 
 
@@ -1615,7 +1833,10 @@ def _geometry_record_context(
     root: Path,
     item_id: str,
 ) -> tuple[HarvestRunManifest, dict[str, Any]]:
-    child_run_id, _ = item_id.rsplit("-", 1)
+    if "-component-bundle-" in item_id:
+        child_run_id = item_id.split("-component-bundle-", 1)[0]
+    else:
+        child_run_id, _ = item_id.rsplit("-", 1)
     manifest = _load_run_manifest(root, child_run_id)
     records = _geometry_items_payload(root, manifest)["items"]
     record = next(
@@ -1697,6 +1918,25 @@ def _geocode_context(
                     location.get("country"),
                 )
             )
+    bundle = record.get("component_bundle")
+    if isinstance(bundle, dict):
+        location = bundle.get("location")
+        if isinstance(location, dict):
+            add_query(
+                join_parts(
+                    location.get("facility_name") or bundle.get("geography_name"),
+                    location.get("specific_address_or_landmark"),
+                    location.get("city_or_region"),
+                    location.get("country") or bundle.get("country"),
+                )
+            )
+            add_query(
+                join_parts(
+                    location.get("facility_name") or bundle.get("geography_name"),
+                    location.get("city_or_region"),
+                    location.get("country") or bundle.get("country"),
+                )
+            )
     return manifest, tuple(queries)
 
 
@@ -1719,7 +1959,10 @@ def _run_address_spatial_retry(
         None,
     )
     if address_input is None:
-        return {"status": "skipped", "reason": "QAQC-approved address input was not found."}
+        return {
+            "status": "skipped",
+            "reason": "Model-ready or partial addressable input was not found.",
+        }
     prompt = render_address_correction_prompt(
         address_input,
         current_address=(
@@ -2064,6 +2307,7 @@ def _workflow_status_payload(
     address_target_count = 0
     held_component_bundle_count = 0
     approved_component_bundle_count = 0
+    partial_component_bundle_count = 0
     rejected_count = 0
     address_count = 0
     address_found_count = 0
@@ -2103,8 +2347,35 @@ def _workflow_status_payload(
                 and review.counts_toward_target_approved
                 for review in component_bundle_reviews
             )
+            partial_bundle_count = 0
+            held_bundle_count = 0
+            if child_manifest is not None and Path(child_manifest.lead_path).is_file():
+                evidence_set_for_bundles = load_evidence_set(Path(child_manifest.lead_path))
+                reviews_by_bundle = {
+                    review.bundle_index: review for review in component_bundle_reviews
+                }
+                for bundle_index, bundle in enumerate(
+                    evidence_set_for_bundles.component_bundles
+                ):
+                    source_leads = [
+                        evidence_set_for_bundles.component_leads[index]
+                        for index in bundle.source_lead_indexes
+                        if 0 <= index < len(evidence_set_for_bundles.component_leads)
+                    ]
+                    readiness = bundle_readiness(
+                        bundle=bundle,
+                        review=reviews_by_bundle.get(bundle_index),
+                        source_leads=source_leads,
+                    )
+                    if readiness == "partial_component_bundle":
+                        partial_bundle_count += 1
+                    elif readiness == "held_component_bundle":
+                        held_bundle_count += 1
+            else:
+                held_bundle_count = len(component_bundle_reviews) - bundle_keep_count
             approved_component_bundle_count += bundle_keep_count
-            held_component_bundle_count += len(component_bundle_reviews) - bundle_keep_count
+            partial_component_bundle_count += partial_bundle_count
+            held_component_bundle_count += held_bundle_count
             direct_verified_count += direct_keep_count
             has_bundle_reviews = bool(component_bundle_reviews)
             verified_count += direct_keep_count + (
@@ -2155,7 +2426,7 @@ def _workflow_status_payload(
         address_status = "blocked"
 
     geometry_items: tuple[dict[str, Any], ...] = ()
-    if direct_verified_count > 0:
+    if direct_verified_count > 0 or address_target_count > 0:
         try:
             if sample_set is not None:
                 geometry_items = sample_records(root, refresh_sample_set(root, sample_set))
@@ -2176,18 +2447,24 @@ def _workflow_status_payload(
                 footprint_count += 1
             if geometry.get("geometry_status") == "skipped":
                 skipped_count += 1
+    exportable_count = (
+        sum(1 for item in geometry_items if item.get("model_ready", True))
+        if sample_set is not None
+        else verified_count
+    )
     if approved_count > 0 and geocoded_count + skipped_count >= approved_count:
         geometry_status = "complete"
     elif geocoded_count or skipped_count:
         geometry_status = "running"
-    elif direct_verified_count > 0:
+    elif approved_count > 0 or address_target_count > 0:
         geometry_status = "ready"
     else:
         geometry_status = "blocked"
 
+    reviewable_count = verified_count + partial_component_bundle_count
     if sample_set is not None:
         sample_status = "complete"
-    elif direct_verified_count > 0:
+    elif reviewable_count > 0:
         sample_status = "ready"
     else:
         sample_status = "blocked"
@@ -2349,20 +2626,25 @@ def _workflow_status_payload(
             total=address_target_count,
             detail=(
                 (
-                    f"{address_count}/{address_target_count} QAQC-approved address targets "
-                    f"processed; {address_found_count} addresses found."
+                    f"{address_count}/{address_target_count} addressable target(s) "
+                    f"processed; {address_found_count} addresses found. "
+                    f"{approved_component_bundle_count} model-ready bundle(s), "
+                    f"{partial_component_bundle_count} partial candidate bundle(s), and "
+                    f"{held_component_bundle_count} held bundle(s)."
                 )
                 if address_target_count
                 else (
-                    "No QAQC-approved address targets exist. "
-                    f"{held_component_bundle_count} component bundle(s) are held for "
-                    "supervisor review before address enrichment."
+                    "No addressable targets exist. "
+                    f"{held_component_bundle_count} component bundle(s) are held because they "
+                    "lack a specific facility identity or useful source-backed population "
+                    "component."
                 )
             ),
             metrics={
                 "target_count": address_target_count,
                 "found_count": address_found_count,
                 "approved_component_bundle_count": approved_component_bundle_count,
+                "partial_component_bundle_count": partial_component_bundle_count,
                 "held_component_bundle_count": held_component_bundle_count,
             },
             action_id="run_address" if address_status in {"ready", "attention"} else None,
@@ -2408,7 +2690,12 @@ def _workflow_status_payload(
                 f"Review dataset {sample_set.sample_set_id} contains "
                 f"{len(sample_set.combined_child_run_ids)} child run(s)."
                 if sample_set is not None
-                else "Assemble verified observations into a reviewable dataset."
+                else (
+                    f"Assemble {reviewable_count} reviewable observation candidate(s), "
+                    f"including {partial_component_bundle_count} partial bundle candidate(s)."
+                    if reviewable_count
+                    else "Assemble verified observations into a reviewable dataset."
+                )
             ),
             action_id="create_sample" if sample_status == "ready" else None,
             action_label="Assemble Review Dataset" if sample_status == "ready" else None,
@@ -2476,15 +2763,14 @@ def _workflow_status_payload(
         _workflow_stage(
             stage_id="export",
             label="Export Dataset",
-            status="ready" if (approved_count if sample_set else verified_count) > 0 else "blocked",
-            current=approved_count if sample_set else verified_count,
-            total=approved_count if sample_set else verified_count,
+            status="ready" if exportable_count > 0 else "blocked",
+            current=exportable_count,
+            total=exportable_count,
             detail=(
-                f"{approved_count if sample_set else verified_count} included observation(s) "
-                "are available for export."
+                f"{exportable_count} strict model-ready observation(s) are available for export."
             ),
             action_id=(
-                "export_json" if (approved_count if sample_set else verified_count) > 0 else None
+                "export_json" if exportable_count > 0 else None
             ),
             action_label=(
                 "Download Verified JSON"
@@ -2523,7 +2809,11 @@ def _sample_verified_export_response(
 ) -> Response:
     try:
         sample_set = refresh_sample_set(root, load_sample_set(root, sample_set_id))
-        items = sample_records(root, sample_set)
+        items = tuple(
+            item
+            for item in sample_records(root, sample_set)
+            if item.get("model_ready", True)
+        )
     except ValueError as exc:
         return _json_error(str(exc), status_code=404)
 
@@ -2861,6 +3151,7 @@ def _all_lead_table_rows(root: Path, manifest: Any) -> list[dict[str, Any]]:
             rows.append(row)
         rows.extend(
             _component_bundle_table_rows(
+                root=root,
                 child_run_id=child_run_id,
                 child_manifest=child_manifest,
                 evidence_set=evidence_set,
@@ -3060,10 +3351,13 @@ def _table_rows_from_component_bundle_records(
                     else reported_address
                 )
                 or reported_address,
-                "geometry_status": "not_applicable",
-                "area_m2": "",
+                "geometry_status": record.get("geometry_status", "not_applicable"),
+                "area_m2": record.get("area_m2") or "",
                 "review_notes": review.get("review_notes") or bundle.get("completion_notes") or "",
                 "component_bundle_status": bundle.get("completion_status", ""),
+                "bundle_readiness": record.get("bundle_readiness", ""),
+                "model_ready": record.get("model_ready", False),
+                "bundle_review_required": record.get("bundle_review_required", True),
                 "counts_toward_target": bundle.get("counts_toward_target", False),
                 "missing_component_types": ", ".join(
                     bundle.get("missing_component_types", ())
@@ -3109,38 +3403,14 @@ def _sample_table_payload(root: Path, sample_set_id: str, *, mode: str) -> dict[
         raise ValueError("sample table only supports verified mode")
     sample_set = refresh_sample_set(root, load_sample_set(root, sample_set_id))
     records = sample_records(root, sample_set, include_excluded=True)
-    component_records: list[dict[str, Any]] = []
-    component_bundle_records: list[dict[str, Any]] = []
-    has_component_bundles = False
-    round_by_child: dict[str, int] = {}
-    for sample_round in sample_set.rounds:
-        for child_run_id in sample_round.child_run_ids:
-            round_by_child[child_run_id] = sample_round.round_number
-    for child_run_id in sample_set.combined_child_run_ids:
-        manifest = _load_run_manifest(root, child_run_id)
-        if load_evidence_set(Path(manifest.lead_path)).component_bundles:
-            has_component_bundles = True
-        for record in _approved_component_bundle_records_for_child(root, manifest):
-            payload = dict(record)
-            payload["sample_set_id"] = sample_set.sample_set_id
-            payload["sample_round"] = round_by_child.get(child_run_id, "")
-            component_bundle_records.append(payload)
-        for record in _approved_component_records_for_child(root, manifest):
-            payload = dict(record)
-            payload["sample_set_id"] = sample_set.sample_set_id
-            payload["sample_round"] = round_by_child.get(child_run_id, "")
-            component_records.append(payload)
     curation = load_curation(root, sample_set_id)
     decisions = {decision.item_id: decision for decision in curation.decisions}
-    rows = _table_rows_from_records(records)
-    component_bundle_records_with_addresses = merge_address_results(
-        root, tuple(component_bundle_records)
+    direct_records = tuple(record for record in records if "lead" in record)
+    component_bundle_records = tuple(
+        record for record in records if "component_bundle" in record
     )
-    if component_bundle_records_with_addresses:
-        rows.extend(_table_rows_from_component_bundle_records(component_bundle_records_with_addresses))
-    elif not has_component_bundles:
-        component_records_with_addresses = merge_address_results(root, tuple(component_records))
-        rows.extend(_table_rows_from_component_records(component_records_with_addresses))
+    rows = _table_rows_from_records(direct_records)
+    rows.extend(_table_rows_from_component_bundle_records(component_bundle_records))
     for row in rows:
         decision = decisions.get(str(row["item_id"]))
         if decision is None:

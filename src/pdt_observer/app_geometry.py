@@ -18,7 +18,14 @@ def _normalized_address_words(value: object) -> set[str]:
 def _record_facility_name(record: dict[str, Any]) -> str:
     lead = record.get("lead")
     location = lead.get("location") if isinstance(lead, dict) else None
-    return str(location.get("facility_name") or "") if isinstance(location, dict) else ""
+    if isinstance(location, dict):
+        return str(location.get("facility_name") or "")
+    bundle = record.get("component_bundle")
+    bundle_location = bundle.get("location") if isinstance(bundle, dict) else None
+    if isinstance(bundle_location, dict):
+        geography_name = bundle.get("geography_name") if isinstance(bundle, dict) else ""
+        return str(bundle_location.get("facility_name") or geography_name or "")
+    return ""
 
 
 def _record_expected_postal_code(record: dict[str, Any]) -> str:

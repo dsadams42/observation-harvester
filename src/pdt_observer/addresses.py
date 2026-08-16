@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -145,27 +146,32 @@ def approved_address_inputs_from_files(
                 "component_summary": component_summary,
             }
         )
-    approved_bundle_reviews = {
-        review.bundle_index: review
-        for review in review_set.component_bundle_reviews
-        if review.verification_status == LeadQaqcVerificationStatus.VERIFIED
-        and review.recommended_action == LeadQaqcRecommendedAction.KEEP
-        and review.counts_toward_target_approved
+    bundle_reviews = {
+        review.bundle_index: review for review in review_set.component_bundle_reviews
     }
     for bundle_index, bundle in enumerate(evidence_set.component_bundles):
         if bundle.location is None:
-            continue
-        if review_set.component_bundle_reviews:
-            bundle_review = approved_bundle_reviews.get(bundle_index)
-            if bundle_review is None:
-                continue
-        elif not bundle.counts_toward_target:
             continue
         source_leads = [
             evidence_set.component_leads[index]
             for index in bundle.source_lead_indexes
             if 0 <= index < len(evidence_set.component_leads)
         ]
+        bundle_review = bundle_reviews.get(bundle_index)
+        if review_set.component_bundle_reviews:
+            if not bundle_is_addressable_candidate(
+                bundle=bundle,
+                review=bundle_review,
+                source_leads=source_leads,
+            ):
+                continue
+        elif not bundle.counts_toward_target:
+            continue
+        readiness = bundle_readiness(
+            bundle=bundle,
+            review=bundle_review,
+            source_leads=source_leads,
+        )
         component_parts: list[str] = []
         for component_lead in source_leads:
             for datum in component_lead.component_data:
@@ -184,13 +190,13 @@ def approved_address_inputs_from_files(
                 "city_or_region": bundle.location.city_or_region,
                 "country": bundle.location.country,
                 "qaqc_supporting_quote": (
-                    approved_bundle_reviews[bundle_index].supporting_quote
-                    if bundle_index in approved_bundle_reviews
+                    bundle_review.supporting_quote
+                    if bundle_review is not None
                     else None
                 ),
                 "qaqc_review_notes": (
-                    approved_bundle_reviews[bundle_index].review_notes
-                    if bundle_index in approved_bundle_reviews
+                    bundle_review.review_notes
+                    if bundle_review is not None
                     else bundle.completion_notes
                 ),
                 "component_summary": "; ".join(component_parts),
@@ -198,15 +204,89 @@ def approved_address_inputs_from_files(
                 "target_component_fields": list(bundle.target_component_fields),
                 "found_component_types": list(bundle.found_component_types),
                 "missing_component_types": list(bundle.missing_component_types),
+                "bundle_readiness": readiness,
+                "model_ready": readiness == "model_ready_bundle",
+                "bundle_review_required": readiness != "model_ready_bundle",
             }
         )
     return tuple(inputs)
 
 
+def bundle_is_model_ready(review: Any | None) -> bool:
+    return bool(
+        review is not None
+        and review.verification_status == LeadQaqcVerificationStatus.VERIFIED
+        and review.recommended_action == LeadQaqcRecommendedAction.KEEP
+        and review.counts_toward_target_approved
+    )
+
+
+def bundle_has_population_component(source_leads: Sequence[Any]) -> bool:
+    for lead in source_leads:
+        for datum in getattr(lead, "component_data", ()):
+            if getattr(datum, "value", 0) > 0 and str(
+                getattr(datum, "component_type", "")
+            ).strip():
+                return True
+    return False
+
+
+def bundle_has_specific_facility_identity(bundle: Any) -> bool:
+    location = getattr(bundle, "location", None)
+    if location is None:
+        return False
+    facility_name = str(getattr(location, "facility_name", "") or "").strip()
+    country = str(getattr(location, "country", "") or getattr(bundle, "country", "") or "").strip()
+    return bool(facility_name and country)
+
+
+def bundle_readiness(
+    *,
+    bundle: Any,
+    review: Any | None,
+    source_leads: Sequence[Any],
+) -> str:
+    if bundle_is_model_ready(review):
+        return "model_ready_bundle"
+    if review is None and bool(getattr(bundle, "counts_toward_target", False)):
+        return "model_ready_bundle"
+    if review is None:
+        return "held_component_bundle"
+    if review.recommended_action in {
+        LeadQaqcRecommendedAction.REJECT,
+        LeadQaqcRecommendedAction.RETRY,
+    }:
+        return "held_component_bundle"
+    if review.verification_status not in {
+        LeadQaqcVerificationStatus.VERIFIED,
+        LeadQaqcVerificationStatus.AMBIGUOUS,
+    }:
+        return "held_component_bundle"
+    if not review.source_lead_indexes_valid or not review.same_facility_or_geography:
+        return "held_component_bundle"
+    if not bundle_has_specific_facility_identity(bundle):
+        return "held_component_bundle"
+    if not bundle_has_population_component(source_leads):
+        return "held_component_bundle"
+    return "partial_component_bundle"
+
+
+def bundle_is_addressable_candidate(
+    *,
+    bundle: Any,
+    review: Any | None,
+    source_leads: Sequence[Any],
+) -> bool:
+    return bundle_readiness(bundle=bundle, review=review, source_leads=source_leads) in {
+        "model_ready_bundle",
+        "partial_component_bundle",
+    }
+
+
 def render_address_enrichment_prompt(
     records: tuple[dict[str, Any], ...],
     *,
-    source_label: str = "QAQC-approved lead JSON",
+    source_label: str = "QAQC-approved or partial-candidate lead JSON",
 ) -> str:
     payload = json.dumps(list(records), indent=2)
     return f"""# Facility Address Enrichment
@@ -234,6 +314,8 @@ For each input record:
 - `component_bundle` records are the facility observation for population-subcomponent harvests.
   Find one address for the named facility/store/building/campus, not separate addresses for the
   individual component values in the bundle.
+- `partial_component_bundle` records are addressable supervisor-review candidates, not final
+  model-ready observations. Research their facility address when the facility identity is specific.
 - Prefer a specific street/campus/site address over a broad city, district, or province.
 - Capture a short exact supporting quote or address snippet when found.
 - Do not invent an address. If multiple plausible addresses exist, mark the result `ambiguous`.

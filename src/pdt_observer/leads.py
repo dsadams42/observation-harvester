@@ -509,7 +509,10 @@ For each facility bundle in `component_bundles`:
 - `counts_toward_target` is acceptable only when `completion_status` is `complete` or
   `mostly_complete`.
 - Partial and seed-only bundles may remain in the artifact as useful notes, but they should not
-  be counted as completed observations.
+  be counted as completed/model-ready observations.
+- A partial bundle can still be an addressable supervisor-review candidate when it has a specific
+  facility identity plus at least one source-backed population-bearing component such as students,
+  staff, employees, beds, rooms, residents, visitors, or annual/daily attendance.
 - Treat a facility-level component bundle as the observation unit. The individual component leads
   are supporting evidence fields attached to that facility observation.
 - For facility-level bundles, verify that the bundle identity is specific enough to support one
@@ -901,6 +904,9 @@ When you find a facility-level component hit:
   to be useful despite one or more missing low-priority fields.
 - Set `completion_status` to `partial` or `seed_only` for incomplete seeds. These must have
   `counts_toward_target: false`.
+- Preserve partial bundles with a specific facility identity and at least one source-backed
+  population-bearing component as supervisor-review candidates. Do not convert them into final
+  occupancy estimates and do not mark them countable/model-ready until QAQC approves that status.
 - Only `complete` and `mostly_complete` bundles may use `counts_toward_target: true`.
 
 Do not calculate final occupancy estimates from the bundle. The bundle is a source-backed input

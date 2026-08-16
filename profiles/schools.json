@@ -99,7 +99,7 @@
         "percent employee day/night",
         "shift schooling"
       ],
-      "component_source_guidance": "Harvest these values as source-backed component inputs, not final occupancy estimates. Preserve the source quote, unit, time basis, and geography level for each value."
+      "component_source_guidance": "Harvest these values as source-backed component inputs, not final occupancy estimates. Student/enrollment and staff/faculty/personnel values are high-value population-bearing components. Attendance rate, day/night percentages, and shift-schooling details are desirable modeling enrichments; do not discard a facility candidate solely because those enrichment fields are missing."
     },
     {
       "profile_id": "university_college",
@@ -196,7 +196,7 @@
         "percent employee day/night",
         "percent students day/night"
       ],
-      "component_source_guidance": "Harvest these values as source-backed component inputs, not final occupancy estimates. Preserve the source quote, unit, time basis, and geography level for each value."
+      "component_source_guidance": "Harvest these values as source-backed component inputs, not final occupancy estimates. Student/enrollment and staff/faculty/personnel values are high-value population-bearing components. Day/night percentages are desirable modeling enrichments; do not discard a facility candidate solely because those enrichment fields are missing."
     },
     {
       "profile_id": "university_library",

@@ -641,26 +641,27 @@ def _bullet_list(values: tuple[str, ...]) -> str:
 
 
 def _profile_scope_guidance(profile_set: BuildingProfileSet) -> str:
-    if profile_set.profile_set_id == "schools":
+    if profile_set.profile_set_id in {"schools", "institutions_public_service"}:
         return (
-            "Include bounded counts for school buildings and campus facilities. Do not treat "
-            "ordinary enrollment, attendance, campus population, or seating capacity as occupancy "
-            "observations unless the count is tied to a bounded date, session, event, incident, "
-            "evacuation, or measured period."
+            "Include only facilities within the selected public-service land use and facility "
+            "class. For subcomponent profiles, collect the configured component inputs with "
+            "source quotes; for direct-count profiles, do not treat enrollment, capacity, "
+            "staffing, beds, or annual visitors as occupancy unless the count is tied to a "
+            "bounded date, session, event, incident, evacuation, or measured period."
         )
-    if profile_set.profile_set_id == "manufacturing":
+    if profile_set.profile_set_id in {"manufacturing", "commercial"}:
         return (
-            "Include bounded counts for factories, plants, mills, workshops, and industrial "
-            "production facilities. Workers on shift, evacuated workers, trapped employees, and "
-            "rescued crew members are acceptable occupancy proxies. Do not treat workforce size "
-            "or production capacity as occupancy observations."
+            "Include facilities within the selected commercial land use and facility class. "
+            "For subcomponent profiles, collect employees and shifts as component inputs. For "
+            "direct-count profiles, workers on shift, evacuated workers, trapped employees, and "
+            "rescued crew members are acceptable only when tied to a bounded source observation."
         )
-    if profile_set.profile_set_id == "restaurants":
+    if profile_set.profile_set_id in {"restaurants", "retail_service"}:
         return (
-            "Include bounded counts for restaurants, cafes, quick-service outlets, bars, and "
-            "nightlife venues. Customers, patrons, diners, employees, attendees, and evacuated "
-            "people are acceptable occupancy groups when tied to a bounded service period, event, "
-            "inspection, or incident."
+            "Include only the selected retail/service facility class. Customers, patrons, "
+            "diners, employees, attendees, and evacuated people are acceptable direct occupancy "
+            "groups when tied to a bounded service period, event, inspection, or incident. "
+            "For hotels, rooms and related argument fields are component inputs, not failures."
         )
     if profile_set.profile_set_id == "commercial_business":
         return (
@@ -674,8 +675,8 @@ def _profile_scope_guidance(profile_set: BuildingProfileSet) -> str:
             "or residential portion of a mixed-use building."
         )
     return (
-        "Do not extract records outside this facility type unless the source ties the count to a "
-        "matching named facility."
+        "Do not extract records outside this land use or facility class unless the source ties "
+        "the count to a matching named facility."
     )
 
 
@@ -685,8 +686,12 @@ def _profile_occurrence_guidance(profile_set: BuildingProfileSet) -> str:
         if not profile.enabled:
             continue
         details: list[str] = []
-        if profile.pdt_subtype:
-            details.append(f"PDT subtype: {profile.pdt_subtype}")
+        if profile.land_use:
+            details.append(f"Land use: {profile.land_use}")
+        if profile.facility_class:
+            details.append(f"Facility class: {profile.facility_class}")
+        elif profile.pdt_subtype:
+            details.append(f"Facility class: {profile.pdt_subtype}")
         if profile.area_defined:
             details.append(f"Area scope: {profile.area_defined}")
         if profile.occupancy_groups:
@@ -924,11 +929,11 @@ sources, inspect unstructured source text, and {harvest_objective}
 {target_rule}
 Country: {country_name} (`{country}`).
 Scope: {locality_scope}
-Facility type: {profile_set.label} (`{profile_set.profile_set_id}`).
+Land use: {profile_set.label} (`{profile_set.profile_set_id}`).
 
 ## Inclusion Filter
 
-Only extract records for facilities matching this facility type or selected subtype:
+Only extract records for facilities matching this land use or selected facility class:
 {_bullet_list(facility_labels)}
 
 Facility aliases and examples:
@@ -1023,8 +1028,9 @@ or prose. Use this exact schema. Use raw URLs, not Markdown links, in `source_ur
 
 Set `source_type` to one of: news, official, wire, encyclopedia, social, directory, unknown.
 Set `confidence` to one of: high, medium, low, unknown.
-Set component `time_basis` to one of: instant, shift, daily, event, annual, school_year,
-census_year, operating_period, current_static, unknown. Use `current_static` for facility facts
+Set component `time_basis` to one of: instant, shift, daily, monthly, event, annual,
+school_year, census_year, operating_period, current_static, unknown. Use `monthly` for monthly
+rates or volumes such as hotel occupancy rate by month. Use `current_static` for facility facts
 such as seating capacity, rooms, beds, or named static capacities when no date period is supplied.
 Use `event` for an event-specific component input such as event capacity or staff for a sold-out
 event.

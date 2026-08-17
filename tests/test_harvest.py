@@ -40,60 +40,52 @@ SCOUT_PAYLOAD = {
     "profile_set": "commercial_business",
     "profile_id": "factories_warehouses",
     "recommended_strategy_order": [
-        "shift_operational_presence",
-        "incident_evacuation",
-        "enforcement_inspection",
+        "official_facility_statistics",
+        "operational_schedule_factors",
     ],
     "recommendations": [
         {
-            "strategy_id": "shift_operational_presence",
+            "strategy_id": "official_facility_statistics",
             "emphasis": "primary",
-            "rationale": "Shift reports are likely for factories in this geography.",
-            "query_patterns": ["workers on shift factory Tennessee"],
-            "expected_traps": ["total workforce"],
+            "rationale": "Official facility statistics are likely for factories in this geography.",
+            "query_patterns": ["factory employees Tennessee annual report"],
+            "expected_traps": ["derived occupancy estimates"],
         },
         {
-            "strategy_id": "incident_evacuation",
+            "strategy_id": "operational_schedule_factors",
             "emphasis": "secondary",
-            "rationale": "Incident reports may still expose evacuated workers.",
-            "query_patterns": ["factory workers evacuated Tennessee"],
-            "expected_traps": ["injury counts"],
-        },
-        {
-            "strategy_id": "enforcement_inspection",
-            "emphasis": "secondary",
-            "rationale": "Inspection reports may count workers present.",
-            "query_patterns": ["factory inspection workers present Tennessee"],
-            "expected_traps": ["number of employees"],
+            "rationale": "Shift and day/night factors complete the component picture.",
+            "query_patterns": ["factory shifts employees Tennessee"],
+            "expected_traps": ["ordinary hours without a usable factor"],
         },
     ],
     "local_source_ideas": ["Tennessee OSHA reports"],
-    "overall_rationale": "I would test shift records first, then use incidents and inspections.",
+    "overall_rationale": "I would test official statistics first, then look for schedules.",
     "confidence": "medium",
 }
 
 ACTIVITY_PAYLOAD = {
     "run_id": "us-tn-factories",
-    "overall_summary": "I sampled shift, incident, and inspection pathways and found one lead.",
+    "overall_summary": "I sampled official statistics and schedule pathways and found one lead.",
     "strategy_activity": [
         {
-            "strategy_id": "shift_operational_presence",
+            "strategy_id": "official_facility_statistics",
             "outcome": "productive",
-            "query_examples": ["workers on shift factory Tennessee"],
-            "notes": "Shift language helped find facility-level worker counts.",
+            "query_examples": ["factory employees Tennessee annual report"],
+            "notes": "Official facility statistics helped find component values.",
             "accepted_lead_count": 1,
         },
         {
-            "strategy_id": "incident_evacuation",
+            "strategy_id": "operational_schedule_factors",
             "outcome": "review_only",
-            "query_examples": ["factory workers evacuated Tennessee"],
-            "notes": "Some incident results were casualty-only and stayed as context.",
+            "query_examples": ["factory shifts employees Tennessee"],
+            "notes": "Some schedule results did not quote a usable component value.",
             "accepted_lead_count": 0,
         },
     ],
     "accepted_lead_count": 1,
-    "rejected_or_context_notes": ["Workforce-size pages were treated as context only."],
-    "follow_up_suggestions": ["Try state occupational safety PDFs."],
+    "rejected_or_context_notes": ["Derived occupancy estimates were rejected."],
+    "follow_up_suggestions": ["Try state facility statistics PDFs."],
 }
 
 
@@ -126,7 +118,7 @@ def scout_and_activity_runner(
         json.dumps(ACTIVITY_PAYLOAD | {"run_id": output_path.stem}),
         encoding="utf-8",
     )
-    assert "bounded time, incident, event, shift" in prompt
+    assert "source-backed population component inputs" in prompt
     assert "Public Harvester Activity Report" in prompt
     return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
@@ -154,7 +146,7 @@ def campaign_runner(
 ) -> subprocess.CompletedProcess[str]:
     output_path = Path(command[command.index("-o") + 1])
     output_path.write_text(json.dumps(LEAD_PAYLOAD), encoding="utf-8")
-    assert "Facility type:" in prompt
+    assert "Land use:" in prompt
     assert cwd.is_dir()
     return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
@@ -193,10 +185,9 @@ def test_run_harvest_writes_prompt_leads_and_completed_manifest(tmp_path: Path) 
     assert [
         recommendation.strategy_id.value
         for recommendation in manifest.strategy_plan.recommendations
-    ][:3] == [
-        "incident_evacuation",
-        "enforcement_inspection",
-        "shift_operational_presence",
+    ][:2] == [
+        "official_facility_statistics",
+        "operational_schedule_factors",
     ]
     assert Path(manifest.prompt_path).is_file()
     assert Path(manifest.lead_path).is_file()
@@ -260,8 +251,8 @@ def test_run_harvest_uses_strategy_scout_and_activity_dialogue(tmp_path: Path) -
         recommendation.strategy_id.value
         for recommendation in manifest.strategy_plan.recommendations
     ][:2] == [
-        "shift_operational_presence",
-        "incident_evacuation",
+        "official_facility_statistics",
+        "operational_schedule_factors",
     ]
     assert manifest.strategy_scout_path is not None
     assert Path(manifest.strategy_scout_path).is_file()
@@ -271,7 +262,7 @@ def test_run_harvest_uses_strategy_scout_and_activity_dialogue(tmp_path: Path) -
         encoding="utf-8"
     )
     assert "Strategy Scout" in dialogue
-    assert "I sampled shift, incident, and inspection pathways" in dialogue
+    assert "I sampled official statistics and schedule pathways" in dialogue
 
 
 def test_run_harvest_falls_back_when_activity_report_missing(tmp_path: Path) -> None:
@@ -348,17 +339,19 @@ def test_run_harvest_batch_runs_each_enabled_profile(tmp_path: Path) -> None:
 
     assert manifest.status == HarvestRunStatus.COMPLETED
     assert manifest.summary == {
-        "run_count": 4,
-        "completed_count": 4,
+        "run_count": 6,
+        "completed_count": 6,
         "failed_count": 0,
-        "lead_count": 4,
-        "budget_observation_count": 4,
+        "lead_count": 6,
+        "budget_observation_count": 6,
     }
     assert manifest.child_run_ids == (
         "us-tn-commercial-malls_retail_markets",
         "us-tn-commercial-offices_bpo_call_centers",
-        "us-tn-commercial-factories_warehouses",
-        "us-tn-commercial-hotels_restaurants",
+        "us-tn-commercial-manufacturing_facilities",
+        "us-tn-commercial-warehouses_storage",
+        "us-tn-commercial-hotels_motels_hospitality",
+        "us-tn-commercial-restaurants_hospitality",
     )
     assert manifest.log_path is not None
     assert Path(manifest.log_path).is_file()

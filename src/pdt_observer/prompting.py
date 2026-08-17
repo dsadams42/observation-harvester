@@ -115,8 +115,12 @@ def _strategy_plan_text(plan: StrategyPlan) -> str:
 
 def _profile_occurrence_text(profile: BuildingTypeProfile) -> str:
     values: list[str] = []
-    if profile.pdt_subtype:
-        values.append(f"PDT subtype: {profile.pdt_subtype}")
+    if profile.land_use:
+        values.append(f"Land use: {profile.land_use}")
+    if profile.facility_class:
+        values.append(f"Facility class: {profile.facility_class}")
+    elif profile.pdt_subtype:
+        values.append(f"Facility class: {profile.pdt_subtype}")
     if profile.area_defined:
         values.append(f"Area scope: {profile.area_defined}")
     if profile.occupancy_groups:
@@ -191,20 +195,29 @@ def render_work_prompt(
     is_hybrid = profile.count_method == CountMethod.HYBRID
     objective = (
         "Find source-backed population component inputs for facilities or regional/country "
-        "scopes matching this subtype. Do not calculate final occupancy estimates in this phase."
+        "scopes matching this facility class. Do not calculate final occupancy estimates in "
+        "this phase."
         if is_component
         else (
             "Find both direct people-present observations and source-backed population component "
-            "inputs for this subtype. Keep the two evidence roles separate and do not calculate "
-            "final occupancy estimates."
+            "inputs for this facility class. Keep the two evidence roles separate and do not "
+            "calculate final occupancy estimates."
             if is_hybrid
             else (
                 "Find explicit historical headcounts of people physically present in, at, "
                 "evacuated from, trapped in, rescued from, transferred from, checked in to, "
                 "attending, on duty at, sheltered in, or measured within facilities matching "
-                "this assigned subtype during a bounded date, time, event, shift, inspection, "
-                "incident, operating period, or study window."
+                "this assigned facility class during a bounded date, time, event, shift, "
+                "inspection, incident, operating period, or study window."
             )
+        )
+    )
+    objective_note = (
+        "Search for the configured argument fields and preserve each value as component evidence."
+        if is_component
+        else (
+            "Incidents are one high-value direct-count evidence pathway, not the only "
+            "acceptable pathway."
         )
     )
     direct_rule = (
@@ -212,12 +225,19 @@ def render_work_prompt(
         "bed counts, workforce size, annual visitors, or scheduled staffing as context only "
         "unless the source explicitly ties the number to people present during a bounded event, "
         "shift, incident, inspection, or measured period."
-        if not is_component
+        if not is_component and not is_hybrid
         else (
-            "For this component-input profile, capacity, enrollment, beds, rooms, workforce, "
-            "visitor volumes, rates, schedules, and regional statistics may be valid component "
-            "evidence when they match the configured component fields. Do not label them as "
-            "direct occupancy and do not derive a final occupancy estimate."
+            (
+                "For this hybrid profile, direct people-present observations and source-backed "
+                "component inputs are both valid, but they must remain role-labeled and separate."
+            )
+            if is_hybrid
+            else (
+                "For this component-input profile, capacity, enrollment, beds, rooms, workforce, "
+                "visitor volumes, rates, schedules, and regional statistics may be valid component "
+                "evidence when they match the configured component fields. Do not label them as "
+                "direct occupancy and do not derive a final occupancy estimate."
+            )
         )
     )
 
@@ -232,7 +252,7 @@ the local Python validation harness in this repository. Do not use external API 
 - Locality: {item.locality}
 - Country: {country_name} (`{item.country}`)
 - Observation type: {item.observation_type}
-- Subtype: {profile.label} (`{profile.profile_id}`)
+- Facility class: {profile.label} (`{profile.profile_id}`)
 - Continue only while `should_continue` is `true`; current value: {status.should_continue}
 - Accepted observations still needed: {status.remaining["accepted_needed"]}
 - Sources remaining: {status.remaining["sources_remaining"]}
@@ -242,8 +262,7 @@ the local Python validation harness in this repository. Do not use external API 
 
 ## Objective
 
-{objective} Incidents are one high-value direct-count evidence pathway, not the only acceptable
-pathway.
+{objective} {objective_note}
 
 Profile guidance:
 {profile.source_search_prompt}

@@ -10,7 +10,7 @@ from pdt_observer.models import CountMethod, CurationReasonCode, GeometryPoint, 
 class HarvestRunRequest(BaseModel):
     country: str = Field(min_length=2)
     locality: str | None = None
-    profiles: str = "schools"
+    profiles: str = "institutions_public_service"
     profile: str | None = None
     target: int = Field(default=20, ge=1)
     count_method_override: CountMethod | None = None
@@ -21,7 +21,7 @@ class HarvestRunRequest(BaseModel):
 class HarvestBatchRunRequest(BaseModel):
     country: str = Field(min_length=2)
     locality: str | None = None
-    profiles: str = "schools"
+    profiles: str = "institutions_public_service"
     target: int = Field(default=20, ge=1)
     count_method_override: CountMethod | None = None
     batch_id: str | None = None
@@ -31,7 +31,7 @@ class HarvestBatchRunRequest(BaseModel):
 class GeographerPlanRequest(BaseModel):
     country: str = Field(min_length=2)
     locality: str | None = None
-    profiles: str = "schools"
+    profiles: str = "institutions_public_service"
     profile: str | None = None
     localities: tuple[str, ...] = ()
     facility_types: tuple[str, ...] = ()

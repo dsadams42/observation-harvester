@@ -99,7 +99,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--profiles",
         "--facility-type",
         dest="profiles",
-        default="schools",
+        default="institutions_public_service",
     )
     batch_create.add_argument("--batch-id")
     batch_create.add_argument("--source-hint", action="append", default=[])
@@ -131,7 +131,7 @@ def build_parser() -> argparse.ArgumentParser:
     work_status.add_argument("--work-item-id", required=True)
     work_prompt = work_subparsers.add_parser(
         "prompt",
-        help="Render a subtype-specific Codex prompt for a work item.",
+        help="Render a facility-class-specific Codex prompt for a work item.",
     )
     work_prompt.add_argument("--workspace", type=Path, default=Path("."))
     work_prompt.add_argument("--work-item-id", required=True)
@@ -199,21 +199,21 @@ def build_parser() -> argparse.ArgumentParser:
     harvest_subparsers = harvest.add_subparsers(dest="harvest_command", required=True)
     harvest_prepare = harvest_subparsers.add_parser(
         "prepare",
-        help="Render a broad country/facility-type lead-harvest prompt.",
+        help="Render a broad country/land-use lead-harvest prompt.",
     )
     harvest_prepare.add_argument("--country", required=True)
     harvest_prepare.add_argument(
         "--profiles",
         "--facility-type",
         dest="profiles",
-        default="schools",
-        help="Top-level facility type to harvest.",
+        default="institutions_public_service",
+        help="Top-level land use to harvest.",
     )
     harvest_prepare.add_argument(
         "--profile",
         "--subtype",
         dest="profile",
-        help="Optional focused subtype within the facility type.",
+        help="Optional focused facility class within the land use.",
     )
     harvest_prepare.add_argument("--target", type=int, default=20)
     harvest_prepare.add_argument("--locality")
@@ -232,14 +232,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--profiles",
         "--facility-type",
         dest="profiles",
-        default="schools",
-        help="Top-level facility type to harvest.",
+        default="institutions_public_service",
+        help="Top-level land use to harvest.",
     )
     harvest_run.add_argument(
         "--profile",
         "--subtype",
         dest="profile",
-        help="Optional focused subtype within the facility type.",
+        help="Optional focused facility class within the land use.",
     )
     harvest_run.add_argument("--target", type=int, default=20)
     harvest_run.add_argument("--locality")
@@ -253,15 +253,15 @@ def build_parser() -> argparse.ArgumentParser:
     harvest_run.add_argument("--codex-bin", default="codex")
     harvest_batch_run = harvest_subparsers.add_parser(
         "batch-run",
-        help="Run one focused harvest per enabled subtype in a facility type.",
+        help="Run one focused harvest per enabled facility class in a land use.",
     )
     harvest_batch_run.add_argument("--country", required=True)
     harvest_batch_run.add_argument(
         "--profiles",
         "--facility-type",
         dest="profiles",
-        default="schools",
-        help="Top-level facility type to harvest.",
+        default="institutions_public_service",
+        help="Top-level land use to harvest.",
     )
     harvest_batch_run.add_argument("--target", type=int, default=20)
     harvest_batch_run.add_argument("--locality")

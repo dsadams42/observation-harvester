@@ -18,30 +18,33 @@ def _ids(profile_set_name: str, profile_id: str | None = None) -> tuple[str, ...
 
 
 def test_manufacturing_plan_prioritizes_component_input_strategies() -> None:
-    assert _ids("manufacturing", "light_manufacturing") == (
+    assert _ids("commercial", "light_manufacturing") == (
         "official_facility_statistics",
         "operational_schedule_factors",
     )
 
 
 def test_temporary_use_is_recommended_only_for_profiles_with_intermittent_venues() -> None:
-    assert "temporary_use_occupancy" in _ids("public_venues", "retail_events")
-    assert "temporary_use_occupancy" not in _ids("schools", "primary_secondary_education")
+    assert "temporary_use_occupancy" in _ids("recreation_entertainment", "theater")
     assert "temporary_use_occupancy" not in _ids(
-        "public_venues",
-        "restaurants_bars",
+        "institutions_public_service",
+        "school_d_12",
+    )
+    assert "temporary_use_occupancy" not in _ids(
+        "retail_service",
+        "restaurant",
     )
 
 
 def test_count_method_override_switches_strategy_family() -> None:
     direct_plan = build_strategy_plan(
-        get_profile_set("manufacturing"),
+        get_profile_set("commercial"),
         profile_id="light_manufacturing",
         count_method_override=CountMethod.DIRECT_COUNT,
     )
     component_plan = build_strategy_plan(
         get_profile_set("recreation_entertainment"),
-        profile_id="theaters",
+        profile_id="theater",
         count_method_override=CountMethod.POPULATION_SUBCOMPONENT,
     )
 
@@ -54,8 +57,8 @@ def test_count_method_override_switches_strategy_family() -> None:
 
 def test_strategy_plan_contains_auditable_reasons() -> None:
     plan = build_strategy_plan(
-        get_profile_set("public_venues"),
-        profile_id="retail_events",
+        get_profile_set("recreation_entertainment"),
+        profile_id="theater",
     )
     temporary = next(
         item
@@ -68,14 +71,13 @@ def test_strategy_plan_contains_auditable_reasons() -> None:
 
 
 def test_profile_level_strategy_preferences_override_family_defaults() -> None:
-    religious = _ids("public_institutional", "religious")
-    power_plants = _ids("manufacturing", "power_plants")
-    theaters = _ids("recreation_entertainment", "theaters")
+    religious = _ids("institutions_public_service", "religious")
+    power_plants = _ids("commercial", "powerplants")
+    theaters = _ids("recreation_entertainment", "theater")
 
-    assert religious[:3] == (
-        "official_event_attendance",
+    assert religious[:2] == (
         "incident_evacuation",
-        "temporary_use_occupancy",
+        "routine_dated_attendance",
     )
     assert power_plants[:2] == (
         "official_facility_statistics",
@@ -89,7 +91,7 @@ def test_profile_level_strategy_preferences_override_family_defaults() -> None:
 
 def test_strategy_queries_mix_component_evidence_pathways() -> None:
     plan = build_strategy_plan(
-        get_profile_set("manufacturing"),
+        get_profile_set("commercial"),
         profile_id="heavy_manufacturing",
     )
     queries = render_strategy_queries(

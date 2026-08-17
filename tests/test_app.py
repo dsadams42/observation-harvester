@@ -191,6 +191,53 @@ def no_gap_runner(
     return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
 
+def partial_gap_runner(
+    command: Sequence[str],
+    prompt: str,
+    cwd: Path,
+) -> subprocess.CompletedProcess[str]:
+    output_path = Path(command[command.index("-o") + 1])
+    if "Sample Set Coverage Steering" in prompt:
+        payload = {
+            **COVERAGE_PAYLOAD,
+            "coverage_id": output_path.stem,
+            "sample_set_id": output_path.stem.split("-coverage", 1)[0],
+            "recommended_child_jobs": [
+                {
+                    "country": "US",
+                    "locality": "Western Tennessee",
+                    "facility_type": "schools",
+                    "target": 2,
+                    "reason": "Western Tennessee is underrepresented.",
+                },
+                {
+                    "country": "US",
+                    "locality": "Eastern Tennessee",
+                    "facility_type": "schools",
+                    "target": 2,
+                    "reason": "Eastern Tennessee is underrepresented.",
+                },
+            ],
+        }
+    elif "Minimal Geographic Vernacular Review" in prompt:
+        payload = {
+            "search_languages": ["English"],
+            "administrative_terms": [],
+            "public_safety_terms": [],
+            "facility_terms": [],
+            "query_adjustments": [],
+            "source_urls": [],
+            "commentary": "No special local terms needed.",
+            "rationale": "English source terms are sufficient.",
+        }
+    elif "western-tennessee" in output_path.name:
+        return subprocess.CompletedProcess(command, 2, stdout="", stderr="harvest failed")
+    else:
+        return successful_runner(command, prompt, cwd)
+    output_path.write_text(json.dumps(payload), encoding="utf-8")
+    return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+
 def multi_count_runner(
     command: Sequence[str],
     prompt: str,
@@ -377,8 +424,8 @@ def test_index_page_contains_local_app_controls(tmp_path: Path) -> None:
     assert "Observation Acquisition and Spatial Information Synthesis" in html
     assert 'src="/assets/oasis-logo.jpg"' in html
     assert "Country" in html
-    assert "Facility Type" in html
-    assert "Subtype" in html
+    assert "Land Use" in html
+    assert "Facility Class" in html
     assert "Campaign" in html
     assert "Regions or Localities" in html
     assert "Agentic Workbench" in html
@@ -475,6 +522,9 @@ def test_index_page_contains_local_app_controls(tmp_path: Path) -> None:
     assert "Search Corrected Address" in html
     assert "Save Footprint" in html
     assert "Download Footprints GeoJSON" in html
+    assert "Download Admin-Scoped JSON" in html
+    assert "Download Admin-Scoped CSV" in html
+    assert "Download Sample Admin-Scoped JSON" in html
     assert "Clear Generated Runs" in html
     assert "Clear All" not in html
     assert "Agent Activity" in html
@@ -501,7 +551,7 @@ def test_index_page_contains_local_app_controls(tmp_path: Path) -> None:
     assert "'transcript.txt'" in js.text
     assert "Cancel Run" in html
     assert "Exit OASIS" in html
-    assert "closing this tab only closes the browser view" in html
+    assert "closes this tab when the browser allows it" in html
     assert html.index("Exit OASIS") < html.index("Agent transcript and activity")
     assert "Theme" in html
     assert "observationHarvesterTheme" in js.text
@@ -534,6 +584,8 @@ def test_index_page_contains_local_app_controls(tmp_path: Path) -> None:
     assert "Copy Visible Rows" in html
     assert "downloadVisibleTableCsv" in js.text
     assert "openTableRowInGeometry" in js.text
+    assert "function geometryLocation(item)" in js.text
+    assert "item.lead.location" not in js.text
     assert "/api/samples/from-run" in js.text
     assert "/api/samples/${state.currentSampleSetId}/coverage-run" in js.text
     assert "/api/samples/${state.currentSampleSetId}/gap-fill-run" in js.text
@@ -542,10 +594,13 @@ def test_index_page_contains_local_app_controls(tmp_path: Path) -> None:
     assert "/api/samples/${state.currentSampleSetId}/geometry-items" in js.text
     assert "/api/geometry/geocode" in js.text
     assert "/api/runs/${state.currentRunId}/export.verified.${format}" in js.text
+    assert "/api/runs/${state.currentRunId}/export.admin_scoped.${format}" in js.text
+    assert "/api/samples/${state.currentSampleSetId}/export.admin_scoped.${format}" in js.text
     assert "/api/runs/${state.currentRunId}/export.footprints.geojson" in js.text
     assert "QAQC still running" in js.text
     assert "/api/runs/clear" in js.text
     assert "/api/app/exit" in js.text
+    assert "window.close()" in js.text
     assert "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" in html
     assert "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" in html
     assert "https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" in html
@@ -559,40 +614,46 @@ def test_profiles_endpoint_returns_builtin_profile_sets(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    profile_ids = {item["profile_set_id"] for item in payload["profile_sets"]}
-    assert {
-        "schools",
-        "manufacturing",
-        "restaurants",
+    profile_ids = [item["profile_set_id"] for item in payload["profile_sets"]]
+    assert profile_ids == [
+        "residential",
+        "institutions_public_service",
         "retail_service",
-        "public_institutional",
+        "commercial",
         "transportation",
+        "military_facility",
         "recreation_entertainment",
         "agriculture",
-        "pdt_residential",
-        "commercial_business",
-        "public_venues",
-        "residential",
-    } <= profile_ids
-    schools = next(
-        item for item in payload["profile_sets"] if item["profile_set_id"] == "schools"
+    ]
+    public_service = next(
+        item
+        for item in payload["profile_sets"]
+        if item["profile_set_id"] == "institutions_public_service"
     )
+    assert public_service["land_use"] == "Institutions/Public Service"
     assert any(
-        profile["profile_id"] == "university_college"
-        for profile in schools["profiles"]
+        profile["profile_id"] == "school_d_12"
+        for profile in public_service["profiles"]
     )
     assert any(
         strategy["strategy_id"] == "incident_evacuation"
         for strategy in payload["strategies"]
     )
-    university = next(
+    school = next(
         profile
-        for profile in schools["profiles"]
-        if profile["profile_id"] == "university_college"
+        for profile in public_service["profiles"]
+        if profile["profile_id"] == "school_d_12"
     )
-    assert university["strategy_plan"]["recommendations"]
-    assert university["pdt_subtype"] == "University"
-    assert "students" in university["occupancy_groups"]
+    assert school["strategy_plan"]["recommendations"]
+    assert school["land_use"] == "Institutions/Public Service"
+    assert school["facility_class"] == "School (D-12)"
+    assert school["pdt_subtype"] == "School (D-12)"
+    assert school["component_count_fields"] == [
+        "Students",
+        "staff",
+        "faculty",
+        "shift schooling",
+    ]
 
 
 def test_geographer_plan_flows_into_harvest_prompt_and_dialogue(tmp_path: Path) -> None:
@@ -752,8 +813,8 @@ def test_harvest_batch_run_endpoint_returns_child_runs(tmp_path: Path) -> None:
     assert response.status_code == 200
     manifest = response.json()["manifest"]
     assert manifest["status"] == "completed"
-    assert manifest["summary"]["run_count"] == 4
-    assert len(manifest["child_run_ids"]) == 4
+    assert manifest["summary"]["run_count"] == 6
+    assert len(manifest["child_run_ids"]) == 6
 
 
 def test_harvest_campaign_run_endpoint_returns_child_runs(tmp_path: Path) -> None:
@@ -1516,6 +1577,8 @@ def test_geometry_review_endpoints_and_verified_exports(tmp_path: Path) -> None:
     verified = client.get(f"/api/runs/{run_id}/verified-leads")
     geometry_items = client.get(f"/api/runs/{run_id}/geometry-items")
     item = geometry_items.json()["items"][0]
+    admin_scoped_json = client.get(f"/api/runs/{run_id}/export.admin_scoped.json")
+    admin_scoped_csv = client.get(f"/api/runs/{run_id}/export.admin_scoped.csv")
     geocoded = client.post(
         "/api/geometry/geocode",
         json={"item_id": item["item_id"], "query": item["geocode_query"]},
@@ -1540,11 +1603,17 @@ def test_geometry_review_endpoints_and_verified_exports(tmp_path: Path) -> None:
     )
     verified_json = client.get(f"/api/runs/{run_id}/export.verified.json")
     verified_csv = client.get(f"/api/runs/{run_id}/export.verified.csv")
+    admin_scoped_after_point = client.get(f"/api/runs/{run_id}/export.admin_scoped.json")
     footprints = client.get(f"/api/runs/{run_id}/export.footprints.geojson")
 
     assert verified.status_code == 200
     assert verified.json()["item_count"] == 1
     assert geometry_items.json()["items"][0]["geometry_status"] == "needs_review"
+    assert admin_scoped_json.status_code == 200
+    assert admin_scoped_json.json()[0]["spatial_certainty"] == "admin_scoped"
+    assert admin_scoped_json.json()[0]["admin_level"] == "locality"
+    assert admin_scoped_json.json()[0]["admin_name"] == "Tennessee"
+    assert "admin_scoped" in admin_scoped_csv.text
     assert geocoded.json()["geometry"]["point"]["latitude"] == 36.0
     assert saved.json()["geometry"]["geometry_status"] == "footprint_drawn"
     assert saved.json()["geometry"]["area_m2"] > 0
@@ -1560,6 +1629,7 @@ def test_geometry_review_endpoints_and_verified_exports(tmp_path: Path) -> None:
     assert verified_record["area_m2"] > 0
     assert "Example Warehouse" in verified_json.text
     assert "footprint_drawn" in verified_csv.text
+    assert admin_scoped_after_point.json() == []
     assert footprints.json()["features"][0]["geometry"]["type"] == "Polygon"
 
 
@@ -1946,6 +2016,7 @@ def test_component_bundle_address_reconciliation_and_verified_table(
     address_results = client.get(f"/api/runs/{run_id}/address-results")
     reviews = client.get(f"/api/runs/{run_id}/qaqc-reviews")
     table = client.get(f"/api/runs/{run_id}/table?mode=verified")
+    workflow = client.get(f"/api/runs/{run_id}/workflow-status")
 
     assert address.status_code == 200
     assert address.json()["address"]["summary"]["expected_count"] == 1
@@ -1968,6 +2039,14 @@ def test_component_bundle_address_reconciliation_and_verified_table(
     assert row["component_values"]["Staff"] == "44 people (school_year, facility, SY 2025)"
     assert row["address_status"] == "needs_review"
     assert row["bundle_qaqc_status"] == "verified"
+    qaqc_stage = next(stage for stage in workflow.json()["stages"] if stage["id"] == "qaqc")
+    assert qaqc_stage["current"] == 1
+    assert qaqc_stage["total"] == 1
+    assert "target observation(s) reviewed" in qaqc_stage["detail"]
+    assert "supporting component evidence record(s)" in qaqc_stage["detail"]
+    assert qaqc_stage["metrics"]["raw_evidence_record_count"] == 3
+    assert qaqc_stage["metrics"]["raw_review_count"] == 3
+    assert qaqc_stage["metrics"]["supporting_component_review_count"] == 2
 
 
 def test_partial_component_bundles_are_addressable_but_not_verified_rows(
@@ -2174,12 +2253,16 @@ def test_partial_component_bundles_are_addressable_but_not_verified_rows(
     sample_table = client.get(f"/api/samples/{sample_id}/table").json()
     sample_workflow = client.get(f"/api/samples/{sample_id}/workflow-status").json()
     sample_export = client.get(f"/api/samples/{sample_id}/export.verified.json")
+    sample_admin_export = client.get(f"/api/samples/{sample_id}/export.admin_scoped.json")
     assert sample_table["row_count"] == 1
     assert sample_table["rows"][0]["bundle_readiness"] == "partial_component_bundle"
     assert sample_table["rows"][0]["model_ready"] is False
     assert sample_table["rows"][0]["bundle_review_required"] is True
     assert sample_export.status_code == 200
     assert sample_export.json() == []
+    assert sample_admin_export.status_code == 200
+    assert sample_admin_export.json()[0]["spatial_certainty"] == "admin_scoped"
+    assert sample_admin_export.json()[0]["facility_name"] == "Example School"
     export_stage = next(stage for stage in sample_workflow["stages"] if stage["id"] == "export")
     assert export_stage["status"] == "blocked"
     assert "1 partial candidate is addressable" in transcript
@@ -2365,6 +2448,44 @@ def test_sample_set_coverage_and_gap_fill_api_flow(tmp_path: Path) -> None:
     assert missing_address.json()["address"]["child_run_ids"]
     assert geometry_items.json()["item_count"] == 2
     assert "sample_round" in exported.text
+
+
+def test_workflow_status_explains_failed_targeted_follow_ups(tmp_path: Path) -> None:
+    client = TestClient(create_app(workspace=tmp_path, runner=partial_gap_runner, background=False))
+    created = client.post(
+        "/api/harvest/campaign-run",
+        json={
+            "country": "US",
+            "localities": ["Tennessee"],
+            "facility_types": ["schools"],
+            "target": 3,
+        },
+    ).json()
+    campaign_id = created["manifest"]["campaign_id"]
+    client.post(f"/api/runs/{campaign_id}/qaqc-run")
+    client.post(f"/api/runs/{campaign_id}/address-run")
+    client.post(
+        "/api/samples/from-run",
+        json={"run_id": campaign_id, "sample_set_id": "tn-schools-partial-gap"},
+    )
+    client.post("/api/samples/tn-schools-partial-gap/curation/approve")
+    client.post("/api/samples/tn-schools-partial-gap/coverage-run")
+    client.post("/api/samples/tn-schools-partial-gap/gap-fill-run", json={})
+
+    workflow = client.get("/api/samples/tn-schools-partial-gap/workflow-status")
+    stages = {stage["id"]: stage for stage in workflow.json()["stages"]}
+    gap_stage = stages["gap_fill"]
+
+    assert gap_stage["status"] == "attention"
+    assert gap_stage["current"] == 1
+    assert gap_stage["total"] == 2
+    assert "1/2 coverage gap follow-up job(s) succeeded; 1 need repair or retry." in (
+        gap_stage["detail"]
+    )
+    assert "Western Tennessee" in gap_stage["detail"]
+    assert gap_stage["action_label"] == "Retry Coverage Gap Follow-ups"
+    assert gap_stage["metrics"]["failed_count"] == 1
+    assert gap_stage["metrics"]["failed_child_runs"][0]["error_message"] == "harvest failed"
 
 
 def test_workflow_status_marks_targeted_follow_ups_not_needed(tmp_path: Path) -> None:

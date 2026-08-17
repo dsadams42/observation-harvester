@@ -202,6 +202,37 @@ def test_component_time_basis_accepts_static_and_event_inputs() -> None:
     assert event.time_basis == TimeBasis.EVENT
 
 
+def test_component_time_basis_accepts_monthly_inputs() -> None:
+    evidence_set = HarvestEvidenceSet.model_validate(
+        {
+            "schema_version": 1,
+            "component_leads": [
+                {
+                    "is_valid_component_report": True,
+                    "source_url": "https://example.test/hotel-statistics",
+                    "source_title": "Hotel statistics",
+                    "source_type": "official",
+                    "evidence_quote": "Hotel occupancy was 71.2 percent in May 2026.",
+                    "component_data": [
+                        {
+                            "component_type": "hotel occupancy rate",
+                            "value": 71.2,
+                            "unit": "percent",
+                            "time_basis": "monthly",
+                            "geography_level": "country",
+                            "period_label": "May 2026",
+                        }
+                    ],
+                    "geography_name": "Netherlands",
+                    "country": "Netherlands",
+                }
+            ],
+        }
+    )
+
+    assert evidence_set.component_leads[0].component_data[0].time_basis == TimeBasis.MONTHLY
+
+
 def test_harvest_evidence_set_accepts_countable_component_bundles() -> None:
     evidence_set = HarvestEvidenceSet.model_validate(
         {

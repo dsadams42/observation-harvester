@@ -88,6 +88,8 @@ from pdt_observer.dialogue import (
 from pdt_observer.geocoding import NominatimGeocoder
 from pdt_observer.geographer import load_geographer_plan, run_geographer
 from pdt_observer.geometry import (
+    admin_scoped_csv,
+    admin_scoped_json,
     approved_records_for_child,
     footprints_geojson,
     geometry_item_from_payload,
@@ -499,30 +501,30 @@ def _finalize_failed_campaign_manifest(
 
 def _profiles_payload() -> dict[str, Any]:
     preferred_order = {
-        "schools": 0,
-        "manufacturing": 1,
-        "restaurants": 2,
-        "retail_service": 3,
-        "public_institutional": 4,
-        "transportation": 5,
+        "residential": 0,
+        "institutions_public_service": 1,
+        "retail_service": 2,
+        "commercial": 3,
+        "transportation": 4,
+        "military_facility": 5,
         "recreation_entertainment": 6,
         "agriculture": 7,
-        "pdt_residential": 8,
     }
     profile_sets: list[dict[str, Any]] = []
-    for profile_set_id, profile_set in BUILTIN_PROFILE_SETS.items():
-        if profile_set_id.startswith("philippines_"):
-            continue
+    for profile_set in BUILTIN_PROFILE_SETS.values():
         profile_sets.append(
             {
                 "profile_set_id": profile_set.profile_set_id,
                 "label": profile_set.label,
+                "land_use": profile_set.label,
                 "profiles": [
                     {
                         "profile_id": profile.profile_id,
                         "label": profile.label,
                         "enabled": profile.enabled,
                         "priority": profile.priority,
+                        "land_use": profile.land_use,
+                        "facility_class": profile.facility_class,
                         "pdt_subtype": profile.pdt_subtype,
                         "area_defined": profile.area_defined,
                         "day_occurrence": profile.day_occurrence,
@@ -2215,6 +2217,25 @@ def _workflow_stage(
     }
 
 
+def _summary_int(summary: dict[str, object], key: str, default: int = 0) -> int:
+    value = summary.get(key, default)
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int | float | str):
+        try:
+            return int(value)
+        except ValueError:
+            return default
+    return default
+
+
+def _summary_dicts(summary: dict[str, object], key: str) -> list[dict[str, object]]:
+    value = summary.get(key, [])
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
 def _workflow_status_payload(
     root: Path,
     *,
@@ -2302,13 +2323,19 @@ def _workflow_status_payload(
 
     all_lead_count = 0
     review_count = 0
+    target_observation_count = 0
+    target_review_count = 0
     verified_count = 0
     direct_verified_count = 0
+    supporting_component_evidence_count = 0
+    supporting_component_review_count = 0
+    supporting_component_verified_count = 0
     address_target_count = 0
     held_component_bundle_count = 0
     approved_component_bundle_count = 0
     partial_component_bundle_count = 0
     rejected_count = 0
+    target_rejected_count = 0
     address_count = 0
     address_found_count = 0
     for child_run_id in all_child_ids:
@@ -2322,6 +2349,31 @@ def _workflow_status_payload(
             all_lead_count += len(evidence_set.occupancy_leads) + len(
                 evidence_set.component_leads
             ) + len(evidence_set.component_bundles)
+            countable_bundle_indexes = {
+                index
+                for index, bundle in enumerate(evidence_set.component_bundles)
+                if bundle.counts_toward_target
+            }
+            target_component_source_indexes = {
+                source_index
+                for index, bundle in enumerate(evidence_set.component_bundles)
+                if index in countable_bundle_indexes
+                for source_index in bundle.source_lead_indexes
+                if 0 <= source_index < len(evidence_set.component_leads)
+            }
+            if evidence_set.component_bundles:
+                target_observation_count += len(evidence_set.occupancy_leads) + len(
+                    countable_bundle_indexes
+                )
+                supporting_component_evidence_count += len(target_component_source_indexes)
+            else:
+                target_observation_count += len(evidence_set.occupancy_leads) + len(
+                    evidence_set.component_leads
+                )
+        else:
+            evidence_set = None
+            countable_bundle_indexes = set()
+            target_component_source_indexes = set()
         qaqc_path = _qaqc_output_path(root, child_run_id)
         if qaqc_path.is_file():
             review_set = load_qaqc_review_set(qaqc_path)
@@ -2331,6 +2383,21 @@ def _workflow_status_payload(
             review_count += len(reviews) + len(component_reviews) + len(
                 component_bundle_reviews
             )
+            has_bundle_reviews = bool(component_bundle_reviews)
+            if has_bundle_reviews:
+                target_bundle_reviews = tuple(
+                    review
+                    for review in component_bundle_reviews
+                    if review.bundle_index in countable_bundle_indexes
+                )
+                target_review_count += len(reviews) + len(target_bundle_reviews)
+                supporting_component_review_count += sum(
+                    review.lead_index in target_component_source_indexes
+                    for review in component_reviews
+                )
+            else:
+                target_bundle_reviews = ()
+                target_review_count += len(reviews) + len(component_reviews)
             direct_keep_count = sum(
                 review.verification_status.value == "verified"
                 and review.recommended_action.value == "keep"
@@ -2339,6 +2406,10 @@ def _workflow_status_payload(
             component_keep_count = sum(
                 review.verification_status.value == "verified"
                 and review.recommended_action.value == "keep"
+                for review in component_reviews
+            )
+            supporting_component_verified_count += sum(
+                review.verification_status == LeadQaqcVerificationStatus.VERIFIED
                 for review in component_reviews
             )
             bundle_keep_count = sum(
@@ -2377,9 +2448,26 @@ def _workflow_status_payload(
             partial_component_bundle_count += partial_bundle_count
             held_component_bundle_count += held_bundle_count
             direct_verified_count += direct_keep_count
-            has_bundle_reviews = bool(component_bundle_reviews)
             verified_count += direct_keep_count + (
                 bundle_keep_count if has_bundle_reviews else component_keep_count
+            )
+            target_rejected_count += sum(
+                review.recommended_action.value in {"reject", "retry"}
+                or review.verification_status.value != "verified"
+                for review in reviews
+            ) + (
+                sum(
+                    review.recommended_action.value in {"reject", "retry"}
+                    or review.verification_status.value != "verified"
+                    or not review.counts_toward_target_approved
+                    for review in target_bundle_reviews
+                )
+                if has_bundle_reviews
+                else sum(
+                    review.recommended_action.value in {"reject", "retry"}
+                    or review.verification_status.value != "verified"
+                    for review in component_reviews
+                )
             )
             rejected_count += sum(
                 review.recommended_action.value in {"reject", "retry"}
@@ -2407,14 +2495,26 @@ def _workflow_status_payload(
                 result.status.value == "found" for result in address_results
             )
 
-    if review_count >= all_lead_count and all_lead_count > 0:
+    if target_observation_count > 0 and target_review_count >= target_observation_count:
         qaqc_status = "complete"
-    elif review_count > 0:
+    elif target_review_count > 0 or review_count > 0:
         qaqc_status = "attention"
-    elif finished_jobs >= planned_jobs and all_lead_count > 0:
+    elif finished_jobs >= planned_jobs and target_observation_count > 0:
         qaqc_status = "ready"
     else:
         qaqc_status = "blocked"
+    if target_observation_count == 0:
+        target_observation_count = all_lead_count
+    if target_review_count == 0 and review_count > 0 and not supporting_component_review_count:
+        target_review_count = review_count
+    target_needs_review_count = max(
+        target_review_count - verified_count - target_rejected_count,
+        0,
+    )
+    supporting_component_unreviewed_count = max(
+        supporting_component_evidence_count - supporting_component_review_count,
+        0,
+    )
 
     if address_target_count > 0 and address_count >= address_target_count:
         address_status = "complete"
@@ -2543,8 +2643,32 @@ def _workflow_status_payload(
     recommended_jobs = (
         len(coverage_review.recommended_child_jobs) if coverage_review is not None else 0
     )
+    gap_summary: dict[str, object] = (
+        latest_gap_round.summary
+        if latest_gap_round is not None and latest_gap_round.summary is not None
+        else {}
+    )
+    gap_failed = _summary_int(gap_summary, "failed_count")
+    gap_planned = _summary_int(gap_summary, "planned_run_count", recommended_jobs)
     gap_completed = (
-        len(latest_gap_round.child_run_ids) if latest_gap_round is not None else 0
+        _summary_int(gap_summary, "completed_count")
+        if "completed_count" in gap_summary
+        else len(latest_gap_round.child_run_ids)
+        if latest_gap_round is not None
+        else 0
+    )
+    gap_total = recommended_jobs or gap_planned
+    failed_gap_children = (
+        [
+            {
+                "run_id": str(child.get("run_id") or ""),
+                "locality": child.get("locality"),
+                "facility_type": child.get("facility_type"),
+                "error_message": child.get("error_message"),
+            }
+            for child in _summary_dicts(gap_summary, "child_summaries")
+            if str(child.get("status")) != HarvestRunStatus.COMPLETED
+        ]
     )
     if (
         latest_gap_round is not None
@@ -2562,6 +2686,20 @@ def _workflow_status_payload(
         gap_status = "complete"
     else:
         gap_status = "blocked"
+    if recommended_jobs == 0:
+        gap_detail = "Not needed. No coverage gap follow-ups are currently recommended."
+    elif gap_status == "attention":
+        failed_labels = [
+            str(child.get("locality") or child.get("run_id") or "unnamed follow-up")
+            for child in failed_gap_children[:3]
+        ]
+        failed_text = f" Failed: {', '.join(failed_labels)}." if failed_labels else ""
+        gap_detail = (
+            f"{gap_completed}/{gap_total} coverage gap follow-up job(s) succeeded; "
+            f"{gap_failed} need repair or retry.{failed_text}"
+        )
+    else:
+        gap_detail = f"{gap_completed}/{gap_total} coverage gap follow-up job(s) complete."
 
     stages = [
         _workflow_stage(
@@ -2602,13 +2740,38 @@ def _workflow_status_payload(
             stage_id="qaqc",
             label="Verify Evidence",
             status=qaqc_status,
-            current=review_count,
-            total=all_lead_count,
+            current=target_review_count,
+            total=target_observation_count,
             detail=(
-                f"{review_count}/{all_lead_count} leads reviewed; "
-                f"{verified_count} verified; {rejected_count} rejected or unresolved."
+                f"{target_review_count}/{target_observation_count} target observation(s) "
+                f"reviewed; {verified_count} approved; "
+                f"{target_needs_review_count} need human review; "
+                f"{target_rejected_count} not approved."
+                + (
+                    f" {supporting_component_review_count} supporting component evidence "
+                    f"record(s) checked; {supporting_component_verified_count} verified."
+                    + (
+                        f" {supporting_component_unreviewed_count} "
+                        "supporting record(s) were not individually reviewed."
+                        if supporting_component_unreviewed_count
+                        else ""
+                    )
+                    if supporting_component_review_count
+                    else ""
+                )
             ),
             metrics={
+                "target_observation_count": target_observation_count,
+                "target_review_count": target_review_count,
+                "target_approved_count": verified_count,
+                "target_needs_review_count": target_needs_review_count,
+                "target_not_approved_count": target_rejected_count,
+                "raw_evidence_record_count": all_lead_count,
+                "raw_review_count": review_count,
+                "supporting_component_evidence_count": supporting_component_evidence_count,
+                "supporting_component_review_count": supporting_component_review_count,
+                "supporting_component_verified_count": supporting_component_verified_count,
+                "supporting_component_unreviewed_count": supporting_component_unreviewed_count,
                 "verified_count": verified_count,
                 "direct_verified_count": direct_verified_count,
                 "rejected_count": rejected_count,
@@ -2747,15 +2910,23 @@ def _workflow_status_payload(
             label="Run Coverage Gap Follow-ups",
             status=gap_status,
             current=gap_completed,
-            total=recommended_jobs,
-            detail=(
-                f"{gap_completed}/{recommended_jobs} coverage gap follow-up job(s) complete."
-                if recommended_jobs
-                else "Not needed. No coverage gap follow-ups are currently recommended."
-            ),
+            total=gap_total,
+            detail=gap_detail,
+            metrics={
+                "planned_count": gap_total,
+                "completed_count": gap_completed,
+                "failed_count": gap_failed,
+                "failed_child_runs": failed_gap_children,
+            },
             action_id="run_gap_fill" if gap_status in {"ready", "attention"} else None,
             action_label=(
-                "Run Coverage Gap Follow-ups" if gap_status in {"ready", "attention"} else None
+                (
+                    "Retry Coverage Gap Follow-ups"
+                    if gap_status == "attention"
+                    else "Run Coverage Gap Follow-ups"
+                )
+                if gap_status in {"ready", "attention"}
+                else None
             ),
             indeterminate=gap_status == "running",
             display_mode="job_progress" if recommended_jobs or gap_status == "running" else "gate",
@@ -2831,6 +3002,45 @@ def _sample_verified_export_response(
         filename = f"{sample_set_id}.footprints.geojson"
     else:
         return _json_error(f"unsupported sample export format: {output_format}")
+
+    return PlainTextResponse(
+        payload,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _admin_scoped_export_payload(
+    records: Sequence[dict[str, Any]],
+    *,
+    identity: str,
+    output_format: str,
+) -> tuple[str, str, str]:
+    if output_format == "json":
+        return admin_scoped_json(records), "application/json", f"{identity}.admin_scoped.json"
+    if output_format == "csv":
+        return admin_scoped_csv(records), "text/csv", f"{identity}.admin_scoped.csv"
+    raise ValueError(f"unsupported admin-scoped export format: {output_format}")
+
+
+def _sample_admin_scoped_export_response(
+    root: Path,
+    sample_set_id: str,
+    *,
+    output_format: str,
+) -> Response:
+    try:
+        sample_set = refresh_sample_set(root, load_sample_set(root, sample_set_id))
+        records = tuple(sample_records(root, sample_set))
+        payload, media_type, filename = _admin_scoped_export_payload(
+            records,
+            identity=sample_set_id,
+            output_format=output_format,
+        )
+    except FileNotFoundError as exc:
+        return _json_error(str(exc), status_code=409)
+    except ValueError as exc:
+        return _json_error(str(exc), status_code=404)
 
     return PlainTextResponse(
         payload,
@@ -2993,6 +3203,28 @@ def _verified_export_response(root: Path, run_id: str, *, output_format: str) ->
         filename = f"{run_id}.footprints.geojson"
     else:
         return _json_error(f"unsupported verified export format: {output_format}")
+
+    return PlainTextResponse(
+        payload,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _admin_scoped_export_response(root: Path, run_id: str, *, output_format: str) -> Response:
+    try:
+        manifest = _load_any_manifest(root, run_id)
+        records = merge_address_results(root, _approved_records_for_manifest(root, manifest))
+        items = tuple(merge_geometry_items(root, records))
+        payload, media_type, filename = _admin_scoped_export_payload(
+            items,
+            identity=run_id,
+            output_format=output_format,
+        )
+    except FileNotFoundError as exc:
+        return _json_error(str(exc), status_code=409)
+    except ValueError as exc:
+        return _json_error(str(exc), status_code=404)
 
     return PlainTextResponse(
         payload,
@@ -4639,6 +4871,20 @@ def create_app(
             output_format="csv",
         )
 
+    async def sample_export_admin_scoped_json(request: Request) -> Response:
+        return _sample_admin_scoped_export_response(
+            root,
+            request.path_params["sample_set_id"],
+            output_format="json",
+        )
+
+    async def sample_export_admin_scoped_csv(request: Request) -> Response:
+        return _sample_admin_scoped_export_response(
+            root,
+            request.path_params["sample_set_id"],
+            output_format="csv",
+        )
+
     async def sample_export_footprints_geojson(request: Request) -> Response:
         return _sample_verified_export_response(
             root,
@@ -4818,7 +5064,9 @@ def create_app(
     async def geometry_research(request: Request) -> JSONResponse:
         try:
             data = GeometryResearchRequest.model_validate(await _request_json(request))
-            child_run_id, _ = data.item_id.rsplit("-", 1)
+            child_run_id = data.item_id.split("-component-bundle-", 1)[0]
+            if child_run_id == data.item_id:
+                child_run_id, _ = data.item_id.rsplit("-", 1)
             conversation_id = data.conversation_id or child_run_id
             _, geometry_record = _geometry_record_context(root, data.item_id)
             existing_geometry = geometry_record.get("geometry")
@@ -5191,6 +5439,20 @@ def create_app(
             output_format="csv",
         )
 
+    async def export_admin_scoped_json(request: Request) -> Response:
+        return _admin_scoped_export_response(
+            root,
+            request.path_params["run_id"],
+            output_format="json",
+        )
+
+    async def export_admin_scoped_csv(request: Request) -> Response:
+        return _admin_scoped_export_response(
+            root,
+            request.path_params["run_id"],
+            output_format="csv",
+        )
+
     async def export_footprints_geojson(request: Request) -> Response:
         return _verified_export_response(
             root,
@@ -5267,6 +5529,8 @@ def create_app(
         Route("/api/runs/{run_id}/export.jsonl", export_jsonl),
         Route("/api/runs/{run_id}/export.verified.json", export_verified_json),
         Route("/api/runs/{run_id}/export.verified.csv", export_verified_csv),
+        Route("/api/runs/{run_id}/export.admin_scoped.json", export_admin_scoped_json),
+        Route("/api/runs/{run_id}/export.admin_scoped.csv", export_admin_scoped_csv),
         Route("/api/runs/{run_id}/export.footprints.geojson", export_footprints_geojson),
         Route("/api/runs/{run_id}/export.components.json", export_components_json),
         Route("/api/runs/{run_id}/export.components.csv", export_components_csv),
@@ -5313,6 +5577,14 @@ def create_app(
         Route("/api/samples/{sample_set_id}/table", sample_table),
         Route("/api/samples/{sample_set_id}/export.verified.json", sample_export_verified_json),
         Route("/api/samples/{sample_set_id}/export.verified.csv", sample_export_verified_csv),
+        Route(
+            "/api/samples/{sample_set_id}/export.admin_scoped.json",
+            sample_export_admin_scoped_json,
+        ),
+        Route(
+            "/api/samples/{sample_set_id}/export.admin_scoped.csv",
+            sample_export_admin_scoped_csv,
+        ),
         Route("/api/samples/{sample_set_id}/export.components.json", sample_export_components_json),
         Route("/api/samples/{sample_set_id}/export.components.csv", sample_export_components_csv),
         Route(

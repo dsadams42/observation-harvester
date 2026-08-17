@@ -218,7 +218,11 @@
       setControlEnabled('clearSampleExtentButton', hasGeometryItems, 'Load geometry observations before clearing extent.');
       setControlEnabled('downloadVerifiedJsonButton', canExportRun, 'Run QAQC before downloading verified exports.');
       setControlEnabled('downloadVerifiedCsvButton', canExportRun, 'Run QAQC before downloading verified exports.');
+      setControlEnabled('downloadAdminJsonButton', canExportRun, 'Run QAQC before downloading admin-scoped exports.');
+      setControlEnabled('downloadAdminCsvButton', canExportRun, 'Run QAQC before downloading admin-scoped exports.');
       setControlEnabled('downloadFootprintsButton', hasRun && hasGeometryItems, 'Load geometry observations before footprint export.');
+      setControlEnabled('downloadSampleAdminJsonButton', hasSample, 'Assemble a review dataset before admin-scoped export.');
+      setControlEnabled('downloadSampleAdminCsvButton', hasSample, 'Assemble a review dataset before admin-scoped export.');
       setControlEnabled('downloadSampleFootprintsButton', hasSample && hasGeometryItems, 'Load sample geometry before footprint export.');
 
       setControlEnabled('tableVerifiedMode', hasTableContext, 'Select a run or review dataset first.');
@@ -340,9 +344,11 @@
         `<option value="${profileSet.profile_set_id}">${profileSet.label}</option>`
       ).join('');
       $('campaignFacilityTypes').innerHTML = state.profiles.map((profileSet) => {
-        const selected = ['schools', 'manufacturing', 'restaurants'].includes(
-          profileSet.profile_set_id
-        )
+        const selected = [
+          'institutions_public_service',
+          'commercial',
+          'retail_service',
+        ].includes(profileSet.profile_set_id)
           ? ' selected'
           : '';
         return `<option value="${profileSet.profile_set_id}"${selected}>` +
@@ -353,7 +359,7 @@
 
     function renderProfiles() {
       const profileSet = selectedProfileSet();
-      const options = ['<option value="">All subtypes</option>'];
+      const options = ['<option value="">All facility classes</option>'];
       if (profileSet) {
         for (const profile of profileSet.profiles) {
           options.push(`<option value="${profile.profile_id}">${profile.label}</option>`);
@@ -899,7 +905,7 @@
       ['run_id', 'Run'],
       ['sample_set_id', 'Dataset'],
       ['sample_round', 'Round'],
-      ['facility_type', 'Facility Type'],
+      ['facility_type', 'Land Use'],
       ['evidence_role', 'Evidence Role'],
       ['lead_index', 'Lead'],
       ['count_index', 'Count Row'],
@@ -1757,6 +1763,58 @@
       return round === 1 ? 'round 1' : `coverage gap follow-up round ${round}`;
     }
 
+    function geometryLocation(item) {
+      const leadLocation = item?.lead?.location;
+      if (leadLocation) return leadLocation;
+      const bundle = item?.component_bundle || {};
+      const bundleLocation = bundle.location || {};
+      return {
+        facility_name:
+          bundleLocation.facility_name ||
+          bundle.geography_name ||
+          item?.facility_name ||
+          item?.item_id ||
+          'Observation',
+        specific_address_or_landmark:
+          bundleLocation.specific_address_or_landmark ||
+          item?.address_enrichment?.formatted_address ||
+          '',
+        city_or_region: bundleLocation.city_or_region || item?.city_or_region || '',
+        country: bundleLocation.country || bundle.country || item?.country || ''
+      };
+    }
+
+    function geometrySourceUrl(item) {
+      if (item?.lead?.source_url) return item.lead.source_url;
+      const componentLead = (item?.component_leads || []).find((lead) => lead.source_url);
+      return componentLead?.source_url || '';
+    }
+
+    function geometryCounts(item) {
+      if (item?.lead?.occupancy_data) return item.lead.occupancy_data;
+      return (item?.component_leads || []).flatMap((lead) => lead.component_data || []);
+    }
+
+    function geometryObservationDetail(item) {
+      const location = geometryLocation(item);
+      return {
+        item_id: item.item_id,
+        facility: location.facility_name,
+        query: item.geocode_query,
+        enriched_address: item.address_enrichment,
+        source_url: geometrySourceUrl(item),
+        counts: geometryCounts(item),
+        qaqc:
+          item.qaqc_review?.review_notes ||
+          item.component_bundle_qaqc_review?.review_notes ||
+          '',
+        address_status: item.address_status,
+        geometry_status: item.geometry_status,
+        spatial_validation: item.geometry?.spatial_validation || null,
+        area_m2: item.area_m2
+      };
+    }
+
     function geometryColor(item) {
       const round = geometryRound(item);
       if (round > 1) return '#d97706';
@@ -1806,7 +1864,7 @@
       $('geometryTabBadge').textContent = items.length;
       $('geometryTabBadge').title = `${items.length} coordinate assignment(s) need review`;
       $('interventionList').innerHTML = items.map((item) => {
-        const facility = item.lead?.location?.facility_name || item.item_id;
+        const facility = geometryLocation(item).facility_name || item.item_id;
         const reason = item.geometry.spatial_validation.reason || 'Coordinate needs review.';
         return `<button class="secondary" type="button" data-intervention="` +
           `${escapeHtml(item.item_id)}">${escapeHtml(facility)} - ${escapeHtml(reason)}</button>`;
@@ -1877,13 +1935,13 @@
         ? 'No observations need manual geocoding.'
         : 'No geocoded observations yet.';
       $('geometryList').innerHTML = listedItems.map((item) => {
-        const lead = item.lead;
+        const location = geometryLocation(item);
         const addressStatus = item.address_status || 'not_run';
-        const label = `${lead.location.facility_name} - ${addressStatus} - ` +
+        const label = `${location.facility_name} - ${addressStatus} - ` +
           `${item.geometry_status}`;
         const active = item.item_id === state.selectedGeometryItemId ? ' active' : '';
         return `<button type="button" class="${active}" data-geometry="${item.item_id}">
-          ${label}<br>${lead.location.city_or_region}, ${lead.location.country} -
+          ${label}<br>${location.city_or_region}, ${location.country} -
           ${geometryRoundLabel(item)}
         </button>`;
       }).join('') || `<div class="status">${emptyMessage}</div>`;
@@ -1923,12 +1981,17 @@
     }
 
     function overviewPopup(item) {
-      const lead = item.lead;
-      const counts = (lead.occupancy_data || [])
-        .map((count) => `${count.count} ${count.group_type}`)
+      const location = geometryLocation(item);
+      const counts = geometryCounts(item)
+        .map((count) => {
+          if (count.count !== undefined) return `${count.count} ${count.group_type || ''}`;
+          if (count.value !== undefined) return `${count.value} ${count.component_type || ''}`;
+          return '';
+        })
+        .filter(Boolean)
         .join(', ');
-      return `<strong>${lead.location.facility_name}</strong><br>` +
-        `${lead.location.city_or_region}, ${lead.location.country}<br>` +
+      return `<strong>${location.facility_name}</strong><br>` +
+        `${location.city_or_region}, ${location.country}<br>` +
         `${geometryRoundLabel(item)}<br>${counts}`;
     }
 
@@ -2036,26 +2099,14 @@
         ? 'This observation already has a saved coordinate.'
         : 'No coordinate change is waiting to be saved.';
       $('resolutionReason').textContent = resolutionExplanation(item);
-      setResolutionLink('resolutionSourceLink', item.lead?.source_url);
+      setResolutionLink('resolutionSourceLink', geometrySourceUrl(item));
       setResolutionLink(
         'resolutionAddressLink',
         item.address_enrichment?.address_source_url
       );
       updateExternalSearchLinks(item);
       renderCandidateOptions(item);
-      $('geometryDetail').value = JSON.stringify({
-        item_id: item.item_id,
-        facility: item.lead.location.facility_name,
-        query: item.geocode_query,
-        enriched_address: item.address_enrichment,
-        source_url: item.lead.source_url,
-        counts: item.lead.occupancy_data,
-        qaqc: item.qaqc_review.review_notes,
-        address_status: item.address_status,
-        geometry_status: item.geometry_status,
-        spatial_validation: item.geometry?.spatial_validation || null,
-        area_m2: item.area_m2
-      }, null, 2);
+      $('geometryDetail').value = JSON.stringify(geometryObservationDetail(item), null, 2);
       if (state.drawnItems) state.drawnItems.clearLayers();
       const point = pointFromGeometry(item);
       if (point) setMarker(point);
@@ -2078,7 +2129,7 @@
     }
 
     function facilitySearchQuery(item) {
-      const location = item?.lead?.location || {};
+      const location = geometryLocation(item);
       return [
         location.facility_name,
         item?.address_enrichment?.formatted_address,
@@ -2361,7 +2412,7 @@
       const button = $('researchFacilityButton');
       button.disabled = true;
       setGeometryStatus(
-        `Researching ${item.lead?.location?.facility_name || item.item_id}…`,
+        `Researching ${geometryLocation(item).facility_name || item.item_id}…`,
         'ok'
       );
       $('coordinateDraftStatus').textContent =
@@ -2792,7 +2843,11 @@
       }
       stopPolling();
       setStatus('Server shutting down.', 'ok');
-      $('activityOutput').value += '\\nServer shutting down. You may close this tab.\\n';
+      $('activityOutput').value += '\\nServer shutting down. Closing this tab if the browser allows it.\\n';
+      setTimeout(() => {
+        window.close();
+        setStatus('OASIS has stopped. You can close this tab.', 'ok');
+      }, 150);
     }
 
     function downloadText(filename, text, type) {
@@ -2811,6 +2866,19 @@
       if (!response.ok) return setStatus(await response.text(), 'error');
       downloadText(
         `observation-harvest.verified.${format}`,
+        await response.text(),
+        format === 'csv' ? 'text/csv' : 'application/json'
+      );
+    }
+
+    async function downloadAdminExport(format) {
+      if (!state.currentRunId) return setGeometryStatus('No run selected.', 'error');
+      const response = await fetch(
+        `/api/runs/${state.currentRunId}/export.admin_scoped.${format}`
+      );
+      if (!response.ok) return setGeometryStatus(await response.text(), 'error');
+      downloadText(
+        `observation-harvest.admin_scoped.${format}`,
         await response.text(),
         format === 'csv' ? 'text/csv' : 'application/json'
       );
@@ -2837,6 +2905,21 @@
       if (!response.ok) return setSampleStatus(await response.text(), 'error');
       downloadText(
         `observation-sample.verified.${format}`,
+        await response.text(),
+        format === 'csv' ? 'text/csv' : 'application/json'
+      );
+    }
+
+    async function downloadSampleAdminExport(format) {
+      if (!state.currentSampleSetId) {
+        return setGeometryStatus('No review dataset selected.', 'error');
+      }
+      const response = await fetch(
+        `/api/samples/${state.currentSampleSetId}/export.admin_scoped.${format}`
+      );
+      if (!response.ok) return setGeometryStatus(await response.text(), 'error');
+      downloadText(
+        `observation-sample.admin_scoped.${format}`,
         await response.text(),
         format === 'csv' ? 'text/csv' : 'application/json'
       );
@@ -3054,7 +3137,17 @@
       $('clearSampleExtentButton').addEventListener('click', clearSampleExtent);
       $('downloadVerifiedJsonButton').addEventListener('click', () => downloadExport('json'));
       $('downloadVerifiedCsvButton').addEventListener('click', () => downloadExport('csv'));
+      $('downloadAdminJsonButton').addEventListener('click', () => downloadAdminExport('json'));
+      $('downloadAdminCsvButton').addEventListener('click', () => downloadAdminExport('csv'));
       $('downloadFootprintsButton').addEventListener('click', downloadFootprints);
+      $('downloadSampleAdminJsonButton').addEventListener(
+        'click',
+        () => downloadSampleAdminExport('json')
+      );
+      $('downloadSampleAdminCsvButton').addEventListener(
+        'click',
+        () => downloadSampleAdminExport('csv')
+      );
       $('downloadSampleFootprintsButton').addEventListener('click', downloadSampleFootprints);
     }
     boot().catch((error) => setStatus(error.message, 'error'));

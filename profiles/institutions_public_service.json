@@ -1,0 +1,1096 @@
+{
+  "profile_set_id": "institutions_public_service",
+  "label": "Institutions/Public Service",
+  "profiles": [
+    {
+      "profile_id": "religious",
+      "label": "Religious",
+      "land_use": "Institutions/Public Service",
+      "facility_class": "Religious",
+      "pdt_subtype": "Religious",
+      "area_defined": "Generally we use capacity for episodic services",
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [
+        "Capacity",
+        "staff"
+      ],
+      "count_method": "direct_count",
+      "component_count_fields": [],
+      "regional_stat_fields": [],
+      "component_source_guidance": null,
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find direct people-present occupancy evidence for Religious in the Institutions/Public Service land-use group. Use only direct evidence of people physically present during a bounded incident, event, shift, measurement, or observation. Treat capacities, staffing, rooms, area, ridership, and annual traffic as context unless the analyst overrides count mode.",
+      "preferred_source_types": [
+        "incident reports",
+        "inspection reports",
+        "event attendance records",
+        "credible news reports with observed counts",
+        "official operational logs"
+      ],
+      "context_only_source_types": [
+        "capacity lists",
+        "floor area tables",
+        "employee totals",
+        "room counts",
+        "annual visitors or traffic totals"
+      ],
+      "positive_evidence_patterns": [
+        "people present at a bounded time",
+        "observed attendance or occupancy count",
+        "incident/event/shift count tied to a facility and date or period"
+      ],
+      "negative_evidence_patterns": [
+        "Capacity alone is not a direct occupancy count",
+        "staff alone is not a direct occupancy count"
+      ],
+      "venue_aliases": [
+        "Religious"
+      ],
+      "priority": 0,
+      "enabled": true
+    },
+    {
+      "profile_id": "museum_urban",
+      "label": "Museum - Urban",
+      "land_use": "Institutions/Public Service",
+      "facility_class": "Museum - Urban",
+      "pdt_subtype": "Museum - Urban",
+      "area_defined": null,
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Annual visitors",
+        "museum staff",
+        "average hours open",
+        "days open",
+        "visit time in hours"
+      ],
+      "regional_stat_fields": [],
+      "component_source_guidance": "Collect source-backed component inputs only for this facility class. Keep each component role-labeled with value, unit, time basis, and geography level. Do not calculate a final derived occupancy estimate in v1.",
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find source-backed population component inputs for Museum - Urban in the Institutions/Public Service land-use group. Target fields: Annual visitors, museum staff, average hours open, days open, visit time in hours. Do not derive a final occupancy estimate.",
+      "preferred_source_types": [
+        "official facility statistics",
+        "operator annual reports",
+        "government or regulator datasets",
+        "facility factsheets",
+        "regional demographic or sector statistics"
+      ],
+      "context_only_source_types": [
+        "unsourced estimates",
+        "marketing descriptions without numeric component values",
+        "calculated occupancy totals derived by the model"
+      ],
+      "positive_evidence_patterns": [
+        "Annual visitors: numeric source-backed component input",
+        "museum staff: numeric source-backed component input",
+        "average hours open: numeric source-backed component input",
+        "days open: numeric source-backed component input",
+        "visit time in hours: numeric source-backed component input"
+      ],
+      "negative_evidence_patterns": [
+        "derived total occupancy estimate without source support",
+        "component value with no exact quote",
+        "numeric value without unit or time basis"
+      ],
+      "venue_aliases": [
+        "Museum - Urban"
+      ],
+      "priority": 10,
+      "enabled": true
+    },
+    {
+      "profile_id": "museum_rural",
+      "label": "Museum - Rural",
+      "land_use": "Institutions/Public Service",
+      "facility_class": "Museum - Rural",
+      "pdt_subtype": "Museum - Rural",
+      "area_defined": null,
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Annual visitors",
+        "museum staff",
+        "average hours open",
+        "days open",
+        "visit time in hours"
+      ],
+      "regional_stat_fields": [],
+      "component_source_guidance": "Collect source-backed component inputs only for this facility class. Keep each component role-labeled with value, unit, time basis, and geography level. Do not calculate a final derived occupancy estimate in v1.",
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find source-backed population component inputs for Museum - Rural in the Institutions/Public Service land-use group. Target fields: Annual visitors, museum staff, average hours open, days open, visit time in hours. Do not derive a final occupancy estimate.",
+      "preferred_source_types": [
+        "official facility statistics",
+        "operator annual reports",
+        "government or regulator datasets",
+        "facility factsheets",
+        "regional demographic or sector statistics"
+      ],
+      "context_only_source_types": [
+        "unsourced estimates",
+        "marketing descriptions without numeric component values",
+        "calculated occupancy totals derived by the model"
+      ],
+      "positive_evidence_patterns": [
+        "Annual visitors: numeric source-backed component input",
+        "museum staff: numeric source-backed component input",
+        "average hours open: numeric source-backed component input",
+        "days open: numeric source-backed component input",
+        "visit time in hours: numeric source-backed component input"
+      ],
+      "negative_evidence_patterns": [
+        "derived total occupancy estimate without source support",
+        "component value with no exact quote",
+        "numeric value without unit or time basis"
+      ],
+      "venue_aliases": [
+        "Museum - Rural"
+      ],
+      "priority": 20,
+      "enabled": true
+    },
+    {
+      "profile_id": "university_library",
+      "label": "University Library",
+      "land_use": "Institutions/Public Service",
+      "facility_class": "University Library",
+      "pdt_subtype": "University Library",
+      "area_defined": null,
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Annual visitors",
+        "library staff",
+        "average hours open",
+        "days open",
+        "visit time in hours"
+      ],
+      "regional_stat_fields": [],
+      "component_source_guidance": "Collect source-backed component inputs only for this facility class. Keep each component role-labeled with value, unit, time basis, and geography level. Do not calculate a final derived occupancy estimate in v1.",
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find source-backed population component inputs for University Library in the Institutions/Public Service land-use group. Target fields: Annual visitors, library staff, average hours open, days open, visit time in hours. Do not derive a final occupancy estimate.",
+      "preferred_source_types": [
+        "official facility statistics",
+        "operator annual reports",
+        "government or regulator datasets",
+        "facility factsheets",
+        "regional demographic or sector statistics"
+      ],
+      "context_only_source_types": [
+        "unsourced estimates",
+        "marketing descriptions without numeric component values",
+        "calculated occupancy totals derived by the model"
+      ],
+      "positive_evidence_patterns": [
+        "Annual visitors: numeric source-backed component input",
+        "library staff: numeric source-backed component input",
+        "average hours open: numeric source-backed component input",
+        "days open: numeric source-backed component input",
+        "visit time in hours: numeric source-backed component input"
+      ],
+      "negative_evidence_patterns": [
+        "derived total occupancy estimate without source support",
+        "component value with no exact quote",
+        "numeric value without unit or time basis"
+      ],
+      "venue_aliases": [
+        "University Library"
+      ],
+      "priority": 30,
+      "enabled": true
+    },
+    {
+      "profile_id": "public_library",
+      "label": "Public Library",
+      "land_use": "Institutions/Public Service",
+      "facility_class": "Public Library",
+      "pdt_subtype": "Public Library",
+      "area_defined": null,
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Annual visitors",
+        "library staff",
+        "average hours open",
+        "days open",
+        "visit time in hours"
+      ],
+      "regional_stat_fields": [],
+      "component_source_guidance": "Collect source-backed component inputs only for this facility class. Keep each component role-labeled with value, unit, time basis, and geography level. Do not calculate a final derived occupancy estimate in v1.",
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find source-backed population component inputs for Public Library in the Institutions/Public Service land-use group. Target fields: Annual visitors, library staff, average hours open, days open, visit time in hours. Do not derive a final occupancy estimate.",
+      "preferred_source_types": [
+        "official facility statistics",
+        "operator annual reports",
+        "government or regulator datasets",
+        "facility factsheets",
+        "regional demographic or sector statistics"
+      ],
+      "context_only_source_types": [
+        "unsourced estimates",
+        "marketing descriptions without numeric component values",
+        "calculated occupancy totals derived by the model"
+      ],
+      "positive_evidence_patterns": [
+        "Annual visitors: numeric source-backed component input",
+        "library staff: numeric source-backed component input",
+        "average hours open: numeric source-backed component input",
+        "days open: numeric source-backed component input",
+        "visit time in hours: numeric source-backed component input"
+      ],
+      "negative_evidence_patterns": [
+        "derived total occupancy estimate without source support",
+        "component value with no exact quote",
+        "numeric value without unit or time basis"
+      ],
+      "venue_aliases": [
+        "Public Library"
+      ],
+      "priority": 40,
+      "enabled": true
+    },
+    {
+      "profile_id": "school_d_12",
+      "label": "School (D-12)",
+      "land_use": "Institutions/Public Service",
+      "facility_class": "School (D-12)",
+      "pdt_subtype": "School (D-12)",
+      "area_defined": null,
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Students",
+        "staff",
+        "faculty",
+        "shift schooling"
+      ],
+      "regional_stat_fields": [
+        "School attendance Rate"
+      ],
+      "component_source_guidance": "Collect source-backed component inputs only for this facility class. Keep each component role-labeled with value, unit, time basis, and geography level. Do not calculate a final derived occupancy estimate in v1.",
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find source-backed population component inputs for School (D-12) in the Institutions/Public Service land-use group. Target fields: Students, staff, faculty, shift schooling, School attendance Rate. Do not derive a final occupancy estimate.",
+      "preferred_source_types": [
+        "official facility statistics",
+        "operator annual reports",
+        "government or regulator datasets",
+        "facility factsheets",
+        "regional demographic or sector statistics"
+      ],
+      "context_only_source_types": [
+        "unsourced estimates",
+        "marketing descriptions without numeric component values",
+        "calculated occupancy totals derived by the model"
+      ],
+      "positive_evidence_patterns": [
+        "Students: numeric source-backed component input",
+        "staff: numeric source-backed component input",
+        "faculty: numeric source-backed component input",
+        "shift schooling: numeric source-backed component input"
+      ],
+      "negative_evidence_patterns": [
+        "derived total occupancy estimate without source support",
+        "component value with no exact quote",
+        "numeric value without unit or time basis"
+      ],
+      "venue_aliases": [
+        "School (D-12)"
+      ],
+      "priority": 50,
+      "enabled": true
+    },
+    {
+      "profile_id": "university",
+      "label": "University",
+      "land_use": "Institutions/Public Service",
+      "facility_class": "University",
+      "pdt_subtype": "University",
+      "area_defined": null,
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Students",
+        "staff",
+        "faculty"
+      ],
+      "regional_stat_fields": [
+        "School attendance Rate"
+      ],
+      "component_source_guidance": "Collect source-backed component inputs only for this facility class. Keep each component role-labeled with value, unit, time basis, and geography level. Do not calculate a final derived occupancy estimate in v1.",
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find source-backed population component inputs for University in the Institutions/Public Service land-use group. Target fields: Students, staff, faculty, School attendance Rate. Do not derive a final occupancy estimate.",
+      "preferred_source_types": [
+        "official facility statistics",
+        "operator annual reports",
+        "government or regulator datasets",
+        "facility factsheets",
+        "regional demographic or sector statistics"
+      ],
+      "context_only_source_types": [
+        "unsourced estimates",
+        "marketing descriptions without numeric component values",
+        "calculated occupancy totals derived by the model"
+      ],
+      "positive_evidence_patterns": [
+        "Students: numeric source-backed component input",
+        "staff: numeric source-backed component input",
+        "faculty: numeric source-backed component input"
+      ],
+      "negative_evidence_patterns": [
+        "derived total occupancy estimate without source support",
+        "component value with no exact quote",
+        "numeric value without unit or time basis"
+      ],
+      "venue_aliases": [
+        "University"
+      ],
+      "priority": 60,
+      "enabled": true
+    },
+    {
+      "profile_id": "hospital_clinic_with_beds",
+      "label": "Hospital/Clinic with Beds",
+      "land_use": "Institutions/Public Service",
+      "facility_class": "Hospital/Clinic with Beds",
+      "pdt_subtype": "Hospital/Clinic with Beds",
+      "area_defined": null,
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Inpatients",
+        "outpatients",
+        "beds",
+        "nurses",
+        "doctors",
+        "staff"
+      ],
+      "regional_stat_fields": [
+        "Bed Occupancy Rate"
+      ],
+      "component_source_guidance": "Collect source-backed component inputs only for this facility class. Keep each component role-labeled with value, unit, time basis, and geography level. Do not calculate a final derived occupancy estimate in v1.",
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find source-backed population component inputs for Hospital/Clinic with Beds in the Institutions/Public Service land-use group. Target fields: Inpatients, outpatients, beds, nurses, doctors, staff, Bed Occupancy Rate. Do not derive a final occupancy estimate.",
+      "preferred_source_types": [
+        "official facility statistics",
+        "operator annual reports",
+        "government or regulator datasets",
+        "facility factsheets",
+        "regional demographic or sector statistics"
+      ],
+      "context_only_source_types": [
+        "unsourced estimates",
+        "marketing descriptions without numeric component values",
+        "calculated occupancy totals derived by the model"
+      ],
+      "positive_evidence_patterns": [
+        "Inpatients: numeric source-backed component input",
+        "outpatients: numeric source-backed component input",
+        "beds: numeric source-backed component input",
+        "nurses: numeric source-backed component input",
+        "doctors: numeric source-backed component input",
+        "staff: numeric source-backed component input"
+      ],
+      "negative_evidence_patterns": [
+        "derived total occupancy estimate without source support",
+        "component value with no exact quote",
+        "numeric value without unit or time basis"
+      ],
+      "venue_aliases": [
+        "Hospital/Clinic with Beds"
+      ],
+      "priority": 70,
+      "enabled": true
+    },
+    {
+      "profile_id": "hospital_clinic_without_beds",
+      "label": "Hospital/Clinic without Beds",
+      "land_use": "Institutions/Public Service",
+      "facility_class": "Hospital/Clinic without Beds",
+      "pdt_subtype": "Hospital/Clinic without Beds",
+      "area_defined": null,
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Outpatients",
+        "nurses",
+        "doctors",
+        "staff"
+      ],
+      "regional_stat_fields": [],
+      "component_source_guidance": "Collect source-backed component inputs only for this facility class. Keep each component role-labeled with value, unit, time basis, and geography level. Do not calculate a final derived occupancy estimate in v1.",
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find source-backed population component inputs for Hospital/Clinic without Beds in the Institutions/Public Service land-use group. Target fields: Outpatients, nurses, doctors, staff. Do not derive a final occupancy estimate.",
+      "preferred_source_types": [
+        "official facility statistics",
+        "operator annual reports",
+        "government or regulator datasets",
+        "facility factsheets",
+        "regional demographic or sector statistics"
+      ],
+      "context_only_source_types": [
+        "unsourced estimates",
+        "marketing descriptions without numeric component values",
+        "calculated occupancy totals derived by the model"
+      ],
+      "positive_evidence_patterns": [
+        "Outpatients: numeric source-backed component input",
+        "nurses: numeric source-backed component input",
+        "doctors: numeric source-backed component input",
+        "staff: numeric source-backed component input"
+      ],
+      "negative_evidence_patterns": [
+        "derived total occupancy estimate without source support",
+        "component value with no exact quote",
+        "numeric value without unit or time basis"
+      ],
+      "venue_aliases": [
+        "Hospital/Clinic without Beds"
+      ],
+      "priority": 80,
+      "enabled": true
+    },
+    {
+      "profile_id": "courts",
+      "label": "Courts",
+      "land_use": "Institutions/Public Service",
+      "facility_class": "Courts",
+      "pdt_subtype": "Courts",
+      "area_defined": null,
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "direct_count",
+      "component_count_fields": [],
+      "regional_stat_fields": [],
+      "component_source_guidance": null,
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find direct people-present occupancy evidence for Courts in the Institutions/Public Service land-use group. Use only direct evidence of people physically present during a bounded incident, event, shift, measurement, or observation. Treat capacities, staffing, rooms, area, ridership, and annual traffic as context unless the analyst overrides count mode.",
+      "preferred_source_types": [
+        "incident reports",
+        "inspection reports",
+        "event attendance records",
+        "credible news reports with observed counts",
+        "official operational logs"
+      ],
+      "context_only_source_types": [
+        "capacity lists",
+        "floor area tables",
+        "employee totals",
+        "room counts",
+        "annual visitors or traffic totals"
+      ],
+      "positive_evidence_patterns": [
+        "people present at a bounded time",
+        "observed attendance or occupancy count",
+        "incident/event/shift count tied to a facility and date or period"
+      ],
+      "negative_evidence_patterns": [
+        "capacity or descriptive context alone is not direct occupancy"
+      ],
+      "venue_aliases": [
+        "Courts"
+      ],
+      "priority": 90,
+      "enabled": true
+    },
+    {
+      "profile_id": "police_stations",
+      "label": "Police Stations",
+      "land_use": "Institutions/Public Service",
+      "facility_class": "Police Stations",
+      "pdt_subtype": "Police Stations",
+      "area_defined": null,
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "direct_count",
+      "component_count_fields": [],
+      "regional_stat_fields": [],
+      "component_source_guidance": null,
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find direct people-present occupancy evidence for Police Stations in the Institutions/Public Service land-use group. Use only direct evidence of people physically present during a bounded incident, event, shift, measurement, or observation. Treat capacities, staffing, rooms, area, ridership, and annual traffic as context unless the analyst overrides count mode.",
+      "preferred_source_types": [
+        "incident reports",
+        "inspection reports",
+        "event attendance records",
+        "credible news reports with observed counts",
+        "official operational logs"
+      ],
+      "context_only_source_types": [
+        "capacity lists",
+        "floor area tables",
+        "employee totals",
+        "room counts",
+        "annual visitors or traffic totals"
+      ],
+      "positive_evidence_patterns": [
+        "people present at a bounded time",
+        "observed attendance or occupancy count",
+        "incident/event/shift count tied to a facility and date or period"
+      ],
+      "negative_evidence_patterns": [
+        "capacity or descriptive context alone is not direct occupancy"
+      ],
+      "venue_aliases": [
+        "Police Stations"
+      ],
+      "priority": 100,
+      "enabled": true
+    },
+    {
+      "profile_id": "conference_centers",
+      "label": "Conference Centers",
+      "land_use": "Institutions/Public Service",
+      "facility_class": "Conference Centers",
+      "pdt_subtype": "Conference Centers",
+      "area_defined": null,
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [
+        "Capacity"
+      ],
+      "count_method": "direct_count",
+      "component_count_fields": [],
+      "regional_stat_fields": [],
+      "component_source_guidance": null,
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find direct people-present occupancy evidence for Conference Centers in the Institutions/Public Service land-use group. Use only direct evidence of people physically present during a bounded incident, event, shift, measurement, or observation. Treat capacities, staffing, rooms, area, ridership, and annual traffic as context unless the analyst overrides count mode.",
+      "preferred_source_types": [
+        "incident reports",
+        "inspection reports",
+        "event attendance records",
+        "credible news reports with observed counts",
+        "official operational logs"
+      ],
+      "context_only_source_types": [
+        "capacity lists",
+        "floor area tables",
+        "employee totals",
+        "room counts",
+        "annual visitors or traffic totals"
+      ],
+      "positive_evidence_patterns": [
+        "people present at a bounded time",
+        "observed attendance or occupancy count",
+        "incident/event/shift count tied to a facility and date or period"
+      ],
+      "negative_evidence_patterns": [
+        "Capacity alone is not a direct occupancy count"
+      ],
+      "venue_aliases": [
+        "Conference Centers"
+      ],
+      "priority": 110,
+      "enabled": true
+    },
+    {
+      "profile_id": "fire_stations",
+      "label": "Fire Stations",
+      "land_use": "Institutions/Public Service",
+      "facility_class": "Fire Stations",
+      "pdt_subtype": "Fire Stations",
+      "area_defined": null,
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "direct_count",
+      "component_count_fields": [],
+      "regional_stat_fields": [],
+      "component_source_guidance": null,
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find direct people-present occupancy evidence for Fire Stations in the Institutions/Public Service land-use group. Use only direct evidence of people physically present during a bounded incident, event, shift, measurement, or observation. Treat capacities, staffing, rooms, area, ridership, and annual traffic as context unless the analyst overrides count mode.",
+      "preferred_source_types": [
+        "incident reports",
+        "inspection reports",
+        "event attendance records",
+        "credible news reports with observed counts",
+        "official operational logs"
+      ],
+      "context_only_source_types": [
+        "capacity lists",
+        "floor area tables",
+        "employee totals",
+        "room counts",
+        "annual visitors or traffic totals"
+      ],
+      "positive_evidence_patterns": [
+        "people present at a bounded time",
+        "observed attendance or occupancy count",
+        "incident/event/shift count tied to a facility and date or period"
+      ],
+      "negative_evidence_patterns": [
+        "capacity or descriptive context alone is not direct occupancy"
+      ],
+      "venue_aliases": [
+        "Fire Stations"
+      ],
+      "priority": 120,
+      "enabled": true
+    },
+    {
+      "profile_id": "public_service",
+      "label": "Public Service",
+      "land_use": "Institutions/Public Service",
+      "facility_class": "Public Service",
+      "pdt_subtype": "Public Service",
+      "area_defined": null,
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "direct_count",
+      "component_count_fields": [],
+      "regional_stat_fields": [],
+      "component_source_guidance": null,
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find direct people-present occupancy evidence for Public Service in the Institutions/Public Service land-use group. Use only direct evidence of people physically present during a bounded incident, event, shift, measurement, or observation. Treat capacities, staffing, rooms, area, ridership, and annual traffic as context unless the analyst overrides count mode.",
+      "preferred_source_types": [
+        "incident reports",
+        "inspection reports",
+        "event attendance records",
+        "credible news reports with observed counts",
+        "official operational logs"
+      ],
+      "context_only_source_types": [
+        "capacity lists",
+        "floor area tables",
+        "employee totals",
+        "room counts",
+        "annual visitors or traffic totals"
+      ],
+      "positive_evidence_patterns": [
+        "people present at a bounded time",
+        "observed attendance or occupancy count",
+        "incident/event/shift count tied to a facility and date or period"
+      ],
+      "negative_evidence_patterns": [
+        "capacity or descriptive context alone is not direct occupancy"
+      ],
+      "venue_aliases": [
+        "Public Service"
+      ],
+      "priority": 130,
+      "enabled": true
+    },
+    {
+      "profile_id": "post_office",
+      "label": "Post Office",
+      "land_use": "Institutions/Public Service",
+      "facility_class": "Post Office",
+      "pdt_subtype": "Post Office",
+      "area_defined": null,
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "direct_count",
+      "component_count_fields": [],
+      "regional_stat_fields": [],
+      "component_source_guidance": null,
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find direct people-present occupancy evidence for Post Office in the Institutions/Public Service land-use group. Use only direct evidence of people physically present during a bounded incident, event, shift, measurement, or observation. Treat capacities, staffing, rooms, area, ridership, and annual traffic as context unless the analyst overrides count mode.",
+      "preferred_source_types": [
+        "incident reports",
+        "inspection reports",
+        "event attendance records",
+        "credible news reports with observed counts",
+        "official operational logs"
+      ],
+      "context_only_source_types": [
+        "capacity lists",
+        "floor area tables",
+        "employee totals",
+        "room counts",
+        "annual visitors or traffic totals"
+      ],
+      "positive_evidence_patterns": [
+        "people present at a bounded time",
+        "observed attendance or occupancy count",
+        "incident/event/shift count tied to a facility and date or period"
+      ],
+      "negative_evidence_patterns": [
+        "capacity or descriptive context alone is not direct occupancy"
+      ],
+      "venue_aliases": [
+        "Post Office"
+      ],
+      "priority": 140,
+      "enabled": true
+    },
+    {
+      "profile_id": "tv_stations",
+      "label": "TV Stations",
+      "land_use": "Institutions/Public Service",
+      "facility_class": "TV Stations",
+      "pdt_subtype": "TV Stations",
+      "area_defined": null,
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "direct_count",
+      "component_count_fields": [],
+      "regional_stat_fields": [],
+      "component_source_guidance": null,
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find direct people-present occupancy evidence for TV Stations in the Institutions/Public Service land-use group. Use only direct evidence of people physically present during a bounded incident, event, shift, measurement, or observation. Treat capacities, staffing, rooms, area, ridership, and annual traffic as context unless the analyst overrides count mode.",
+      "preferred_source_types": [
+        "incident reports",
+        "inspection reports",
+        "event attendance records",
+        "credible news reports with observed counts",
+        "official operational logs"
+      ],
+      "context_only_source_types": [
+        "capacity lists",
+        "floor area tables",
+        "employee totals",
+        "room counts",
+        "annual visitors or traffic totals"
+      ],
+      "positive_evidence_patterns": [
+        "people present at a bounded time",
+        "observed attendance or occupancy count",
+        "incident/event/shift count tied to a facility and date or period"
+      ],
+      "negative_evidence_patterns": [
+        "capacity or descriptive context alone is not direct occupancy"
+      ],
+      "venue_aliases": [
+        "TV Stations"
+      ],
+      "priority": 150,
+      "enabled": true
+    },
+    {
+      "profile_id": "radio_stations",
+      "label": "Radio Stations",
+      "land_use": "Institutions/Public Service",
+      "facility_class": "Radio Stations",
+      "pdt_subtype": "Radio Stations",
+      "area_defined": null,
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "direct_count",
+      "component_count_fields": [],
+      "regional_stat_fields": [],
+      "component_source_guidance": null,
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find direct people-present occupancy evidence for Radio Stations in the Institutions/Public Service land-use group. Use only direct evidence of people physically present during a bounded incident, event, shift, measurement, or observation. Treat capacities, staffing, rooms, area, ridership, and annual traffic as context unless the analyst overrides count mode.",
+      "preferred_source_types": [
+        "incident reports",
+        "inspection reports",
+        "event attendance records",
+        "credible news reports with observed counts",
+        "official operational logs"
+      ],
+      "context_only_source_types": [
+        "capacity lists",
+        "floor area tables",
+        "employee totals",
+        "room counts",
+        "annual visitors or traffic totals"
+      ],
+      "positive_evidence_patterns": [
+        "people present at a bounded time",
+        "observed attendance or occupancy count",
+        "incident/event/shift count tied to a facility and date or period"
+      ],
+      "negative_evidence_patterns": [
+        "capacity or descriptive context alone is not direct occupancy"
+      ],
+      "venue_aliases": [
+        "Radio Stations"
+      ],
+      "priority": 160,
+      "enabled": true
+    },
+    {
+      "profile_id": "water_treatment",
+      "label": "Water Treatment",
+      "land_use": "Institutions/Public Service",
+      "facility_class": "Water Treatment",
+      "pdt_subtype": "Water Treatment",
+      "area_defined": "Direct count if available",
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Employees"
+      ],
+      "regional_stat_fields": [],
+      "component_source_guidance": "Collect source-backed component inputs only for this facility class. Keep each component role-labeled with value, unit, time basis, and geography level. Do not calculate a final derived occupancy estimate in v1.",
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find source-backed population component inputs for Water Treatment in the Institutions/Public Service land-use group. Target fields: Employees. Do not derive a final occupancy estimate.",
+      "preferred_source_types": [
+        "official facility statistics",
+        "operator annual reports",
+        "government or regulator datasets",
+        "facility factsheets",
+        "regional demographic or sector statistics"
+      ],
+      "context_only_source_types": [
+        "unsourced estimates",
+        "marketing descriptions without numeric component values",
+        "calculated occupancy totals derived by the model"
+      ],
+      "positive_evidence_patterns": [
+        "Employees: numeric source-backed component input"
+      ],
+      "negative_evidence_patterns": [
+        "derived total occupancy estimate without source support",
+        "component value with no exact quote",
+        "numeric value without unit or time basis"
+      ],
+      "venue_aliases": [
+        "Water Treatment"
+      ],
+      "priority": 170,
+      "enabled": true
+    },
+    {
+      "profile_id": "prisons",
+      "label": "Prisons",
+      "land_use": "Institutions/Public Service",
+      "facility_class": "Prisons",
+      "pdt_subtype": "Prisons",
+      "area_defined": "Mixture of capacity and direct prisoner count",
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [
+        "Capacity",
+        "number of prisoners",
+        "employees"
+      ],
+      "count_method": "direct_count",
+      "component_count_fields": [],
+      "regional_stat_fields": [],
+      "component_source_guidance": null,
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find direct people-present occupancy evidence for Prisons in the Institutions/Public Service land-use group. Use only direct evidence of people physically present during a bounded incident, event, shift, measurement, or observation. Treat capacities, staffing, rooms, area, ridership, and annual traffic as context unless the analyst overrides count mode.",
+      "preferred_source_types": [
+        "incident reports",
+        "inspection reports",
+        "event attendance records",
+        "credible news reports with observed counts",
+        "official operational logs"
+      ],
+      "context_only_source_types": [
+        "capacity lists",
+        "floor area tables",
+        "employee totals",
+        "room counts",
+        "annual visitors or traffic totals"
+      ],
+      "positive_evidence_patterns": [
+        "people present at a bounded time",
+        "observed attendance or occupancy count",
+        "incident/event/shift count tied to a facility and date or period"
+      ],
+      "negative_evidence_patterns": [
+        "Capacity alone is not a direct occupancy count",
+        "number of prisoners alone is not a direct occupancy count",
+        "employees alone is not a direct occupancy count"
+      ],
+      "venue_aliases": [
+        "Prisons"
+      ],
+      "priority": 180,
+      "enabled": true
+    },
+    {
+      "profile_id": "civil_protection_shelters",
+      "label": "Civil Protection Shelters",
+      "land_use": "Institutions/Public Service",
+      "facility_class": "Civil Protection Shelters",
+      "pdt_subtype": "Civil Protection Shelters",
+      "area_defined": null,
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [
+        "Capacity"
+      ],
+      "count_method": "direct_count",
+      "component_count_fields": [],
+      "regional_stat_fields": [],
+      "component_source_guidance": null,
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find direct people-present occupancy evidence for Civil Protection Shelters in the Institutions/Public Service land-use group. Use only direct evidence of people physically present during a bounded incident, event, shift, measurement, or observation. Treat capacities, staffing, rooms, area, ridership, and annual traffic as context unless the analyst overrides count mode.",
+      "preferred_source_types": [
+        "incident reports",
+        "inspection reports",
+        "event attendance records",
+        "credible news reports with observed counts",
+        "official operational logs"
+      ],
+      "context_only_source_types": [
+        "capacity lists",
+        "floor area tables",
+        "employee totals",
+        "room counts",
+        "annual visitors or traffic totals"
+      ],
+      "positive_evidence_patterns": [
+        "people present at a bounded time",
+        "observed attendance or occupancy count",
+        "incident/event/shift count tied to a facility and date or period"
+      ],
+      "negative_evidence_patterns": [
+        "Capacity alone is not a direct occupancy count"
+      ],
+      "venue_aliases": [
+        "Civil Protection Shelters"
+      ],
+      "priority": 190,
+      "enabled": true
+    },
+    {
+      "profile_id": "cemeteries_urban",
+      "label": "Cemeteries - Urban",
+      "land_use": "Institutions/Public Service",
+      "facility_class": "Cemeteries - Urban",
+      "pdt_subtype": "Cemeteries - Urban",
+      "area_defined": null,
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "direct_count",
+      "component_count_fields": [],
+      "regional_stat_fields": [],
+      "component_source_guidance": null,
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find direct people-present occupancy evidence for Cemeteries - Urban in the Institutions/Public Service land-use group. Use only direct evidence of people physically present during a bounded incident, event, shift, measurement, or observation. Treat capacities, staffing, rooms, area, ridership, and annual traffic as context unless the analyst overrides count mode.",
+      "preferred_source_types": [
+        "incident reports",
+        "inspection reports",
+        "event attendance records",
+        "credible news reports with observed counts",
+        "official operational logs"
+      ],
+      "context_only_source_types": [
+        "capacity lists",
+        "floor area tables",
+        "employee totals",
+        "room counts",
+        "annual visitors or traffic totals"
+      ],
+      "positive_evidence_patterns": [
+        "people present at a bounded time",
+        "observed attendance or occupancy count",
+        "incident/event/shift count tied to a facility and date or period"
+      ],
+      "negative_evidence_patterns": [
+        "capacity or descriptive context alone is not direct occupancy"
+      ],
+      "venue_aliases": [
+        "Cemeteries - Urban"
+      ],
+      "priority": 200,
+      "enabled": true
+    },
+    {
+      "profile_id": "cemeteries_rural",
+      "label": "Cemeteries - Rural",
+      "land_use": "Institutions/Public Service",
+      "facility_class": "Cemeteries - Rural",
+      "pdt_subtype": "Cemeteries - Rural",
+      "area_defined": null,
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "direct_count",
+      "component_count_fields": [],
+      "regional_stat_fields": [],
+      "component_source_guidance": null,
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find direct people-present occupancy evidence for Cemeteries - Rural in the Institutions/Public Service land-use group. Use only direct evidence of people physically present during a bounded incident, event, shift, measurement, or observation. Treat capacities, staffing, rooms, area, ridership, and annual traffic as context unless the analyst overrides count mode.",
+      "preferred_source_types": [
+        "incident reports",
+        "inspection reports",
+        "event attendance records",
+        "credible news reports with observed counts",
+        "official operational logs"
+      ],
+      "context_only_source_types": [
+        "capacity lists",
+        "floor area tables",
+        "employee totals",
+        "room counts",
+        "annual visitors or traffic totals"
+      ],
+      "positive_evidence_patterns": [
+        "people present at a bounded time",
+        "observed attendance or occupancy count",
+        "incident/event/shift count tied to a facility and date or period"
+      ],
+      "negative_evidence_patterns": [
+        "capacity or descriptive context alone is not direct occupancy"
+      ],
+      "venue_aliases": [
+        "Cemeteries - Rural"
+      ],
+      "priority": 210,
+      "enabled": true
+    }
+  ]
+}

@@ -8,228 +8,79 @@ from pdt_observer.storage import write_json_file
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
-_PREFERRED_SOURCE_TYPES = (
-    "local or national news article",
-    "wire-service article",
-    "official emergency or public-safety incident report",
-    "official government or regulator enforcement report",
-    "official venue, organizer, or event attendance announcement",
-    "official press release with a count-bearing event or incident detail",
-)
-
-_CONTEXT_ONLY_SOURCE_TYPES = (
-    "Wikipedia or encyclopedia page",
-    "generic directory, travel guide, listicle, or map listing",
-    "venue marketing or about page without a count-bearing event or incident",
-    "capacity, seating-chart, annual-report, or statistics page",
-    "social media repost without an original authoritative source",
-)
-
-PUBLIC_VENUE_PROFILES = BuildingProfileSet(
-    profile_set_id="public_venues",
-    label="Public venues",
-    profiles=(
-        BuildingTypeProfile(
-            profile_id="restaurants_bars",
-            label="Restaurants and bars",
-            source_search_prompt=(
-                "Find incident reports with quoted count-bearing phrases such as "
-                '"people were inside", "customers were inside", "patrons were inside", '
-                '"people were evacuated", or "inside the restaurant when" for a restaurant, '
-                "bar, cafe, diner, brewery, or nightclub. Prioritize news articles, official "
-                "reports, and official attendance announcements; treat encyclopedia, directory, "
-                "map, and generic venue pages as context only."
-            ),
-            preferred_source_types=_PREFERRED_SOURCE_TYPES,
-            context_only_source_types=_CONTEXT_ONLY_SOURCE_TYPES,
-            positive_evidence_patterns=(
-                "people were inside",
-                "people were present",
-                "customers were inside",
-                "patrons were inside",
-                "guests were inside",
-                "people were evacuated",
-                "customers were evacuated",
-                "people were rescued",
-                "inside the restaurant when",
-                "inside the bar when",
-                "people inside",
-                "patrons inside",
-                "customers inside",
-            ),
-            negative_evidence_patterns=("capacity", "seats", "address", "injured"),
-            venue_aliases=("restaurant", "bar", "cafe", "diner", "brewery", "nightclub"),
-            priority=10,
-        ),
-        BuildingTypeProfile(
-            profile_id="schools_childcare",
-            label="Schools and childcare",
-            source_search_prompt=(
-                "Find incident reports with quoted count-bearing phrases such as "
-                '"students were inside", "children were inside", "people were evacuated", '
-                '"students were rescued", or "inside the school when" for a school, daycare, '
-                "childcare center, preschool, or campus building. Prioritize news articles, "
-                "official reports, and official attendance announcements; treat encyclopedia, "
-                "directory, map, and generic venue pages as context only."
-            ),
-            preferred_source_types=_PREFERRED_SOURCE_TYPES,
-            context_only_source_types=_CONTEXT_ONLY_SOURCE_TYPES,
-            positive_evidence_patterns=(
-                "students were inside",
-                "children were inside",
-                "people were evacuated",
-                "students were evacuated",
-                "students were rescued",
-                "inside the school when",
-                "students inside",
-                "people inside",
-                "children inside",
-            ),
-            negative_evidence_patterns=("enrollment", "graduation year", "address"),
-            venue_aliases=("school", "daycare", "childcare", "preschool", "campus"),
-            priority=20,
-        ),
-        BuildingTypeProfile(
-            profile_id="hospitals_care",
-            label="Hospitals and care facilities",
-            source_search_prompt=(
-                "Find incident reports with quoted count-bearing phrases such as "
-                '"patients were inside", "residents were inside", "people were evacuated", '
-                '"patients were rescued", or "inside the hospital when" for a hospital, '
-                "clinic, nursing home, assisted living facility, or care home. Prioritize news "
-                "articles, official reports, and official attendance announcements; treat "
-                "encyclopedia, directory, map, and generic venue pages as context only."
-            ),
-            preferred_source_types=_PREFERRED_SOURCE_TYPES,
-            context_only_source_types=_CONTEXT_ONLY_SOURCE_TYPES,
-            positive_evidence_patterns=(
-                "patients were inside",
-                "residents were inside",
-                "people were evacuated",
-                "patients were evacuated",
-                "patients were rescued",
-                "inside the hospital when",
-                "patients inside",
-                "residents inside",
-                "people inside",
-            ),
-            negative_evidence_patterns=("beds", "staffed beds", "cost", "capacity"),
-            venue_aliases=("hospital", "clinic", "nursing home", "assisted living", "care home"),
-            priority=30,
-        ),
-        BuildingTypeProfile(
-            profile_id="hotels_lodging",
-            label="Hotels and lodging",
-            source_search_prompt=(
-                "Find incident reports with quoted count-bearing phrases such as "
-                '"guests were inside", "occupants were inside", "people were evacuated", '
-                '"guests were rescued", or "inside the hotel when" for a hotel, motel, inn, '
-                "shelter, or lodging property. Prioritize news articles, official reports, and "
-                "official attendance announcements; treat encyclopedia, directory, map, and "
-                "generic venue pages as context only."
-            ),
-            preferred_source_types=_PREFERRED_SOURCE_TYPES,
-            context_only_source_types=_CONTEXT_ONLY_SOURCE_TYPES,
-            positive_evidence_patterns=(
-                "guests were inside",
-                "occupants were inside",
-                "people were evacuated",
-                "guests were evacuated",
-                "guests were rescued",
-                "inside the hotel when",
-                "guests inside",
-                "people inside",
-                "occupants inside",
-            ),
-            negative_evidence_patterns=("rooms", "room rate", "address", "built in"),
-            venue_aliases=("hotel", "motel", "inn", "shelter", "lodge"),
-            priority=40,
-        ),
-        BuildingTypeProfile(
-            profile_id="retail_events",
-            label="Retail and event venues",
-            source_search_prompt=(
-                "Find incident reports with quoted count-bearing phrases such as "
-                '"people were inside", "shoppers were inside", "attendees were inside", '
-                '"people were evacuated", or "inside the mall when" for a store, mall, '
-                "market, theater, hall, arena, or event venue. Prioritize news articles, official "
-                "reports, and official attendance announcements; treat encyclopedia, directory, "
-                "map, and generic venue pages as context only."
-            ),
-            preferred_source_types=_PREFERRED_SOURCE_TYPES,
-            context_only_source_types=_CONTEXT_ONLY_SOURCE_TYPES,
-            positive_evidence_patterns=(
-                "people were inside",
-                "shoppers were inside",
-                "attendees were inside",
-                "people were evacuated",
-                "shoppers were evacuated",
-                "people were rescued",
-                "inside the mall when",
-                "people inside",
-                "shoppers inside",
-                "attendees inside",
-            ),
-            negative_evidence_patterns=("capacity", "tickets sold", "construction cost"),
-            venue_aliases=("store", "mall", "market", "theater", "hall", "arena", "venue"),
-            priority=50,
-        ),
-    ),
-)
-
 def _load_profile_set(filename: str) -> BuildingProfileSet:
     return BuildingProfileSet.model_validate_json(
         (_REPO_ROOT / "profiles" / filename).read_text(encoding="utf-8")
     )
 
 
-COMMERCIAL_BUSINESS_PROFILES = _load_profile_set("commercial_business.json")
 RESIDENTIAL_PROFILES = _load_profile_set("residential.json")
-SCHOOLS_PROFILES = _load_profile_set("schools.json")
-MANUFACTURING_PROFILES = _load_profile_set("manufacturing.json")
-RESTAURANTS_PROFILES = _load_profile_set("restaurants.json")
+INSTITUTIONS_PUBLIC_SERVICE_PROFILES = _load_profile_set(
+    "institutions_public_service.json"
+)
 RETAIL_SERVICE_PROFILES = _load_profile_set("retail_service.json")
-PUBLIC_INSTITUTIONAL_PROFILES = _load_profile_set("public_institutional.json")
+COMMERCIAL_PROFILES = _load_profile_set("commercial.json")
 TRANSPORTATION_PROFILES = _load_profile_set("transportation.json")
+MILITARY_FACILITY_PROFILES = _load_profile_set("military_facility.json")
 RECREATION_ENTERTAINMENT_PROFILES = _load_profile_set("recreation_entertainment.json")
 AGRICULTURE_PROFILES = _load_profile_set("agriculture.json")
-PDT_RESIDENTIAL_PROFILES = _load_profile_set("pdt_residential.json")
+
+_PROFILE_ID_ALIASES: dict[tuple[str, str], str] = {
+    ("commercial", "factories_warehouses"): "light_manufacturing",
+    ("commercial", "manufacturing_facilities"): "light_manufacturing",
+    ("commercial", "offices_bpo_call_centers"): "office_building",
+    ("commercial", "power_plants"): "powerplants",
+    ("commercial_business", "factories_warehouses"): "manufacturing_facilities",
+    ("commercial_business", "hotels_restaurants"): "hotels_motels_hospitality",
+    ("institutions_public_service", "primary_secondary_education"): "school_d_12",
+    ("institutions_public_service", "schools_childcare"): "school_d_12",
+    ("institutions_public_service", "university_college"): "university",
+    ("institutions_public_service", "public_libraries"): "public_library",
+    ("institutions_public_service", "hospitals_with_beds"): "hospital_clinic_with_beds",
+    (
+        "institutions_public_service",
+        "clinics_without_beds",
+    ): "hospital_clinic_without_beds",
+    ("institutions_public_service", "hospitals_care"): "hospital_clinic_with_beds",
+    ("institutions_public_service", "public_services"): "public_service",
+    ("public_venues", "hospitals_care"): "hospitals_with_beds",
+    ("public_venues", "retail_events"): "retail_markets",
+    ("recreation_entertainment", "theaters_events"): "theater",
+    ("recreation_entertainment", "theaters"): "theater",
+    ("residential", "apartments_multi_family"): "multi_family",
+    ("residential", "detached_houses"): "single_family",
+    ("residential", "informal_settlements"): "slum",
+    ("retail_service", "full_service_restaurants"): "restaurant",
+    ("retail_service", "quick_service_restaurants"): "restaurant",
+    ("retail_service", "restaurants_bars"): "restaurant",
+    ("retail_service", "restaurants_hospitality"): "restaurant",
+    ("retail_service", "hotels_lodging"): "hotel_motel",
+    ("retail_service", "hotels_motels"): "hotel_motel",
+    ("retail_service", "hotels_motels_hospitality"): "hotel_motel",
+    ("retail_service", "malls_retail_markets"): "stores",
+    ("retail_service", "retail_markets"): "stores",
+}
+
+_PROFILE_SET_ALIASES: dict[str, str] = {
+}
 
 BUILTIN_PROFILE_SETS = {
-    SCHOOLS_PROFILES.profile_set_id: SCHOOLS_PROFILES,
-    MANUFACTURING_PROFILES.profile_set_id: MANUFACTURING_PROFILES,
-    RESTAURANTS_PROFILES.profile_set_id: RESTAURANTS_PROFILES,
+    RESIDENTIAL_PROFILES.profile_set_id: RESIDENTIAL_PROFILES,
+    INSTITUTIONS_PUBLIC_SERVICE_PROFILES.profile_set_id: (
+        INSTITUTIONS_PUBLIC_SERVICE_PROFILES
+    ),
     RETAIL_SERVICE_PROFILES.profile_set_id: RETAIL_SERVICE_PROFILES,
-    PUBLIC_INSTITUTIONAL_PROFILES.profile_set_id: PUBLIC_INSTITUTIONAL_PROFILES,
+    COMMERCIAL_PROFILES.profile_set_id: COMMERCIAL_PROFILES,
     TRANSPORTATION_PROFILES.profile_set_id: TRANSPORTATION_PROFILES,
+    MILITARY_FACILITY_PROFILES.profile_set_id: MILITARY_FACILITY_PROFILES,
     RECREATION_ENTERTAINMENT_PROFILES.profile_set_id: RECREATION_ENTERTAINMENT_PROFILES,
     AGRICULTURE_PROFILES.profile_set_id: AGRICULTURE_PROFILES,
-    PDT_RESIDENTIAL_PROFILES.profile_set_id: PDT_RESIDENTIAL_PROFILES,
-    PUBLIC_VENUE_PROFILES.profile_set_id: PUBLIC_VENUE_PROFILES,
-    COMMERCIAL_BUSINESS_PROFILES.profile_set_id: COMMERCIAL_BUSINESS_PROFILES,
-    RESIDENTIAL_PROFILES.profile_set_id: RESIDENTIAL_PROFILES,
-    "philippines_commercial_business": COMMERCIAL_BUSINESS_PROFILES,
 }
 
 
-def get_profile_set(name: str) -> BuildingProfileSet:
-    if name in BUILTIN_PROFILE_SETS:
-        return BUILTIN_PROFILE_SETS[name]
-    path = Path(name)
-    if path.is_file():
-        return BuildingProfileSet.model_validate_json(path.read_text(encoding="utf-8"))
-    raise ValueError(f"unknown profile set: {name}")
-
-
-def narrow_profile_set(profile_set: BuildingProfileSet, profile_id: str) -> BuildingProfileSet:
-    matching_profiles = tuple(
-        profile for profile in profile_set.profiles if profile.profile_id == profile_id
-    )
-    if not matching_profiles:
-        raise ValueError(
-            f"profile {profile_id!r} not found in profile set {profile_set.profile_set_id!r}"
-        )
-    return profile_set.model_copy(update={"profiles": matching_profiles})
+def _canonical_profile(profile_set_id: str, profile_id: str) -> BuildingTypeProfile:
+    profile_set = BUILTIN_PROFILE_SETS[profile_set_id]
+    return next(profile for profile in profile_set.profiles if profile.profile_id == profile_id)
 
 
 def _unique_values(*groups: tuple[str, ...]) -> tuple[str, ...]:
@@ -239,6 +90,319 @@ def _unique_values(*groups: tuple[str, ...]) -> tuple[str, ...]:
             if value not in values:
                 values.append(value)
     return tuple(values)
+
+
+def _compat_profile(
+    profile_set_id: str,
+    canonical_profile_id: str,
+    legacy_profile_id: str,
+    label: str,
+    *,
+    aliases: tuple[str, ...] = (),
+    priority: int | None = None,
+) -> BuildingTypeProfile:
+    profile = _canonical_profile(profile_set_id, canonical_profile_id)
+    update: dict[str, object] = {
+        "profile_id": legacy_profile_id,
+        "label": label,
+        "venue_aliases": _unique_values((label,), aliases, profile.venue_aliases),
+    }
+    if priority is not None:
+        update["priority"] = priority
+    return profile.model_copy(update=update)
+
+
+COMPATIBILITY_PROFILE_SETS = {
+    "schools": BuildingProfileSet(
+        profile_set_id="schools",
+        label="Schools",
+        profiles=(
+            _compat_profile(
+                "institutions_public_service",
+                "school_d_12",
+                "primary_secondary_education",
+                "Primary and secondary education",
+                aliases=("school", "K-12", "childcare"),
+            ),
+            _compat_profile(
+                "institutions_public_service",
+                "university",
+                "university_college",
+                "University and college",
+                aliases=("college", "campus"),
+            ),
+            _compat_profile(
+                "institutions_public_service",
+                "university_library",
+                "university_library",
+                "University library",
+            ),
+        ),
+    ),
+    "manufacturing": BuildingProfileSet(
+        profile_set_id="manufacturing",
+        label="Manufacturing",
+        profiles=(
+            _compat_profile(
+                "commercial",
+                "light_manufacturing",
+                "light_manufacturing",
+                "Light manufacturing",
+            ),
+            _compat_profile(
+                "commercial",
+                "heavy_manufacturing",
+                "heavy_manufacturing",
+                "Heavy manufacturing",
+            ),
+            _compat_profile(
+                "commercial",
+                "chemical_refining_cement",
+                "chemical_refining_cement",
+                "Chemical, refining, and cement",
+            ),
+            _compat_profile(
+                "commercial",
+                "heat_processing",
+                "heat_processing",
+                "Heat processing",
+            ),
+            _compat_profile("commercial", "powerplants", "power_plants", "Power plants"),
+            _compat_profile("transportation", "warehouse", "warehouses", "Warehouses"),
+        ),
+    ),
+    "restaurants": BuildingProfileSet(
+        profile_set_id="restaurants",
+        label="Restaurants",
+        profiles=(
+            _compat_profile(
+                "retail_service",
+                "restaurant",
+                "full_service_restaurants",
+                "Full-service restaurants",
+            ),
+            _compat_profile(
+                "retail_service",
+                "restaurant",
+                "quick_service_restaurants",
+                "Quick-service restaurants",
+                aliases=("fast-food restaurant",),
+            ),
+            _compat_profile(
+                "recreation_entertainment",
+                "night_club",
+                "bars_nightlife",
+                "Bars and nightlife",
+            ),
+        ),
+    ),
+    "retail_service": RETAIL_SERVICE_PROFILES,
+    "public_institutional": BuildingProfileSet(
+        profile_set_id="public_institutional",
+        label="Public / institutional",
+        profiles=(
+            _compat_profile(
+                "institutions_public_service",
+                "religious",
+                "religious",
+                "Religious",
+            ),
+            _compat_profile(
+                "institutions_public_service",
+                "museum_urban",
+                "museums",
+                "Museums",
+            ),
+            _compat_profile(
+                "institutions_public_service",
+                "public_library",
+                "public_libraries",
+                "Public libraries",
+            ),
+            _compat_profile(
+                "institutions_public_service",
+                "hospital_clinic_with_beds",
+                "hospitals_with_beds",
+                "Hospitals/clinics with beds",
+            ),
+            _compat_profile(
+                "institutions_public_service",
+                "hospital_clinic_without_beds",
+                "clinics_without_beds",
+                "Hospitals/clinics without beds",
+            ),
+            _compat_profile(
+                "institutions_public_service",
+                "public_service",
+                "public_services",
+                "Public services",
+            ),
+            _compat_profile(
+                "institutions_public_service",
+                "police_stations",
+                "police_fire_courts_prisons",
+                "Police, fire, courts, and prisons",
+            ),
+            _compat_profile(
+                "institutions_public_service",
+                "civil_protection_shelters",
+                "civil_protection_shelters",
+                "Civil protection shelters",
+            ),
+        ),
+    ),
+    "pdt_residential": BuildingProfileSet(
+        profile_set_id="pdt_residential",
+        label="PDT Residential",
+        profiles=(
+            _compat_profile(
+                "residential",
+                "single_family_urban",
+                "single_family_urban",
+                "Single-family urban",
+            ),
+            _compat_profile(
+                "residential",
+                "multi_family_urban",
+                "multi_family_urban",
+                "Multi-family urban",
+            ),
+            _compat_profile("residential", "slum", "slum", "Slum"),
+            _compat_profile(
+                "residential",
+                "refugee_settlement",
+                "refugee_settlement",
+                "Refugee settlement",
+            ),
+        ),
+    ),
+    "public_venues": BuildingProfileSet(
+        profile_set_id="public_venues",
+        label="Public venues",
+        profiles=(
+            _compat_profile(
+                "retail_service",
+                "restaurant",
+                "restaurants_bars",
+                "Restaurants and bars",
+            ),
+            _compat_profile(
+                "institutions_public_service",
+                "school_d_12",
+                "schools_childcare",
+                "Schools and childcare",
+            ),
+            _compat_profile(
+                "institutions_public_service",
+                "hospital_clinic_with_beds",
+                "hospitals_with_beds",
+                "Hospitals with beds",
+            ),
+            _compat_profile(
+                "institutions_public_service",
+                "hospital_clinic_without_beds",
+                "clinics_without_beds",
+                "Clinics without beds",
+            ),
+            _compat_profile(
+                "retail_service",
+                "hotel_motel",
+                "hotels_lodging",
+                "Hotels and lodging",
+            ),
+            _compat_profile("retail_service", "stores", "retail_markets", "Retail markets"),
+            _compat_profile(
+                "recreation_entertainment",
+                "theater",
+                "theaters_events",
+                "Theaters and events",
+            ),
+        ),
+    ),
+    "commercial_business": BuildingProfileSet(
+        profile_set_id="commercial_business",
+        label="Commercial / business",
+        profiles=(
+            _compat_profile(
+                "retail_service",
+                "stores",
+                "malls_retail_markets",
+                "Malls, retail, and public markets",
+                priority=0,
+            ),
+            _compat_profile(
+                "commercial",
+                "office_building",
+                "offices_bpo_call_centers",
+                "Offices, BPO, and call centers",
+                aliases=("BPO", "call center", "office"),
+                priority=10,
+            ),
+            _compat_profile(
+                "commercial",
+                "light_manufacturing",
+                "manufacturing_facilities",
+                "Manufacturing facilities",
+                priority=20,
+            ),
+            _compat_profile(
+                "transportation",
+                "warehouse",
+                "warehouses_storage",
+                "Warehouses and storage",
+                priority=30,
+            ),
+            _compat_profile(
+                "retail_service",
+                "hotel_motel",
+                "hotels_motels_hospitality",
+                "Hotels, motels, and hospitality",
+                priority=40,
+            ),
+            _compat_profile(
+                "retail_service",
+                "restaurant",
+                "restaurants_hospitality",
+                "Restaurants and hospitality",
+                priority=50,
+            ),
+        ),
+    ),
+}
+COMPATIBILITY_PROFILE_SETS["philippines_commercial_business"] = COMPATIBILITY_PROFILE_SETS[
+    "commercial_business"
+]
+
+
+def get_profile_set(name: str) -> BuildingProfileSet:
+    if name in COMPATIBILITY_PROFILE_SETS:
+        return COMPATIBILITY_PROFILE_SETS[name]
+    resolved_name = _PROFILE_SET_ALIASES.get(name, name)
+    if resolved_name in BUILTIN_PROFILE_SETS:
+        return BUILTIN_PROFILE_SETS[resolved_name]
+    path = Path(name)
+    if path.is_file():
+        return BuildingProfileSet.model_validate_json(path.read_text(encoding="utf-8"))
+    raise ValueError(f"unknown profile set: {name}")
+
+
+def resolve_profile_id_alias(profile_set: BuildingProfileSet, profile_id: str) -> str:
+    return _PROFILE_ID_ALIASES.get(
+        (profile_set.profile_set_id, profile_id),
+        profile_id,
+    )
+
+
+def narrow_profile_set(profile_set: BuildingProfileSet, profile_id: str) -> BuildingProfileSet:
+    profile_id = resolve_profile_id_alias(profile_set, profile_id)
+    matching_profiles = tuple(
+        profile for profile in profile_set.profiles if profile.profile_id == profile_id
+    )
+    if not matching_profiles:
+        raise ValueError(
+            f"profile {profile_id!r} not found in profile set {profile_set.profile_set_id!r}"
+        )
+    return profile_set.model_copy(update={"profiles": matching_profiles})
 
 
 def _profile_with_count_method_override(
@@ -311,7 +475,10 @@ def resolve_profile_set(
 
 
 def get_builtin_profile(profile_id: str) -> BuildingTypeProfile:
-    for profile_set in BUILTIN_PROFILE_SETS.values():
+    profile_sets = tuple(BUILTIN_PROFILE_SETS.values()) + tuple(
+        COMPATIBILITY_PROFILE_SETS.values()
+    )
+    for profile_set in profile_sets:
         for profile in profile_set.profiles:
             if profile.profile_id == profile_id:
                 return profile

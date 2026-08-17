@@ -124,7 +124,7 @@ def test_cli_batch_create_and_work_claim(tmp_path, capsys) -> None:
 
     assert exit_code == 0
     assert batch["batch_id"] == "batch-test"
-    assert len(batch["work_item_ids"]) == 5
+    assert len(batch["work_item_ids"]) == 7
 
     exit_code = main(
         [
@@ -197,8 +197,8 @@ def test_cli_work_prompt_renders_profile_specific_guidance(tmp_path, capsys) -> 
     assert "Profile-Driven Occupancy Harvest Prompt" in captured.out
     assert "Country: Philippines (`PH`)" in captured.out
     assert "barangay" in captured.out
-    assert "call center agents were evacuated" in captured.out
-    assert '"Makati" Philippines "employees were inside" office' in captured.out
+    assert "Component input fields: Employees, shifts" in captured.out
+    assert '"Makati" Philippines BPO official statistics' in captured.out
     assert "Accepted observations require exact source URL" in captured.out
 
 
@@ -224,7 +224,9 @@ def test_cli_harvest_prepare_renders_broad_lead_prompt(tmp_path, capsys) -> None
     assert exit_code == 0
     assert output.is_file()
     assert "Broad Occupancy Lead Harvest" in captured.out
-    assert "Target: 20 lead records." in captured.out
+    assert "Target: 20 completed observations. Direct occupancy leads count as observations" in (
+        captured.out
+    )
     assert "Country: Philippines (`PH`)." in captured.out
     assert '"city_or_region": "String"' in captured.out
     assert "DO NOT" not in captured.err
@@ -256,9 +258,9 @@ def test_cli_harvest_prepare_can_focus_one_profile(tmp_path, capsys) -> None:
     assert exit_code == 0
     assert output.is_file()
     assert "Scope: Focus on Tennessee, United States" in captured.out
-    assert "- Factories and warehouses" in captured.out
+    assert "- Manufacturing facilities" in captured.out
     assert "- Malls, retail, and markets" not in captured.out
-    assert "workers were trapped" in captured.out
+    assert "Component inputs: Employees, shifts" in captured.out
     assert "shopping center" not in captured.out
 
 
@@ -287,10 +289,10 @@ def test_cli_harvest_prepare_accepts_facility_type_and_subtype_aliases(tmp_path,
 
     assert exit_code == 0
     assert output.is_file()
-    assert "Facility type: Schools (`schools`)." in captured.out
+    assert "Land use: Schools (`schools`)." in captured.out
     assert "- University and college" in captured.out
     assert "- Primary and secondary education" not in captured.out
-    assert "campus population" in captured.out
+    assert "Component inputs: Students, staff, faculty" in captured.out
 
 
 def test_cli_leads_validate_and_summarize(capsys) -> None:

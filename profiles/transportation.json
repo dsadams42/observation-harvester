@@ -1,290 +1,259 @@
 {
   "profile_set_id": "transportation",
-  "label": "Transportation facilities",
+  "label": "Transportation",
   "profiles": [
     {
       "profile_id": "airports",
-      "label": "Airport terminals",
+      "label": "Airports",
+      "land_use": "Transportation",
+      "facility_class": "Airports",
       "pdt_subtype": "Airports",
-      "area_defined": "Airport terminals only.",
-      "day_occurrence": "Open with passengers, visitors, employees, crew, and security staff.",
-      "night_occurrence": "Operational or closed depending on airport schedule, with visitors and employees.",
-      "episodic_occurrence": [
-        "terminal evacuations",
-        "delays",
-        "security incidents",
-        "flight disruptions"
-      ],
-      "occupancy_groups": [
-        "passengers",
-        "visitors",
+      "area_defined": null,
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Freight MT",
+        "annual visitors",
         "employees",
-        "staff",
-        "crew",
-        "security personnel"
+        "days open",
+        "average hours open"
       ],
-      "contextual_count_fields": [
-        "annual passengers",
-        "terminal capacity",
-        "flight count"
+      "regional_stat_fields": [
+        "Airport traffic unit to employee ration"
       ],
-      "preferred_strategy_ids": [
-        "incident_evacuation",
-        "official_event_attendance",
-        "routine_dated_attendance",
-        "legal_investigative_records"
-      ],
-      "source_search_prompt": "Find count-bearing reports for airport terminals. Good evidence includes passengers, visitors, employees, crew, or security personnel inside, evacuated, sheltered, screened, or present during a bounded terminal incident or operational period. Treat annual passengers, terminal capacity, and flight counts as context only.",
+      "component_source_guidance": "Collect source-backed component inputs only for this facility class. Keep each component role-labeled with value, unit, time basis, and geography level. Do not calculate a final derived occupancy estimate in v1.",
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find source-backed population component inputs for Airports in the Transportation land-use group. Target fields: Freight MT, annual visitors, employees, days open, average hours open, Airport traffic unit to employee ration. Do not derive a final occupancy estimate.",
       "preferred_source_types": [
-        "official airport statement",
-        "official emergency or security report",
-        "local or national news article",
-        "transportation authority report"
+        "official facility statistics",
+        "operator annual reports",
+        "government or regulator datasets",
+        "facility factsheets",
+        "regional demographic or sector statistics"
       ],
       "context_only_source_types": [
-        "airport directory",
-        "annual passenger statistics",
-        "terminal capacity page",
-        "Wikipedia or encyclopedia page"
+        "unsourced estimates",
+        "marketing descriptions without numeric component values",
+        "calculated occupancy totals derived by the model"
       ],
       "positive_evidence_patterns": [
-        "passengers were evacuated",
-        "people were inside the terminal",
-        "terminal was evacuated",
-        "passengers were stranded",
-        "people sheltered at the airport"
+        "Freight MT: numeric source-backed component input",
+        "annual visitors: numeric source-backed component input",
+        "employees: numeric source-backed component input",
+        "days open: numeric source-backed component input",
+        "average hours open: numeric source-backed component input"
       ],
       "negative_evidence_patterns": [
-        "annual passengers",
-        "terminal capacity",
-        "flights per day",
-        "runway"
+        "derived total occupancy estimate without source support",
+        "component value with no exact quote",
+        "numeric value without unit or time basis"
       ],
       "venue_aliases": [
-        "airport terminal",
-        "airport",
-        "passenger terminal"
+        "Airports"
+      ],
+      "priority": 0,
+      "enabled": true
+    },
+    {
+      "profile_id": "bus",
+      "label": "Bus",
+      "land_use": "Transportation",
+      "facility_class": "Bus",
+      "pdt_subtype": "Bus",
+      "area_defined": "Specifically refering to bus station/stop",
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "direct_count",
+      "component_count_fields": [],
+      "regional_stat_fields": [],
+      "component_source_guidance": null,
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find direct people-present occupancy evidence for Bus in the Transportation land-use group. Use only direct evidence of people physically present during a bounded incident, event, shift, measurement, or observation. Treat capacities, staffing, rooms, area, ridership, and annual traffic as context unless the analyst overrides count mode.",
+      "preferred_source_types": [
+        "incident reports",
+        "inspection reports",
+        "event attendance records",
+        "credible news reports with observed counts",
+        "official operational logs"
+      ],
+      "context_only_source_types": [
+        "capacity lists",
+        "floor area tables",
+        "employee totals",
+        "room counts",
+        "annual visitors or traffic totals"
+      ],
+      "positive_evidence_patterns": [
+        "people present at a bounded time",
+        "observed attendance or occupancy count",
+        "incident/event/shift count tied to a facility and date or period"
+      ],
+      "negative_evidence_patterns": [
+        "capacity or descriptive context alone is not direct occupancy"
+      ],
+      "venue_aliases": [
+        "Bus"
       ],
       "priority": 10,
-      "count_method": "population_subcomponent",
-      "component_count_fields": [
-        "Freight MT",
-        "annual visitors",
-        "employees",
-        "days open",
-        "average hours open"
-      ],
-      "regional_stat_fields": [
-        "Freight MT",
-        "annual visitors",
-        "employees",
-        "days open",
-        "average hours open"
-      ],
-      "component_source_guidance": "Harvest these values as source-backed component inputs, not final occupancy estimates. Preserve the source quote, unit, time basis, and geography level for each value."
+      "enabled": true
     },
     {
-      "profile_id": "bus_stations",
-      "label": "Bus stations and terminals",
-      "pdt_subtype": "Bus",
-      "area_defined": "Platform, station, terminal, and waiting areas where people congregate for buses.",
-      "day_occurrence": "Open with passengers, visitors, and employees.",
-      "night_occurrence": "Operational or closed depending on service schedule, with visitors and employees.",
-      "episodic_occurrence": [
-        "station evacuations",
-        "bus terminal incidents",
-        "service disruptions"
-      ],
-      "occupancy_groups": [
-        "passengers",
-        "visitors",
-        "employees",
-        "staff"
-      ],
-      "contextual_count_fields": [
-        "daily ridership",
-        "annual passengers",
-        "route count",
-        "station capacity"
-      ],
-      "preferred_strategy_ids": [
-        "incident_evacuation",
-        "routine_dated_attendance",
-        "legal_investigative_records"
-      ],
-      "source_search_prompt": "Find count-bearing reports for bus stations, bus terminals, and bus stops with congregating/waiting areas. Good evidence includes passengers, visitors, employees, or staff present, evacuated, sheltered, or counted during a bounded station incident or operational period. Treat ridership and route counts as context only.",
+      "profile_id": "train",
+      "label": "Train",
+      "land_use": "Transportation",
+      "facility_class": "Train",
+      "pdt_subtype": "Train",
+      "area_defined": "Specifically refering to train station/stop",
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "direct_count",
+      "component_count_fields": [],
+      "regional_stat_fields": [],
+      "component_source_guidance": null,
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find direct people-present occupancy evidence for Train in the Transportation land-use group. Use only direct evidence of people physically present during a bounded incident, event, shift, measurement, or observation. Treat capacities, staffing, rooms, area, ridership, and annual traffic as context unless the analyst overrides count mode.",
       "preferred_source_types": [
-        "transportation authority report",
-        "official emergency report",
-        "local or national news article"
+        "incident reports",
+        "inspection reports",
+        "event attendance records",
+        "credible news reports with observed counts",
+        "official operational logs"
       ],
       "context_only_source_types": [
-        "transit schedule",
-        "ridership statistics",
-        "map listing",
-        "station directory"
+        "capacity lists",
+        "floor area tables",
+        "employee totals",
+        "room counts",
+        "annual visitors or traffic totals"
       ],
       "positive_evidence_patterns": [
-        "passengers were evacuated",
-        "people were waiting",
-        "people were inside the bus station",
-        "terminal was evacuated",
-        "passengers were stranded"
+        "people present at a bounded time",
+        "observed attendance or occupancy count",
+        "incident/event/shift count tied to a facility and date or period"
       ],
       "negative_evidence_patterns": [
-        "daily ridership",
-        "annual passengers",
-        "route count",
-        "capacity"
+        "capacity or descriptive context alone is not direct occupancy"
       ],
       "venue_aliases": [
-        "bus station",
-        "bus terminal",
-        "bus stop",
-        "transit center"
+        "Train"
       ],
       "priority": 20,
+      "enabled": true
+    },
+    {
+      "profile_id": "transportation_repair_facility",
+      "label": "Transportation Repair Facility",
+      "land_use": "Transportation",
+      "facility_class": "Transportation Repair Facility",
+      "pdt_subtype": "Transportation Repair Facility",
+      "area_defined": null,
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
       "count_method": "direct_count",
       "component_count_fields": [],
       "regional_stat_fields": [],
-      "component_source_guidance": null
-    },
-    {
-      "profile_id": "train_stations",
-      "label": "Train stations and platforms",
-      "pdt_subtype": "Train",
-      "area_defined": "Platform, station, terminal, and waiting areas where people congregate for trains.",
-      "day_occurrence": "Open with passengers, visitors, and employees.",
-      "night_occurrence": "Operational or closed depending on service schedule, with visitors and employees.",
-      "episodic_occurrence": [
-        "station evacuations",
-        "service disruptions",
-        "rail incidents",
-        "security incidents"
-      ],
-      "occupancy_groups": [
-        "passengers",
-        "visitors",
-        "employees",
-        "staff"
-      ],
-      "contextual_count_fields": [
-        "daily ridership",
-        "annual passengers",
-        "station capacity"
-      ],
-      "preferred_strategy_ids": [
-        "incident_evacuation",
-        "routine_dated_attendance",
-        "legal_investigative_records"
-      ],
-      "source_search_prompt": "Find count-bearing reports for train stations, rail terminals, platforms, and metro/subway stations. Good evidence includes passengers, visitors, employees, or staff present, evacuated, sheltered, or counted during a bounded station incident or operating period. Treat ridership and station capacity as context only.",
+      "component_source_guidance": null,
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find direct people-present occupancy evidence for Transportation Repair Facility in the Transportation land-use group. Use only direct evidence of people physically present during a bounded incident, event, shift, measurement, or observation. Treat capacities, staffing, rooms, area, ridership, and annual traffic as context unless the analyst overrides count mode.",
       "preferred_source_types": [
-        "transportation authority report",
-        "official emergency report",
-        "local or national news article",
-        "rail operator statement"
+        "incident reports",
+        "inspection reports",
+        "event attendance records",
+        "credible news reports with observed counts",
+        "official operational logs"
       ],
       "context_only_source_types": [
-        "transit schedule",
-        "ridership statistics",
-        "map listing",
-        "station directory"
+        "capacity lists",
+        "floor area tables",
+        "employee totals",
+        "room counts",
+        "annual visitors or traffic totals"
       ],
       "positive_evidence_patterns": [
-        "passengers were evacuated",
-        "people were on the platform",
-        "people were inside the station",
-        "station was evacuated",
-        "passengers were stranded"
+        "people present at a bounded time",
+        "observed attendance or occupancy count",
+        "incident/event/shift count tied to a facility and date or period"
       ],
       "negative_evidence_patterns": [
-        "daily ridership",
-        "annual passengers",
-        "station capacity",
-        "route count"
+        "capacity or descriptive context alone is not direct occupancy"
       ],
       "venue_aliases": [
-        "train station",
-        "rail station",
-        "metro station",
-        "subway station",
-        "platform",
-        "rail terminal"
+        "Transportation Repair Facility"
       ],
       "priority": 30,
+      "enabled": true
+    },
+    {
+      "profile_id": "warehouse",
+      "label": "Warehouse",
+      "land_use": "Transportation",
+      "facility_class": "Warehouse",
+      "pdt_subtype": "Warehouse",
+      "area_defined": null,
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
       "count_method": "direct_count",
       "component_count_fields": [],
       "regional_stat_fields": [],
-      "component_source_guidance": null
-    },
-    {
-      "profile_id": "ports",
-      "label": "Ports and maritime terminals",
-      "pdt_subtype": "Port",
-      "area_defined": "Port areas including terminals, docks, and storage areas where employees or passengers are present.",
-      "day_occurrence": "Open with dock employees, ship employees, and sometimes passengers.",
-      "night_occurrence": "Operational, often with reduced dock and ship employees and sometimes passengers.",
-      "episodic_occurrence": [
-        "port evacuations",
-        "ship incidents",
-        "dock fires",
-        "terminal disruptions"
-      ],
-      "occupancy_groups": [
-        "dock employees",
-        "ship employees",
-        "passengers",
-        "workers",
-        "crew",
-        "visitors"
-      ],
-      "contextual_count_fields": [
-        "cargo throughput",
-        "terminal capacity",
-        "vessel capacity",
-        "annual passengers"
-      ],
-      "preferred_strategy_ids": [
-        "incident_evacuation",
-        "shift_operational_presence",
-        "legal_investigative_records"
-      ],
-      "source_search_prompt": "Find count-bearing reports for ports, maritime terminals, docks, piers, ferry terminals, and cargo terminals. Good evidence includes dock employees, ship employees, workers, crew, passengers, or visitors present, evacuated, rescued, or on duty during a bounded incident or operational period. Treat cargo throughput and vessel capacity as context only.",
+      "component_source_guidance": null,
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find direct people-present occupancy evidence for Warehouse in the Transportation land-use group. Use only direct evidence of people physically present during a bounded incident, event, shift, measurement, or observation. Treat capacities, staffing, rooms, area, ridership, and annual traffic as context unless the analyst overrides count mode.",
       "preferred_source_types": [
-        "official port authority report",
-        "official emergency or maritime safety report",
-        "local or national news article",
-        "company or operator statement"
+        "incident reports",
+        "inspection reports",
+        "event attendance records",
+        "credible news reports with observed counts",
+        "official operational logs"
       ],
       "context_only_source_types": [
-        "port directory",
-        "cargo throughput page",
-        "terminal capacity page",
-        "map listing"
+        "capacity lists",
+        "floor area tables",
+        "employee totals",
+        "room counts",
+        "annual visitors or traffic totals"
       ],
       "positive_evidence_patterns": [
-        "workers were evacuated",
-        "passengers were evacuated",
-        "crew members were inside",
-        "dock workers were on duty",
-        "people were at the terminal"
+        "people present at a bounded time",
+        "observed attendance or occupancy count",
+        "incident/event/shift count tied to a facility and date or period"
       ],
       "negative_evidence_patterns": [
-        "cargo throughput",
-        "terminal capacity",
-        "vessel capacity",
-        "annual passengers"
+        "capacity or descriptive context alone is not direct occupancy"
       ],
       "venue_aliases": [
-        "port",
-        "maritime terminal",
-        "dock",
-        "pier",
-        "ferry terminal",
-        "cargo terminal"
+        "Warehouse"
       ],
       "priority": 40,
+      "enabled": true
+    },
+    {
+      "profile_id": "port",
+      "label": "Port",
+      "land_use": "Transportation",
+      "facility_class": "Port",
+      "pdt_subtype": "Port",
+      "area_defined": "I would ignore ports for now, its an odd facility that Sarah has been working on",
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
       "count_method": "population_subcomponent",
       "component_count_fields": [
         "Dock employees",
@@ -294,15 +263,40 @@
         "trains",
         "trucks"
       ],
-      "regional_stat_fields": [
-        "Dock employees",
-        "ship employees",
-        "ship passengers",
-        "cranes",
-        "trains",
-        "trucks"
+      "regional_stat_fields": [],
+      "component_source_guidance": "Collect source-backed component inputs only for this facility class. Keep each component role-labeled with value, unit, time basis, and geography level. Do not calculate a final derived occupancy estimate in v1.",
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find source-backed population component inputs for Port in the Transportation land-use group. Target fields: Dock employees, ship employees, ship passengers, cranes, trains, trucks. Do not derive a final occupancy estimate.",
+      "preferred_source_types": [
+        "official facility statistics",
+        "operator annual reports",
+        "government or regulator datasets",
+        "facility factsheets",
+        "regional demographic or sector statistics"
       ],
-      "component_source_guidance": "Harvest these values as source-backed component inputs, not final occupancy estimates. Preserve the source quote, unit, time basis, and geography level for each value."
+      "context_only_source_types": [
+        "unsourced estimates",
+        "marketing descriptions without numeric component values",
+        "calculated occupancy totals derived by the model"
+      ],
+      "positive_evidence_patterns": [
+        "Dock employees: numeric source-backed component input",
+        "ship employees: numeric source-backed component input",
+        "ship passengers: numeric source-backed component input",
+        "cranes: numeric source-backed component input",
+        "trains: numeric source-backed component input",
+        "trucks: numeric source-backed component input"
+      ],
+      "negative_evidence_patterns": [
+        "derived total occupancy estimate without source support",
+        "component value with no exact quote",
+        "numeric value without unit or time basis"
+      ],
+      "venue_aliases": [
+        "Port"
+      ],
+      "priority": 50,
+      "enabled": true
     }
   ]
 }

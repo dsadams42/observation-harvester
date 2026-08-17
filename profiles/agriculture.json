@@ -4,149 +4,101 @@
   "profiles": [
     {
       "profile_id": "indoor_agriculture",
-      "label": "Indoor agriculture",
+      "label": "Indoor Agriculture",
+      "land_use": "Agriculture",
+      "facility_class": "Indoor Agriculture",
       "pdt_subtype": "Indoor Agriculture",
-      "area_defined": "All indoor agriculture buildings.",
-      "day_occurrence": "Open during growing, production, packing, and staff work periods.",
-      "night_occurrence": "Closed or operational with reduced employees.",
-      "episodic_occurrence": [
-        "greenhouse fires",
-        "worker evacuations",
-        "inspection actions",
-        "agricultural incidents"
-      ],
-      "occupancy_groups": [
-        "employees",
-        "workers",
-        "staff",
-        "contractors"
-      ],
+      "area_defined": null,
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
       "contextual_count_fields": [
-        "workforce size",
-        "production capacity",
-        "acreage",
-        "greenhouse area"
+        "Employees"
       ],
-      "preferred_strategy_ids": [
-        "incident_evacuation",
-        "shift_operational_presence",
-        "enforcement_inspection",
-        "legal_investigative_records"
-      ],
-      "source_search_prompt": "Find count-bearing reports for greenhouses, vertical farms, plant nurseries, and indoor agricultural facilities. Good evidence includes employees, workers, staff, or contractors inside, on shift, evacuated, rescued, or counted during an inspection or investigation. Treat acreage, production capacity, and workforce size as context only.",
-      "preferred_source_types": [
-        "local or national news article",
-        "official workplace safety or labor report",
-        "official emergency report",
-        "official agriculture or inspection report"
-      ],
-      "context_only_source_types": [
-        "farm directory",
-        "company profile",
-        "production capacity page",
-        "acreage page"
-      ],
-      "positive_evidence_patterns": [
-        "workers were inside",
-        "employees were evacuated",
-        "workers were evacuated",
-        "workers on shift",
-        "inside the greenhouse when",
-        "people found inside"
-      ],
-      "negative_evidence_patterns": [
-        "acreage",
-        "greenhouse area",
-        "production capacity",
-        "workforce size",
-        "number of employees"
-      ],
-      "venue_aliases": [
-        "greenhouse",
-        "vertical farm",
-        "plant nursery",
-        "indoor farm",
-        "indoor agriculture facility"
-      ],
-      "priority": 10,
       "count_method": "direct_count",
       "component_count_fields": [],
       "regional_stat_fields": [],
-      "component_source_guidance": null
+      "component_source_guidance": null,
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find direct people-present occupancy evidence for Indoor Agriculture in the Agriculture land-use group. Use only direct evidence of people physically present during a bounded incident, event, shift, measurement, or observation. Treat capacities, staffing, rooms, area, ridership, and annual traffic as context unless the analyst overrides count mode.",
+      "preferred_source_types": [
+        "incident reports",
+        "inspection reports",
+        "event attendance records",
+        "credible news reports with observed counts",
+        "official operational logs"
+      ],
+      "context_only_source_types": [
+        "capacity lists",
+        "floor area tables",
+        "employee totals",
+        "room counts",
+        "annual visitors or traffic totals"
+      ],
+      "positive_evidence_patterns": [
+        "people present at a bounded time",
+        "observed attendance or occupancy count",
+        "incident/event/shift count tied to a facility and date or period"
+      ],
+      "negative_evidence_patterns": [
+        "Employees alone is not a direct occupancy count"
+      ],
+      "venue_aliases": [
+        "Indoor Agriculture"
+      ],
+      "priority": 0,
+      "enabled": true
     },
     {
       "profile_id": "outdoor_agriculture",
-      "label": "Outdoor agriculture",
+      "label": "Outdoor Agriculture",
+      "land_use": "Agriculture",
+      "facility_class": "Outdoor Agriculture",
       "pdt_subtype": "Outdoor Agriculture",
-      "area_defined": "Outdoor areas that are part of the farm, ranch, orchard, field, or pasture.",
-      "day_occurrence": "Operational during field work, harvesting, animal care, and staff periods.",
-      "night_occurrence": "Usually closed or reduced/no population, except for operational work.",
-      "episodic_occurrence": [
-        "harvest work",
-        "farm incidents",
-        "labor inspections",
-        "evacuations"
-      ],
-      "occupancy_groups": [
-        "farm workers",
-        "employees",
-        "laborers",
-        "contractors",
-        "staff"
-      ],
+      "area_defined": null,
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
       "contextual_count_fields": [
-        "acreage",
-        "seasonal workforce",
-        "annual production",
-        "livestock count"
+        "Employees",
+        "acres"
       ],
-      "preferred_strategy_ids": [
-        "shift_operational_presence",
-        "enforcement_inspection",
-        "legal_investigative_records",
-        "incident_evacuation"
-      ],
-      "source_search_prompt": "Find count-bearing reports for farms, fields, pastures, orchards, ranches, and outdoor agricultural facilities. Good evidence includes farm workers, laborers, employees, contractors, or staff present, on shift, evacuated, rescued, or counted during an inspection or incident. Treat acreage, seasonal workforce totals, annual production, and livestock counts as context only.",
-      "preferred_source_types": [
-        "official labor or agriculture inspection report",
-        "official emergency report",
-        "local or national news article",
-        "court or investigative record"
-      ],
-      "context_only_source_types": [
-        "farm directory",
-        "acreage page",
-        "production statistics page",
-        "company profile"
-      ],
-      "positive_evidence_patterns": [
-        "workers were present",
-        "farm workers were evacuated",
-        "laborers were inside",
-        "workers on shift",
-        "people working in the field",
-        "workers were rescued"
-      ],
-      "negative_evidence_patterns": [
-        "acreage",
-        "seasonal workforce",
-        "annual production",
-        "livestock count",
-        "farm size"
-      ],
-      "venue_aliases": [
-        "farm",
-        "field",
-        "pasture",
-        "orchard",
-        "ranch",
-        "outdoor agriculture"
-      ],
-      "priority": 20,
       "count_method": "direct_count",
       "component_count_fields": [],
       "regional_stat_fields": [],
-      "component_source_guidance": null
+      "component_source_guidance": null,
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find direct people-present occupancy evidence for Outdoor Agriculture in the Agriculture land-use group. Use only direct evidence of people physically present during a bounded incident, event, shift, measurement, or observation. Treat capacities, staffing, rooms, area, ridership, and annual traffic as context unless the analyst overrides count mode.",
+      "preferred_source_types": [
+        "incident reports",
+        "inspection reports",
+        "event attendance records",
+        "credible news reports with observed counts",
+        "official operational logs"
+      ],
+      "context_only_source_types": [
+        "capacity lists",
+        "floor area tables",
+        "employee totals",
+        "room counts",
+        "annual visitors or traffic totals"
+      ],
+      "positive_evidence_patterns": [
+        "people present at a bounded time",
+        "observed attendance or occupancy count",
+        "incident/event/shift count tied to a facility and date or period"
+      ],
+      "negative_evidence_patterns": [
+        "Employees alone is not a direct occupancy count",
+        "acres alone is not a direct occupancy count"
+      ],
+      "venue_aliases": [
+        "Outdoor Agriculture"
+      ],
+      "priority": 10,
+      "enabled": true
     }
   ]
 }

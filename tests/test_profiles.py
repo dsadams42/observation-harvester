@@ -1,119 +1,73 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from pdt_observer.models import BuildingProfileSet, CountMethod
-from pdt_observer.profiles import get_profile_set, narrow_profile_set, resolve_profile_set
+from pdt_observer.profiles import (
+    BUILTIN_PROFILE_SETS,
+    get_profile_set,
+    narrow_profile_set,
+    resolve_profile_set,
+)
+
+CANONICAL_LAND_USES = (
+    "residential",
+    "institutions_public_service",
+    "retail_service",
+    "commercial",
+    "transportation",
+    "military_facility",
+    "recreation_entertainment",
+    "agriculture",
+)
 
 
-def test_public_venue_profile_set_loads_from_builtin() -> None:
-    profile_set = get_profile_set("public_venues")
+def _pdt_mapping() -> dict[str, object]:
+    return json.loads(Path("profiles/pdt_count_mapping.json").read_text(encoding="utf-8"))
 
-    assert profile_set.profile_set_id == "public_venues"
-    assert [profile.profile_id for profile in profile_set.profiles] == [
-        "restaurants_bars",
-        "schools_childcare",
-        "hospitals_care",
-        "hotels_lodging",
-        "retail_events",
+
+def _mapping_rows() -> dict[tuple[str, str], dict[str, object]]:
+    return {
+        (row["land_use_id"], row["facility_class_id"]): row
+        for row in _pdt_mapping()["rows"]
+    }
+
+
+def test_builtin_profile_sets_are_canonical_land_uses() -> None:
+    assert tuple(BUILTIN_PROFILE_SETS) == CANONICAL_LAND_USES
+    assert [get_profile_set(profile_set_id).label for profile_set_id in CANONICAL_LAND_USES] == [
+        "Residential",
+        "Institutions/Public Service",
+        "Retail and Service Outlets",
+        "Commercial",
+        "Transportation",
+        "Military Facility",
+        "Recreation/Entertainment",
+        "Agriculture",
     ]
 
 
-def test_public_venue_profile_json_matches_model() -> None:
-    profile_set = BuildingProfileSet.model_validate_json(
-        Path("profiles/public_venues.json").read_text(encoding="utf-8")
-    )
+def test_repo_owned_mapping_fixture_reflects_updated_spreadsheet() -> None:
+    mapping = _pdt_mapping()
 
-    assert profile_set.profile_set_id == "public_venues"
-    assert all(profile.enabled for profile in profile_set.profiles)
-
-
-def test_builtin_public_venue_profiles_match_json() -> None:
-    builtin = get_profile_set("public_venues")
-    from_json = BuildingProfileSet.model_validate_json(
-        Path("profiles/public_venues.json").read_text(encoding="utf-8")
-    )
-
-    assert builtin == from_json
-
-
-def test_commercial_business_profile_set_loads_from_builtin() -> None:
-    profile_set = get_profile_set("commercial_business")
-
-    assert profile_set.profile_set_id == "commercial_business"
-    assert [profile.profile_id for profile in profile_set.profiles] == [
-        "malls_retail_markets",
-        "offices_bpo_call_centers",
-        "factories_warehouses",
-        "hotels_restaurants",
+    assert mapping["schema_version"] == 2
+    assert mapping["taxonomy"]["land_use_count"] == 8
+    assert mapping["taxonomy"]["facility_class_count"] == 65
+    assert mapping["taxonomy"]["land_uses"] == [
+        "Residential",
+        "Institutions/Public Service",
+        "Retail and Service Outlets",
+        "Commercial",
+        "Transportation",
+        "Military Facility",
+        "Recreation/Entertainment",
+        "Agriculture",
     ]
 
 
-def test_residential_profile_set_loads_from_builtin() -> None:
-    profile_set = get_profile_set("residential")
-
-    assert profile_set.profile_set_id == "residential"
-    assert [profile.profile_id for profile in profile_set.profiles] == [
-        "apartments_condominiums",
-        "houses_informal_settlements",
-    ]
-
-
-def test_pdt_facility_type_profile_sets_load_from_builtin() -> None:
-    schools = get_profile_set("schools")
-    manufacturing = get_profile_set("manufacturing")
-    restaurants = get_profile_set("restaurants")
-
-    assert [profile.profile_id for profile in schools.profiles] == [
-        "primary_secondary_education",
-        "university_college",
-        "university_library",
-    ]
-    assert [profile.profile_id for profile in manufacturing.profiles] == [
-        "light_manufacturing",
-        "heavy_manufacturing",
-        "chemical_refining_cement",
-        "heat_processing",
-        "power_plants",
-        "warehouses",
-    ]
-    assert [profile.profile_id for profile in restaurants.profiles] == [
-        "full_service_restaurants",
-        "quick_service_restaurants",
-        "bars_nightlife",
-    ]
-
-
-def test_builtin_commercial_business_profiles_match_json() -> None:
-    builtin = get_profile_set("commercial_business")
-    from_json = BuildingProfileSet.model_validate_json(
-        Path("profiles/commercial_business.json").read_text(encoding="utf-8")
-    )
-
-    assert builtin == from_json
-
-
-def test_builtin_residential_profiles_match_json() -> None:
-    builtin = get_profile_set("residential")
-    from_json = BuildingProfileSet.model_validate_json(
-        Path("profiles/residential.json").read_text(encoding="utf-8")
-    )
-
-    assert builtin == from_json
-
-
-def test_builtin_pdt_facility_type_profiles_match_json() -> None:
-    for profile_set_id in (
-        "schools",
-        "manufacturing",
-        "restaurants",
-        "retail_service",
-        "public_institutional",
-        "transportation",
-        "recreation_entertainment",
-        "agriculture",
-        "pdt_residential",
-    ):
+def test_builtin_land_use_profiles_match_json() -> None:
+    for profile_set_id in CANONICAL_LAND_USES:
         builtin = get_profile_set(profile_set_id)
         from_json = BuildingProfileSet.model_validate_json(
             Path(f"profiles/{profile_set_id}.json").read_text(encoding="utf-8")
@@ -148,183 +102,147 @@ def test_custom_profile_set_can_load_from_path(tmp_path: Path) -> None:
 
     assert profile_set.profile_set_id == "custom_facilities"
     assert profile_set.profiles[0].profile_id == "cold_storage"
+    assert profile_set.profiles[0].land_use is None
+    assert profile_set.profiles[0].facility_class is None
 
 
-def test_profile_set_can_be_narrowed_to_one_profile() -> None:
-    profile_set = get_profile_set("commercial_business")
+def test_profile_set_can_be_narrowed_with_legacy_alias() -> None:
+    profile_set = get_profile_set("commercial")
 
     narrowed = narrow_profile_set(profile_set, "factories_warehouses")
 
-    assert narrowed.profile_set_id == "commercial_business"
-    assert [profile.profile_id for profile in narrowed.profiles] == ["factories_warehouses"]
+    assert narrowed.profile_set_id == "commercial"
+    assert [profile.profile_id for profile in narrowed.profiles] == ["light_manufacturing"]
 
 
-def test_legacy_philippines_commercial_business_name_aliases_generic_profile_set() -> None:
+def test_legacy_profile_sets_remain_loadable_but_not_canonical() -> None:
+    assert get_profile_set("schools").profile_set_id == "schools"
+    assert get_profile_set("manufacturing").profile_set_id == "manufacturing"
+    assert get_profile_set("commercial_business").profile_set_id == "commercial_business"
     assert get_profile_set("philippines_commercial_business") == get_profile_set(
         "commercial_business"
     )
+    assert "schools" not in BUILTIN_PROFILE_SETS
+    assert "commercial_business" not in BUILTIN_PROFILE_SETS
 
 
-def test_commercial_business_profiles_include_facility_specific_proxy_phrases() -> None:
-    profile_set = get_profile_set("commercial_business")
-    offices = next(
-        profile
-        for profile in profile_set.profiles
-        if profile.profile_id == "offices_bpo_call_centers"
-    )
-    factories = next(
-        profile for profile in profile_set.profiles if profile.profile_id == "factories_warehouses"
-    )
-
-    assert "call center agents were evacuated" in offices.positive_evidence_patterns
-    assert "BPO" in offices.venue_aliases
-    assert "workers were trapped" in factories.positive_evidence_patterns
-    assert "workforce size" in factories.negative_evidence_patterns
-
-
-def test_residential_profiles_include_residential_proxy_phrases() -> None:
-    profile_set = get_profile_set("residential")
-    apartments = next(
-        profile
-        for profile in profile_set.profiles
-        if profile.profile_id == "apartments_condominiums"
-    )
-    houses = next(
-        profile
-        for profile in profile_set.profiles
-        if profile.profile_id == "houses_informal_settlements"
-    )
-
-    assert "residents were evacuated" in apartments.positive_evidence_patterns
-    assert "condo" in apartments.venue_aliases
-    assert "families displaced" in houses.positive_evidence_patterns
-    assert "population" in houses.negative_evidence_patterns
+def test_spreadsheet_mapping_drives_canonical_profiles() -> None:
+    rows = _mapping_rows()
+    for profile_set_id in CANONICAL_LAND_USES:
+        profile_set = get_profile_set(profile_set_id)
+        for profile in profile_set.profiles:
+            key = (profile_set_id, profile.profile_id)
+            row = rows[key]
+            assert profile.land_use == row["land_use"]
+            assert profile.facility_class == row["facility_class"]
+            assert profile.pdt_subtype == row["facility_class"]
+            assert profile.count_method.value == row["count_method"]
+            if profile.count_method == CountMethod.POPULATION_SUBCOMPONENT:
+                assert profile.component_count_fields == tuple(row["component_count_fields"])
+            else:
+                assert profile.component_count_fields == ()
+                assert profile.contextual_count_fields == tuple(
+                    row["direct_contextual_count_fields"]
+                )
+            assert profile.regional_stat_fields == tuple(row["regional_stat_fields"])
 
 
-def test_pdt_facility_type_profiles_include_subtype_guidance() -> None:
-    schools = get_profile_set("schools")
-    manufacturing = get_profile_set("manufacturing")
-    restaurants = get_profile_set("restaurants")
-    university = next(
-        profile for profile in schools.profiles if profile.profile_id == "university_college"
-    )
-    heavy = next(
-        profile for profile in manufacturing.profiles if profile.profile_id == "heavy_manufacturing"
-    )
-    quick_service = next(
-        profile
-        for profile in restaurants.profiles
-        if profile.profile_id == "quick_service_restaurants"
-    )
-
-    assert "students were evacuated" in university.positive_evidence_patterns
-    assert "campus population" in university.negative_evidence_patterns
-    assert "workers were trapped" in heavy.positive_evidence_patterns
-    assert "workforce size" in heavy.negative_evidence_patterns
-    assert "employees were evacuated" in quick_service.positive_evidence_patterns
-    assert "fast-food restaurant" in quick_service.venue_aliases
-
-
-def test_pdt_facility_type_profiles_include_occurrence_guidance() -> None:
-    schools = get_profile_set("schools")
-    manufacturing = get_profile_set("manufacturing")
-    retail = get_profile_set("retail_service")
-    institutional = get_profile_set("public_institutional")
-    transportation = get_profile_set("transportation")
-    recreation = get_profile_set("recreation_entertainment")
-    agriculture = get_profile_set("agriculture")
-    residential = get_profile_set("pdt_residential")
-
-    assert schools.profiles[0].pdt_subtype == "School (D-12)"
-    assert "students" in schools.profiles[0].occupancy_groups
-    assert "workforce size" in manufacturing.profiles[0].contextual_count_fields
-    assert "shoppers" in retail.profiles[0].occupancy_groups
-    assert "patients" in next(
-        profile
-        for profile in institutional.profiles
-        if profile.profile_id == "hospitals_with_beds"
-    ).occupancy_groups
-    assert "passengers" in transportation.profiles[0].occupancy_groups
-    assert "official_event_attendance" in [
-        strategy.value for strategy in recreation.profiles[1].preferred_strategy_ids
-    ]
-    assert "workers" in agriculture.profiles[0].occupancy_groups
-    assert "average household size" in residential.profiles[0].contextual_count_fields
-
-
-def test_csv_mapped_profiles_expose_count_methods_and_component_fields() -> None:
-    schools = get_profile_set("schools")
-    manufacturing = get_profile_set("manufacturing")
-    institutional = get_profile_set("public_institutional")
-    recreation = get_profile_set("recreation_entertainment")
-    residential = get_profile_set("pdt_residential")
-
-    school = schools.profiles[0]
-    factory = manufacturing.profiles[0]
-    hospital = next(
-        profile
-        for profile in institutional.profiles
-        if profile.profile_id == "hospitals_with_beds"
-    )
-    theater = next(profile for profile in recreation.profiles if profile.profile_id == "theaters")
-
-    assert school.count_method == CountMethod.POPULATION_SUBCOMPONENT
-    assert "Students" in school.component_count_fields
-    assert "school attendace rate" in school.component_count_fields
-    assert "Students" in school.regional_stat_fields
-    assert factory.count_method == CountMethod.POPULATION_SUBCOMPONENT
-    assert "Employees" in factory.component_count_fields
-    assert hospital.count_method == CountMethod.POPULATION_SUBCOMPONENT
-    assert "bed occupancy rate" in hospital.component_count_fields
-    assert theater.count_method == CountMethod.DIRECT_COUNT
-    assert theater.component_count_fields == ()
-    assert residential.profiles[0].regional_stat_fields
-
-
-def test_count_method_override_reclassifies_component_fields_without_mutating_defaults() -> None:
-    default_set = get_profile_set("public_institutional")
-    direct_hospital = resolve_profile_set(
-        "public_institutional",
-        profile_id="hospitals_with_beds",
-        count_method_override=CountMethod.DIRECT_COUNT,
+def test_hotel_motel_uses_updated_subcomponent_arguments() -> None:
+    hotel = resolve_profile_set(
+        "retail_service",
+        profile_id="hotel_motel",
     ).profiles[0]
-    component_theater = resolve_profile_set(
-        "recreation_entertainment",
-        profile_id="theaters",
+
+    assert hotel.count_method == CountMethod.POPULATION_SUBCOMPONENT
+    assert hotel.component_count_fields == (
+        "Number of rooms",
+        "number of suites",
+        "hotel stars",
+        "average room size",
+        "average suite size",
+    )
+    assert hotel.regional_stat_fields == ("Hotel Occupancy Rate",)
+    assert "hotel occupancy rate" not in tuple(
+        field.casefold() for field in hotel.component_count_fields
+    )
+
+
+def test_residential_arguments_are_only_household_and_dwelling_size() -> None:
+    residential = get_profile_set("residential")
+    single_family = next(
+        profile for profile in residential.profiles if profile.profile_id == "single_family"
+    )
+
+    assert single_family.count_method == CountMethod.POPULATION_SUBCOMPONENT
+    assert single_family.component_count_fields == ("Household size", "dwelling size")
+    assert single_family.regional_stat_fields == (
+        "School attendance rate",
+        "unemployment rate",
+        "age/sex breakdown",
+    )
+
+
+def test_school_hospital_and_commercial_fields_match_spreadsheet_arguments() -> None:
+    school = resolve_profile_set(
+        "institutions_public_service",
+        profile_id="school_d_12",
+    ).profiles[0]
+    hospital = resolve_profile_set(
+        "institutions_public_service",
+        profile_id="hospital_clinic_with_beds",
+    ).profiles[0]
+    office = resolve_profile_set("commercial", profile_id="office_building").profiles[0]
+
+    assert school.component_count_fields == (
+        "Students",
+        "staff",
+        "faculty",
+        "shift schooling",
+    )
+    assert school.regional_stat_fields == ("School attendance Rate",)
+    assert hospital.component_count_fields == (
+        "Inpatients",
+        "outpatients",
+        "beds",
+        "nurses",
+        "doctors",
+        "staff",
+    )
+    assert hospital.regional_stat_fields == ("Bed Occupancy Rate",)
+    assert office.component_count_fields == ("Employees", "shifts")
+
+
+def test_direct_count_profiles_keep_arguments_as_context_not_components() -> None:
+    religious = resolve_profile_set(
+        "institutions_public_service",
+        profile_id="religious",
+    ).profiles[0]
+    indoor_agriculture = resolve_profile_set(
+        "agriculture",
+        profile_id="indoor_agriculture",
+    ).profiles[0]
+
+    assert religious.count_method == CountMethod.DIRECT_COUNT
+    assert religious.component_count_fields == ()
+    assert religious.contextual_count_fields == ("Capacity", "staff")
+    assert indoor_agriculture.component_count_fields == ()
+    assert indoor_agriculture.contextual_count_fields == ("Employees",)
+
+
+def test_count_method_override_reclassifies_context_fields_without_mutating_defaults() -> None:
+    default_set = get_profile_set("agriculture")
+    component_agriculture = resolve_profile_set(
+        "agriculture",
+        profile_id="outdoor_agriculture",
         count_method_override=CountMethod.POPULATION_SUBCOMPONENT,
     ).profiles[0]
 
-    default_hospital = next(
+    default_agriculture = next(
         profile
         for profile in default_set.profiles
-        if profile.profile_id == "hospitals_with_beds"
+        if profile.profile_id == "outdoor_agriculture"
     )
-    assert default_hospital.count_method == CountMethod.POPULATION_SUBCOMPONENT
-    assert direct_hospital.count_method == CountMethod.DIRECT_COUNT
-    assert direct_hospital.component_count_fields == ()
-    assert "bed occupancy rate" in direct_hospital.contextual_count_fields
-    assert component_theater.count_method == CountMethod.POPULATION_SUBCOMPONENT
-    assert "seating capacity" in component_theater.component_count_fields
-
-
-def test_public_venue_profiles_include_evidence_first_phrases() -> None:
-    profile_set = get_profile_set("public_venues")
-    restaurants = next(
-        profile for profile in profile_set.profiles if profile.profile_id == "restaurants_bars"
-    )
-
-    assert "people were inside" in restaurants.positive_evidence_patterns
-    assert "customers were inside" in restaurants.source_search_prompt
-    assert "inside the restaurant when" in restaurants.positive_evidence_patterns
-
-
-def test_public_venue_profiles_include_source_type_guidance() -> None:
-    profile_set = get_profile_set("public_venues")
-
-    for profile in profile_set.profiles:
-        assert "local or national news article" in profile.preferred_source_types
-        assert "official venue, organizer, or event attendance announcement" in (
-            profile.preferred_source_types
-        )
-        assert "Wikipedia or encyclopedia page" in profile.context_only_source_types
-        assert "context only" in profile.source_search_prompt
+    assert default_agriculture.count_method == CountMethod.DIRECT_COUNT
+    assert default_agriculture.component_count_fields == ()
+    assert component_agriculture.count_method == CountMethod.POPULATION_SUBCOMPONENT
+    assert component_agriculture.component_count_fields == ("Employees", "acres")

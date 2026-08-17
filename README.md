@@ -47,12 +47,11 @@ OASIS currently supports:
 - A persistent, downloadable pipeline transcript written as concise colleague-style
   agent reports rather than hidden chain-of-thought.
 
-The built-in PDT facility families include `schools`, `manufacturing`, `restaurants`,
-`retail_service`, `public_institutional`, `transportation`,
-`recreation_entertainment`, `agriculture`, and residential facilities. Each family includes
-more specific PDT subtypes with aliases, evidence phrases, negative traps, expected
-occupancy groups, occurrence hints, and preferred evidence strategies. Older profile
-families remain available for compatibility.
+The built-in PDT catalog is organized as eight land uses: `residential`,
+`institutions_public_service`, `retail_service`, `commercial`, `transportation`,
+`military_facility`, `recreation_entertainment`, and `agriculture`. Each land use includes
+more specific facility classes with aliases, evidence phrases, negative traps, occurrence
+hints, count-method defaults, and preferred evidence strategies.
 
 ## Human-AI Workflow
 

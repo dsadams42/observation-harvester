@@ -76,6 +76,7 @@ class TimeBasis(StrEnum):
     INSTANT = "instant"
     SHIFT = "shift"
     DAILY = "daily"
+    MONTHLY = "monthly"
     EVENT = "event"
     ANNUAL = "annual"
     SCHOOL_YEAR = "school_year"
@@ -594,6 +595,8 @@ class GeometryReviewItem(StrictModel):
 class BuildingTypeProfile(StrictModel):
     profile_id: str = Field(min_length=1)
     label: str = Field(min_length=1)
+    land_use: str | None = None
+    facility_class: str | None = None
     pdt_subtype: str | None = None
     area_defined: str | None = None
     day_occurrence: str | None = None

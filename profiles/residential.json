@@ -1,151 +1,794 @@
 {
   "profile_set_id": "residential",
-  "label": "Residential facilities",
+  "label": "Residential",
   "profiles": [
     {
-      "profile_id": "apartments_condominiums",
-      "label": "Apartments and condominiums",
-      "source_search_prompt": "Find incident reports with explicit headcounts for residents, occupants, tenants, families, or people physically present, trapped, rescued, displaced, or evacuated from apartments, condominiums, flats, high-rise residential towers, or mixed-use residential buildings. Prioritize news articles, official emergency reports, LGU reports, and public-safety reports; treat real-estate listings, property profiles, unit counts, and amenity pages as context only.",
+      "profile_id": "overall_residential",
+      "label": "Overall Residential",
+      "land_use": "Residential",
+      "facility_class": "Overall Residential",
+      "pdt_subtype": "Overall Residential",
+      "area_defined": "We use a different process for residential buildings using the country level census - revengc",
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Household size",
+        "dwelling size"
+      ],
+      "regional_stat_fields": [
+        "School attendance rate",
+        "unemployment rate",
+        "age/sex breakdown"
+      ],
+      "component_source_guidance": "Collect source-backed component inputs only for this facility class. Keep each component role-labeled with value, unit, time basis, and geography level. Do not calculate a final derived occupancy estimate in v1.",
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find source-backed population component inputs for Overall Residential in the Residential land-use group. Target fields: Household size, dwelling size, School attendance rate, unemployment rate, age/sex breakdown. Do not derive a final occupancy estimate.",
       "preferred_source_types": [
-        "local or national news article",
-        "wire-service article",
-        "official emergency or public-safety incident report",
-        "official government or regulator enforcement report",
-        "official disaster response or social welfare report",
-        "official press release with a count-bearing incident detail"
+        "official facility statistics",
+        "operator annual reports",
+        "government or regulator datasets",
+        "facility factsheets",
+        "regional demographic or sector statistics"
       ],
       "context_only_source_types": [
-        "Wikipedia or encyclopedia page",
-        "generic directory, real-estate listing, listicle, or map listing",
-        "property marketing or about page without a count-bearing event or incident",
-        "unit-count, floor-area, valuation, amenities, or leasing page",
-        "social media repost without an original authoritative source",
-        "commercial-only facility report without residential occupancy evidence",
-        "outdoor public open-space report without a named residential facility"
+        "unsourced estimates",
+        "marketing descriptions without numeric component values",
+        "calculated occupancy totals derived by the model"
       ],
       "positive_evidence_patterns": [
-        "residents were inside",
-        "occupants were inside",
-        "tenants were inside",
-        "families were inside",
-        "people were inside",
-        "residents were evacuated",
-        "occupants were evacuated",
-        "tenants were evacuated",
-        "families were evacuated",
-        "people were evacuated",
-        "residents were rescued",
-        "people were rescued",
-        "trapped inside",
-        "inside the apartment when",
-        "inside the condominium when",
-        "evacuated from the condominium",
-        "evacuated from the apartment",
-        "families displaced",
-        "residents displaced"
+        "Household size: numeric source-backed component input",
+        "dwelling size: numeric source-backed component input"
       ],
       "negative_evidence_patterns": [
-        "units",
-        "number of units",
-        "floor area",
-        "parking slots",
-        "amenities",
-        "rental rate",
-        "sale price",
-        "property value",
-        "address",
-        "injured",
-        "commercial",
-        "office space"
+        "derived total occupancy estimate without source support",
+        "component value with no exact quote",
+        "numeric value without unit or time basis"
       ],
       "venue_aliases": [
-        "apartment",
-        "condominium",
-        "condo",
-        "residential tower",
-        "residential building",
-        "mixed-use building",
-        "flat",
-        "tenement"
+        "Overall Residential"
       ],
-      "priority": 10,
-      "enabled": true,
-      "count_method": "direct_count",
-      "component_count_fields": [],
-      "regional_stat_fields": [],
-      "component_source_guidance": null
+      "priority": 0,
+      "enabled": true
     },
     {
-      "profile_id": "houses_informal_settlements",
-      "label": "Houses and informal settlements",
-      "source_search_prompt": "Find incident reports with explicit headcounts for residents, occupants, families, households, or people physically present, trapped, rescued, displaced, or evacuated from houses, homes, boarding houses, dormitories, row houses, subdivisions, compounds, or informal settlements. Prioritize news articles, official emergency reports, LGU reports, disaster response reports, and public-safety reports; treat census figures, neighborhood population totals, property pages, and general settlement profiles as context only.",
+      "profile_id": "urban",
+      "label": "Urban",
+      "land_use": "Residential",
+      "facility_class": "Urban",
+      "pdt_subtype": "Urban",
+      "area_defined": "We use a different process for residential buildings using the country level census - revengc",
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Household size",
+        "dwelling size"
+      ],
+      "regional_stat_fields": [
+        "School attendance rate",
+        "unemployment rate",
+        "age/sex breakdown"
+      ],
+      "component_source_guidance": "Collect source-backed component inputs only for this facility class. Keep each component role-labeled with value, unit, time basis, and geography level. Do not calculate a final derived occupancy estimate in v1.",
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find source-backed population component inputs for Urban in the Residential land-use group. Target fields: Household size, dwelling size, School attendance rate, unemployment rate, age/sex breakdown. Do not derive a final occupancy estimate.",
       "preferred_source_types": [
-        "local or national news article",
-        "wire-service article",
-        "official emergency or public-safety incident report",
-        "official government or regulator enforcement report",
-        "official disaster response or social welfare report",
-        "official press release with a count-bearing incident detail"
+        "official facility statistics",
+        "operator annual reports",
+        "government or regulator datasets",
+        "facility factsheets",
+        "regional demographic or sector statistics"
       ],
       "context_only_source_types": [
-        "Wikipedia or encyclopedia page",
-        "generic directory, real-estate listing, listicle, or map listing",
-        "property marketing or about page without a count-bearing event or incident",
-        "census, population, household, or annual statistics page without incident evidence",
-        "social media repost without an original authoritative source",
-        "commercial-only facility report without residential occupancy evidence",
-        "outdoor public open-space report without a named residential place"
+        "unsourced estimates",
+        "marketing descriptions without numeric component values",
+        "calculated occupancy totals derived by the model"
       ],
       "positive_evidence_patterns": [
-        "residents were inside",
-        "occupants were inside",
-        "families were inside",
-        "people were inside",
-        "residents were evacuated",
-        "families were evacuated",
-        "people were evacuated",
-        "residents were rescued",
-        "families were rescued",
-        "people were rescued",
-        "trapped inside",
-        "inside the house when",
-        "inside the boarding house when",
-        "evacuated from their homes",
-        "families displaced",
-        "residents displaced",
-        "families affected",
-        "households affected"
+        "Household size: numeric source-backed component input",
+        "dwelling size: numeric source-backed component input"
       ],
       "negative_evidence_patterns": [
-        "population",
-        "households",
-        "number of houses",
-        "number of structures",
-        "floor area",
-        "property value",
-        "sale price",
-        "address",
-        "injured",
-        "commercial",
-        "office space"
+        "derived total occupancy estimate without source support",
+        "component value with no exact quote",
+        "numeric value without unit or time basis"
       ],
       "venue_aliases": [
-        "house",
-        "home",
-        "boarding house",
-        "dormitory",
-        "row house",
-        "subdivision",
-        "compound",
-        "informal settlement",
-        "residential area"
+        "Urban"
+      ],
+      "priority": 10,
+      "enabled": true
+    },
+    {
+      "profile_id": "single_family",
+      "label": "Single-Family",
+      "land_use": "Residential",
+      "facility_class": "Single-Family",
+      "pdt_subtype": "Single-Family",
+      "area_defined": "We use a different process for residential buildings using the country level census - revengc",
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Household size",
+        "dwelling size"
+      ],
+      "regional_stat_fields": [
+        "School attendance rate",
+        "unemployment rate",
+        "age/sex breakdown"
+      ],
+      "component_source_guidance": "Collect source-backed component inputs only for this facility class. Keep each component role-labeled with value, unit, time basis, and geography level. Do not calculate a final derived occupancy estimate in v1.",
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find source-backed population component inputs for Single-Family in the Residential land-use group. Target fields: Household size, dwelling size, School attendance rate, unemployment rate, age/sex breakdown. Do not derive a final occupancy estimate.",
+      "preferred_source_types": [
+        "official facility statistics",
+        "operator annual reports",
+        "government or regulator datasets",
+        "facility factsheets",
+        "regional demographic or sector statistics"
+      ],
+      "context_only_source_types": [
+        "unsourced estimates",
+        "marketing descriptions without numeric component values",
+        "calculated occupancy totals derived by the model"
+      ],
+      "positive_evidence_patterns": [
+        "Household size: numeric source-backed component input",
+        "dwelling size: numeric source-backed component input"
+      ],
+      "negative_evidence_patterns": [
+        "derived total occupancy estimate without source support",
+        "component value with no exact quote",
+        "numeric value without unit or time basis"
+      ],
+      "venue_aliases": [
+        "Single-Family"
       ],
       "priority": 20,
-      "enabled": true,
-      "count_method": "direct_count",
-      "component_count_fields": [],
-      "regional_stat_fields": [],
-      "component_source_guidance": null
+      "enabled": true
+    },
+    {
+      "profile_id": "single_family_urban",
+      "label": "Single-Family Urban",
+      "land_use": "Residential",
+      "facility_class": "Single-Family Urban",
+      "pdt_subtype": "Single-Family Urban",
+      "area_defined": "We use a different process for residential buildings using the country level census - revengc",
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Household size",
+        "dwelling size"
+      ],
+      "regional_stat_fields": [
+        "School attendance rate",
+        "unemployment rate",
+        "age/sex breakdown"
+      ],
+      "component_source_guidance": "Collect source-backed component inputs only for this facility class. Keep each component role-labeled with value, unit, time basis, and geography level. Do not calculate a final derived occupancy estimate in v1.",
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find source-backed population component inputs for Single-Family Urban in the Residential land-use group. Target fields: Household size, dwelling size, School attendance rate, unemployment rate, age/sex breakdown. Do not derive a final occupancy estimate.",
+      "preferred_source_types": [
+        "official facility statistics",
+        "operator annual reports",
+        "government or regulator datasets",
+        "facility factsheets",
+        "regional demographic or sector statistics"
+      ],
+      "context_only_source_types": [
+        "unsourced estimates",
+        "marketing descriptions without numeric component values",
+        "calculated occupancy totals derived by the model"
+      ],
+      "positive_evidence_patterns": [
+        "Household size: numeric source-backed component input",
+        "dwelling size: numeric source-backed component input"
+      ],
+      "negative_evidence_patterns": [
+        "derived total occupancy estimate without source support",
+        "component value with no exact quote",
+        "numeric value without unit or time basis"
+      ],
+      "venue_aliases": [
+        "Single-Family Urban"
+      ],
+      "priority": 30,
+      "enabled": true
+    },
+    {
+      "profile_id": "single_family_urban_upper_middle",
+      "label": "Single-Family Urban Upper/Middle",
+      "land_use": "Residential",
+      "facility_class": "Single-Family Urban Upper/Middle",
+      "pdt_subtype": "Single-Family Urban Upper/Middle",
+      "area_defined": "We use a different process for residential buildings using the country level census - revengc",
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Household size",
+        "dwelling size"
+      ],
+      "regional_stat_fields": [
+        "School attendance rate",
+        "unemployment rate",
+        "age/sex breakdown"
+      ],
+      "component_source_guidance": "Collect source-backed component inputs only for this facility class. Keep each component role-labeled with value, unit, time basis, and geography level. Do not calculate a final derived occupancy estimate in v1.",
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find source-backed population component inputs for Single-Family Urban Upper/Middle in the Residential land-use group. Target fields: Household size, dwelling size, School attendance rate, unemployment rate, age/sex breakdown. Do not derive a final occupancy estimate.",
+      "preferred_source_types": [
+        "official facility statistics",
+        "operator annual reports",
+        "government or regulator datasets",
+        "facility factsheets",
+        "regional demographic or sector statistics"
+      ],
+      "context_only_source_types": [
+        "unsourced estimates",
+        "marketing descriptions without numeric component values",
+        "calculated occupancy totals derived by the model"
+      ],
+      "positive_evidence_patterns": [
+        "Household size: numeric source-backed component input",
+        "dwelling size: numeric source-backed component input"
+      ],
+      "negative_evidence_patterns": [
+        "derived total occupancy estimate without source support",
+        "component value with no exact quote",
+        "numeric value without unit or time basis"
+      ],
+      "venue_aliases": [
+        "Single-Family Urban Upper/Middle"
+      ],
+      "priority": 40,
+      "enabled": true
+    },
+    {
+      "profile_id": "single_family_urban_lower",
+      "label": "Single-Family Urban Lower",
+      "land_use": "Residential",
+      "facility_class": "Single-Family Urban Lower",
+      "pdt_subtype": "Single-Family Urban Lower",
+      "area_defined": "We use a different process for residential buildings using the country level census - revengc",
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Household size",
+        "dwelling size"
+      ],
+      "regional_stat_fields": [
+        "School attendance rate",
+        "unemployment rate",
+        "age/sex breakdown"
+      ],
+      "component_source_guidance": "Collect source-backed component inputs only for this facility class. Keep each component role-labeled with value, unit, time basis, and geography level. Do not calculate a final derived occupancy estimate in v1.",
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find source-backed population component inputs for Single-Family Urban Lower in the Residential land-use group. Target fields: Household size, dwelling size, School attendance rate, unemployment rate, age/sex breakdown. Do not derive a final occupancy estimate.",
+      "preferred_source_types": [
+        "official facility statistics",
+        "operator annual reports",
+        "government or regulator datasets",
+        "facility factsheets",
+        "regional demographic or sector statistics"
+      ],
+      "context_only_source_types": [
+        "unsourced estimates",
+        "marketing descriptions without numeric component values",
+        "calculated occupancy totals derived by the model"
+      ],
+      "positive_evidence_patterns": [
+        "Household size: numeric source-backed component input",
+        "dwelling size: numeric source-backed component input"
+      ],
+      "negative_evidence_patterns": [
+        "derived total occupancy estimate without source support",
+        "component value with no exact quote",
+        "numeric value without unit or time basis"
+      ],
+      "venue_aliases": [
+        "Single-Family Urban Lower"
+      ],
+      "priority": 50,
+      "enabled": true
+    },
+    {
+      "profile_id": "multi_family",
+      "label": "Multi-Family",
+      "land_use": "Residential",
+      "facility_class": "Multi-Family",
+      "pdt_subtype": "Multi-Family",
+      "area_defined": "We use a different process for residential buildings using the country level census - revengc",
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Household size",
+        "dwelling size"
+      ],
+      "regional_stat_fields": [
+        "School attendance rate",
+        "unemployment rate",
+        "age/sex breakdown"
+      ],
+      "component_source_guidance": "Collect source-backed component inputs only for this facility class. Keep each component role-labeled with value, unit, time basis, and geography level. Do not calculate a final derived occupancy estimate in v1.",
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find source-backed population component inputs for Multi-Family in the Residential land-use group. Target fields: Household size, dwelling size, School attendance rate, unemployment rate, age/sex breakdown. Do not derive a final occupancy estimate.",
+      "preferred_source_types": [
+        "official facility statistics",
+        "operator annual reports",
+        "government or regulator datasets",
+        "facility factsheets",
+        "regional demographic or sector statistics"
+      ],
+      "context_only_source_types": [
+        "unsourced estimates",
+        "marketing descriptions without numeric component values",
+        "calculated occupancy totals derived by the model"
+      ],
+      "positive_evidence_patterns": [
+        "Household size: numeric source-backed component input",
+        "dwelling size: numeric source-backed component input"
+      ],
+      "negative_evidence_patterns": [
+        "derived total occupancy estimate without source support",
+        "component value with no exact quote",
+        "numeric value without unit or time basis"
+      ],
+      "venue_aliases": [
+        "Multi-Family"
+      ],
+      "priority": 60,
+      "enabled": true
+    },
+    {
+      "profile_id": "multi_family_urban",
+      "label": "Multi-Family Urban",
+      "land_use": "Residential",
+      "facility_class": "Multi-Family Urban",
+      "pdt_subtype": "Multi-Family Urban",
+      "area_defined": "We use a different process for residential buildings using the country level census - revengc",
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Household size",
+        "dwelling size"
+      ],
+      "regional_stat_fields": [
+        "School attendance rate",
+        "unemployment rate",
+        "age/sex breakdown"
+      ],
+      "component_source_guidance": "Collect source-backed component inputs only for this facility class. Keep each component role-labeled with value, unit, time basis, and geography level. Do not calculate a final derived occupancy estimate in v1.",
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find source-backed population component inputs for Multi-Family Urban in the Residential land-use group. Target fields: Household size, dwelling size, School attendance rate, unemployment rate, age/sex breakdown. Do not derive a final occupancy estimate.",
+      "preferred_source_types": [
+        "official facility statistics",
+        "operator annual reports",
+        "government or regulator datasets",
+        "facility factsheets",
+        "regional demographic or sector statistics"
+      ],
+      "context_only_source_types": [
+        "unsourced estimates",
+        "marketing descriptions without numeric component values",
+        "calculated occupancy totals derived by the model"
+      ],
+      "positive_evidence_patterns": [
+        "Household size: numeric source-backed component input",
+        "dwelling size: numeric source-backed component input"
+      ],
+      "negative_evidence_patterns": [
+        "derived total occupancy estimate without source support",
+        "component value with no exact quote",
+        "numeric value without unit or time basis"
+      ],
+      "venue_aliases": [
+        "Multi-Family Urban"
+      ],
+      "priority": 70,
+      "enabled": true
+    },
+    {
+      "profile_id": "slum",
+      "label": "Slum",
+      "land_use": "Residential",
+      "facility_class": "Slum",
+      "pdt_subtype": "Slum",
+      "area_defined": "We use a different process for residential buildings using the country level census - revengc",
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Household size",
+        "dwelling size"
+      ],
+      "regional_stat_fields": [
+        "School attendance rate",
+        "unemployment rate",
+        "age/sex breakdown"
+      ],
+      "component_source_guidance": "Collect source-backed component inputs only for this facility class. Keep each component role-labeled with value, unit, time basis, and geography level. Do not calculate a final derived occupancy estimate in v1.",
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find source-backed population component inputs for Slum in the Residential land-use group. Target fields: Household size, dwelling size, School attendance rate, unemployment rate, age/sex breakdown. Do not derive a final occupancy estimate.",
+      "preferred_source_types": [
+        "official facility statistics",
+        "operator annual reports",
+        "government or regulator datasets",
+        "facility factsheets",
+        "regional demographic or sector statistics"
+      ],
+      "context_only_source_types": [
+        "unsourced estimates",
+        "marketing descriptions without numeric component values",
+        "calculated occupancy totals derived by the model"
+      ],
+      "positive_evidence_patterns": [
+        "Household size: numeric source-backed component input",
+        "dwelling size: numeric source-backed component input"
+      ],
+      "negative_evidence_patterns": [
+        "derived total occupancy estimate without source support",
+        "component value with no exact quote",
+        "numeric value without unit or time basis"
+      ],
+      "venue_aliases": [
+        "Slum"
+      ],
+      "priority": 80,
+      "enabled": true
+    },
+    {
+      "profile_id": "rural",
+      "label": "Rural",
+      "land_use": "Residential",
+      "facility_class": "Rural",
+      "pdt_subtype": "Rural",
+      "area_defined": "We use a different process for residential buildings using the country level census - revengc",
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Household size",
+        "dwelling size"
+      ],
+      "regional_stat_fields": [
+        "School attendance rate",
+        "unemployment rate",
+        "age/sex breakdown"
+      ],
+      "component_source_guidance": "Collect source-backed component inputs only for this facility class. Keep each component role-labeled with value, unit, time basis, and geography level. Do not calculate a final derived occupancy estimate in v1.",
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find source-backed population component inputs for Rural in the Residential land-use group. Target fields: Household size, dwelling size, School attendance rate, unemployment rate, age/sex breakdown. Do not derive a final occupancy estimate.",
+      "preferred_source_types": [
+        "official facility statistics",
+        "operator annual reports",
+        "government or regulator datasets",
+        "facility factsheets",
+        "regional demographic or sector statistics"
+      ],
+      "context_only_source_types": [
+        "unsourced estimates",
+        "marketing descriptions without numeric component values",
+        "calculated occupancy totals derived by the model"
+      ],
+      "positive_evidence_patterns": [
+        "Household size: numeric source-backed component input",
+        "dwelling size: numeric source-backed component input"
+      ],
+      "negative_evidence_patterns": [
+        "derived total occupancy estimate without source support",
+        "component value with no exact quote",
+        "numeric value without unit or time basis"
+      ],
+      "venue_aliases": [
+        "Rural"
+      ],
+      "priority": 90,
+      "enabled": true
+    },
+    {
+      "profile_id": "single_family_rural",
+      "label": "Single-Family Rural",
+      "land_use": "Residential",
+      "facility_class": "Single-Family Rural",
+      "pdt_subtype": "Single-Family Rural",
+      "area_defined": "We use a different process for residential buildings using the country level census - revengc",
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Household size",
+        "dwelling size"
+      ],
+      "regional_stat_fields": [
+        "School attendance rate",
+        "unemployment rate",
+        "age/sex breakdown"
+      ],
+      "component_source_guidance": "Collect source-backed component inputs only for this facility class. Keep each component role-labeled with value, unit, time basis, and geography level. Do not calculate a final derived occupancy estimate in v1.",
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find source-backed population component inputs for Single-Family Rural in the Residential land-use group. Target fields: Household size, dwelling size, School attendance rate, unemployment rate, age/sex breakdown. Do not derive a final occupancy estimate.",
+      "preferred_source_types": [
+        "official facility statistics",
+        "operator annual reports",
+        "government or regulator datasets",
+        "facility factsheets",
+        "regional demographic or sector statistics"
+      ],
+      "context_only_source_types": [
+        "unsourced estimates",
+        "marketing descriptions without numeric component values",
+        "calculated occupancy totals derived by the model"
+      ],
+      "positive_evidence_patterns": [
+        "Household size: numeric source-backed component input",
+        "dwelling size: numeric source-backed component input"
+      ],
+      "negative_evidence_patterns": [
+        "derived total occupancy estimate without source support",
+        "component value with no exact quote",
+        "numeric value without unit or time basis"
+      ],
+      "venue_aliases": [
+        "Single-Family Rural"
+      ],
+      "priority": 100,
+      "enabled": true
+    },
+    {
+      "profile_id": "multi_family_rural",
+      "label": "Multi-Family Rural",
+      "land_use": "Residential",
+      "facility_class": "Multi-Family Rural",
+      "pdt_subtype": "Multi-Family Rural",
+      "area_defined": "We use a different process for residential buildings using the country level census - revengc",
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Household size",
+        "dwelling size"
+      ],
+      "regional_stat_fields": [
+        "School attendance rate",
+        "unemployment rate",
+        "age/sex breakdown"
+      ],
+      "component_source_guidance": "Collect source-backed component inputs only for this facility class. Keep each component role-labeled with value, unit, time basis, and geography level. Do not calculate a final derived occupancy estimate in v1.",
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find source-backed population component inputs for Multi-Family Rural in the Residential land-use group. Target fields: Household size, dwelling size, School attendance rate, unemployment rate, age/sex breakdown. Do not derive a final occupancy estimate.",
+      "preferred_source_types": [
+        "official facility statistics",
+        "operator annual reports",
+        "government or regulator datasets",
+        "facility factsheets",
+        "regional demographic or sector statistics"
+      ],
+      "context_only_source_types": [
+        "unsourced estimates",
+        "marketing descriptions without numeric component values",
+        "calculated occupancy totals derived by the model"
+      ],
+      "positive_evidence_patterns": [
+        "Household size: numeric source-backed component input",
+        "dwelling size: numeric source-backed component input"
+      ],
+      "negative_evidence_patterns": [
+        "derived total occupancy estimate without source support",
+        "component value with no exact quote",
+        "numeric value without unit or time basis"
+      ],
+      "venue_aliases": [
+        "Multi-Family Rural"
+      ],
+      "priority": 110,
+      "enabled": true
+    },
+    {
+      "profile_id": "refugee_settlement",
+      "label": "Refugee Settlement",
+      "land_use": "Residential",
+      "facility_class": "Refugee Settlement",
+      "pdt_subtype": "Refugee Settlement",
+      "area_defined": "Could be a direct count if total refugee camp population is found",
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Number of tents",
+        "household size",
+        "average tent size",
+        "total population"
+      ],
+      "regional_stat_fields": [
+        "School attendance rate",
+        "unemployment rate",
+        "age/sex breakdown"
+      ],
+      "component_source_guidance": "Collect source-backed component inputs only for this facility class. Keep each component role-labeled with value, unit, time basis, and geography level. Do not calculate a final derived occupancy estimate in v1.",
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find source-backed population component inputs for Refugee Settlement in the Residential land-use group. Target fields: Number of tents, household size, average tent size, total population, School attendance rate, unemployment rate, age/sex breakdown. Do not derive a final occupancy estimate.",
+      "preferred_source_types": [
+        "official facility statistics",
+        "operator annual reports",
+        "government or regulator datasets",
+        "facility factsheets",
+        "regional demographic or sector statistics"
+      ],
+      "context_only_source_types": [
+        "unsourced estimates",
+        "marketing descriptions without numeric component values",
+        "calculated occupancy totals derived by the model"
+      ],
+      "positive_evidence_patterns": [
+        "Number of tents: numeric source-backed component input",
+        "household size: numeric source-backed component input",
+        "average tent size: numeric source-backed component input",
+        "total population: numeric source-backed component input"
+      ],
+      "negative_evidence_patterns": [
+        "derived total occupancy estimate without source support",
+        "component value with no exact quote",
+        "numeric value without unit or time basis"
+      ],
+      "venue_aliases": [
+        "Refugee Settlement"
+      ],
+      "priority": 120,
+      "enabled": true
+    },
+    {
+      "profile_id": "tents",
+      "label": "Tents",
+      "land_use": "Residential",
+      "facility_class": "Tents",
+      "pdt_subtype": "Tents",
+      "area_defined": "Could be a direct count if total population is found for a singular grouping (nomadic population)",
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Number of tents",
+        "household size",
+        "average tent size",
+        "total population"
+      ],
+      "regional_stat_fields": [
+        "School attendance rate",
+        "unemployment rate",
+        "age/sex breakdown"
+      ],
+      "component_source_guidance": "Collect source-backed component inputs only for this facility class. Keep each component role-labeled with value, unit, time basis, and geography level. Do not calculate a final derived occupancy estimate in v1.",
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find source-backed population component inputs for Tents in the Residential land-use group. Target fields: Number of tents, household size, average tent size, total population, School attendance rate, unemployment rate, age/sex breakdown. Do not derive a final occupancy estimate.",
+      "preferred_source_types": [
+        "official facility statistics",
+        "operator annual reports",
+        "government or regulator datasets",
+        "facility factsheets",
+        "regional demographic or sector statistics"
+      ],
+      "context_only_source_types": [
+        "unsourced estimates",
+        "marketing descriptions without numeric component values",
+        "calculated occupancy totals derived by the model"
+      ],
+      "positive_evidence_patterns": [
+        "Number of tents: numeric source-backed component input",
+        "household size: numeric source-backed component input",
+        "average tent size: numeric source-backed component input",
+        "total population: numeric source-backed component input"
+      ],
+      "negative_evidence_patterns": [
+        "derived total occupancy estimate without source support",
+        "component value with no exact quote",
+        "numeric value without unit or time basis"
+      ],
+      "venue_aliases": [
+        "Tents"
+      ],
+      "priority": 130,
+      "enabled": true
+    },
+    {
+      "profile_id": "temporary_resident",
+      "label": "Temporary Resident",
+      "land_use": "Residential",
+      "facility_class": "Temporary Resident",
+      "pdt_subtype": "Temporary Resident",
+      "area_defined": "Could be a direct count if total population is found for a singular building",
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Average household size",
+        "dwelling area"
+      ],
+      "regional_stat_fields": [
+        "School attendance rate",
+        "unemployment rate",
+        "age/sex breakdown"
+      ],
+      "component_source_guidance": "Collect source-backed component inputs only for this facility class. Keep each component role-labeled with value, unit, time basis, and geography level. Do not calculate a final derived occupancy estimate in v1.",
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find source-backed population component inputs for Temporary Resident in the Residential land-use group. Target fields: Average household size, dwelling area, School attendance rate, unemployment rate, age/sex breakdown. Do not derive a final occupancy estimate.",
+      "preferred_source_types": [
+        "official facility statistics",
+        "operator annual reports",
+        "government or regulator datasets",
+        "facility factsheets",
+        "regional demographic or sector statistics"
+      ],
+      "context_only_source_types": [
+        "unsourced estimates",
+        "marketing descriptions without numeric component values",
+        "calculated occupancy totals derived by the model"
+      ],
+      "positive_evidence_patterns": [
+        "Average household size: numeric source-backed component input",
+        "dwelling area: numeric source-backed component input"
+      ],
+      "negative_evidence_patterns": [
+        "derived total occupancy estimate without source support",
+        "component value with no exact quote",
+        "numeric value without unit or time basis"
+      ],
+      "venue_aliases": [
+        "Temporary Resident"
+      ],
+      "priority": 140,
+      "enabled": true
     }
   ]
 }

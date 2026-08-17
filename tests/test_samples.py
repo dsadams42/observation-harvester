@@ -223,6 +223,107 @@ def test_gap_fill_appends_second_round_without_overwriting_initial_round(
     assert updated.combined_child_run_ids[1].startswith("us-tn-sample-r2-gap")
 
 
+def test_gap_fill_round_summary_includes_failed_child_details(tmp_path: Path) -> None:
+    sample_set = SampleSetManifest(
+        sample_set_id="us-gap-partial",
+        country="US",
+        requested_localities=("Western Tennessee", "Eastern Tennessee"),
+        facility_types=("schools",),
+        target=2,
+        rounds=(
+            SampleSetRound(
+                round_number=1,
+                role=SampleSetRoundRole.INITIAL,
+                source_run_ids=("initial-run",),
+                child_run_ids=("initial-run",),
+                status=HarvestRunStatus.COMPLETED,
+            ),
+        ),
+        combined_child_run_ids=("initial-run",),
+        created_at="2026-07-24T00:00:00Z",
+        updated_at="2026-07-24T00:00:00Z",
+    )
+    save_sample_set(tmp_path, sample_set)
+    curation = approve_curation(tmp_path, sample_set.sample_set_id, item_ids=())
+    assert curation.approval is not None
+    review = CoverageSteeringReview(
+        coverage_id="us-gap-partial-coverage",
+        sample_set_id=sample_set.sample_set_id,
+        dispersion_status="imbalanced",
+        narrative_notes="Both ends of the state need targeted collection.",
+        curation_snapshot_id=curation.approval.snapshot_id,
+        recommended_child_jobs=(
+            RecommendedGapFillJob(
+                country="US",
+                locality="Western Tennessee",
+                facility_type="schools",
+                target=2,
+                reason="Western Tennessee is underrepresented.",
+            ),
+            RecommendedGapFillJob(
+                country="US",
+                locality="Eastern Tennessee",
+                facility_type="schools",
+                target=2,
+                reason="Eastern Tennessee is underrepresented.",
+            ),
+        ),
+    )
+    coverage_file = tmp_path / "coverage_runs/us-gap-partial-coverage.json"
+    coverage_file.parent.mkdir()
+    coverage_file.write_text(review.model_dump_json(), encoding="utf-8")
+
+    def partially_failing_runner(
+        command: Sequence[str],
+        prompt: str,
+        cwd: Path,
+    ) -> subprocess.CompletedProcess[str]:
+        output_path = Path(command[command.index("-o") + 1])
+        if "Minimal Geographic Vernacular Review" in prompt:
+            output_path.write_text(
+                json.dumps(
+                    {
+                        "search_languages": ["English"],
+                        "administrative_terms": [],
+                        "public_safety_terms": [],
+                        "facility_terms": [],
+                        "query_adjustments": [],
+                        "source_urls": [],
+                        "commentary": "No special local terms needed.",
+                        "rationale": "English source terms are sufficient.",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+        if "western-tennessee" in output_path.name:
+            return subprocess.CompletedProcess(command, 2, stdout="", stderr="harvest failed")
+        output_path.write_text(json.dumps(LEAD_PAYLOAD), encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    updated = run_gap_fill(
+        root=tmp_path,
+        sample_set_id=sample_set.sample_set_id,
+        coverage_path=coverage_file,
+        runner=partially_failing_runner,
+        max_concurrent_jobs=1,
+    )
+
+    gap_round = updated.rounds[-1]
+    assert gap_round.status == HarvestRunStatus.FAILED
+    assert gap_round.summary is not None
+    assert gap_round.summary["planned_run_count"] == 2
+    assert gap_round.summary["completed_count"] == 1
+    assert gap_round.summary["failed_count"] == 1
+    failed_child = next(
+        child
+        for child in gap_round.summary["child_summaries"]
+        if child["status"] == "failed"
+    )
+    assert failed_child["locality"] == "Western Tennessee"
+    assert failed_child["error_message"] == "harvest failed"
+
+
 def test_gap_fill_runs_job_teams_concurrently_with_geographer_reviews(
     tmp_path: Path,
 ) -> None:

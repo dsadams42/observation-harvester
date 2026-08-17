@@ -11,7 +11,7 @@ from pdt_observer.models import (
     StrategyPlan,
     StrategyRecommendation,
 )
-from pdt_observer.profiles import apply_count_method_override
+from pdt_observer.profiles import apply_count_method_override, resolve_profile_id_alias
 
 STRATEGIES: dict[EvidenceStrategyType, EvidenceStrategy] = {
     EvidenceStrategyType.INCIDENT_EVACUATION: EvidenceStrategy(
@@ -349,7 +349,19 @@ _PROFILE_SET_PRIORITIES: dict[str, tuple[EvidenceStrategyType, ...]] = {
         EvidenceStrategyType.OFFICIAL_EVENT_ATTENDANCE,
         EvidenceStrategyType.ROUTINE_DATED_ATTENDANCE,
     ),
+    "retail_service": (
+        EvidenceStrategyType.ENFORCEMENT_INSPECTION,
+        EvidenceStrategyType.INCIDENT_EVACUATION,
+        EvidenceStrategyType.OFFICIAL_EVENT_ATTENDANCE,
+        EvidenceStrategyType.ROUTINE_DATED_ATTENDANCE,
+    ),
     "commercial_business": (
+        EvidenceStrategyType.INCIDENT_EVACUATION,
+        EvidenceStrategyType.ENFORCEMENT_INSPECTION,
+        EvidenceStrategyType.SHIFT_OPERATIONAL_PRESENCE,
+        EvidenceStrategyType.LEGAL_INVESTIGATIVE_RECORDS,
+    ),
+    "commercial": (
         EvidenceStrategyType.INCIDENT_EVACUATION,
         EvidenceStrategyType.ENFORCEMENT_INSPECTION,
         EvidenceStrategyType.SHIFT_OPERATIONAL_PRESENCE,
@@ -361,11 +373,23 @@ _PROFILE_SET_PRIORITIES: dict[str, tuple[EvidenceStrategyType, ...]] = {
         EvidenceStrategyType.LEGAL_INVESTIGATIVE_RECORDS,
         EvidenceStrategyType.RESEARCH_MEASURED_OCCUPANCY,
     ),
+    "institutions_public_service": (
+        EvidenceStrategyType.INCIDENT_EVACUATION,
+        EvidenceStrategyType.ROUTINE_DATED_ATTENDANCE,
+        EvidenceStrategyType.OFFICIAL_EVENT_ATTENDANCE,
+        EvidenceStrategyType.LEGAL_INVESTIGATIVE_RECORDS,
+    ),
     "public_venues": (
         EvidenceStrategyType.INCIDENT_EVACUATION,
         EvidenceStrategyType.ENFORCEMENT_INSPECTION,
         EvidenceStrategyType.OFFICIAL_EVENT_ATTENDANCE,
         EvidenceStrategyType.ROUTINE_DATED_ATTENDANCE,
+    ),
+    "recreation_entertainment": (
+        EvidenceStrategyType.OFFICIAL_EVENT_ATTENDANCE,
+        EvidenceStrategyType.TEMPORARY_USE_OCCUPANCY,
+        EvidenceStrategyType.INCIDENT_EVACUATION,
+        EvidenceStrategyType.ENFORCEMENT_INSPECTION,
     ),
 }
 
@@ -400,8 +424,8 @@ def _recommendation_reason(
     labels = ", ".join(profile.label for profile in profiles)
     if strategy_id == EvidenceStrategyType.TEMPORARY_USE_OCCUPANCY:
         return (
-            "The selected subtype includes intermittently occupied arenas, halls, theaters, "
-            "event venues, or shelters where event-time use is analytically meaningful."
+            "The selected facility class includes intermittently occupied arenas, halls, "
+            "theaters, event venues, or shelters where event-time use is analytically meaningful."
         )
     if strategy_id in {
         EvidenceStrategyType.OFFICIAL_FACILITY_STATISTICS,
@@ -435,6 +459,8 @@ def build_strategy_plan(
     count_method_override: CountMethod | None = None,
 ) -> StrategyPlan:
     profile_set = apply_count_method_override(profile_set, count_method_override)
+    if profile_id is not None:
+        profile_id = resolve_profile_id_alias(profile_set, profile_id)
     profiles = tuple(
         profile
         for profile in profile_set.profiles

@@ -116,7 +116,7 @@ def test_strategy_scout_prompt_is_bounded_to_strategy_selection() -> None:
 
     assert "Do not harvest observations" in prompt
     assert "Do not invent evidence standards" in prompt
-    assert "Facility type:" in prompt
+    assert "Land use:" in prompt
 
 
 def test_harvest_prompt_is_bounded_occupancy_first_and_requests_activity() -> None:

@@ -48,7 +48,7 @@ INDEX_HTML = r"""<!doctype html>
         id="exitButton"
         class="secondary"
         type="button"
-        title="Closes the local OASIS server; closing this tab only closes the browser view."
+        title="Stops the local OASIS server and closes this tab when the browser allows it."
       >
         Exit OASIS
       </button>
@@ -118,17 +118,17 @@ INDEX_HTML = r"""<!doctype html>
       </div>
 
       <div id="singleFacilityBlock">
-        <label for="profileSet">Facility Type</label>
+        <label for="profileSet">Land Use</label>
         <select id="profileSet"></select>
       </div>
 
       <div id="campaignFacilityBlock" class="hidden">
-        <label for="campaignFacilityTypes">Facility Types</label>
+        <label for="campaignFacilityTypes">Land Uses</label>
         <select id="campaignFacilityTypes" multiple></select>
       </div>
 
       <div id="subtypeBlock">
-        <label for="profile">Subtype</label>
+        <label for="profile">Facility Class</label>
         <select id="profile"></select>
       </div>
 
@@ -346,8 +346,20 @@ INDEX_HTML = r"""<!doctype html>
           <button id="downloadVerifiedCsvButton" class="secondary" type="button" disabled>
             Download Verified CSV
           </button>
+          <button id="downloadAdminJsonButton" class="secondary" type="button" disabled>
+            Download Admin-Scoped JSON
+          </button>
+          <button id="downloadAdminCsvButton" class="secondary" type="button" disabled>
+            Download Admin-Scoped CSV
+          </button>
           <button id="downloadFootprintsButton" class="secondary" type="button" disabled>
             Download Footprints GeoJSON
+          </button>
+          <button id="downloadSampleAdminJsonButton" class="secondary" type="button" disabled>
+            Download Sample Admin-Scoped JSON
+          </button>
+          <button id="downloadSampleAdminCsvButton" class="secondary" type="button" disabled>
+            Download Sample Admin-Scoped CSV
           </button>
           <button id="downloadSampleFootprintsButton" class="secondary" type="button" disabled>
             Download Sample Footprints

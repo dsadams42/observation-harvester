@@ -86,11 +86,11 @@ Profiles are the main specialization mechanism. They provide:
 - Negative traps or component fields, depending on the profile count method.
 - Preferred and context-only source types.
 
-Use `profiles/public_venues.json` for broad public-venue pilots and
-`profiles/commercial_business.json` for commercial, retail, hospitality, office, BPO, factory, and
-warehouse harvesting. The batch `--country` value controls which country to harvest in; for
-example, use `--profiles commercial_business --country PH` for a Philippines commercial/business
-pilot.
+Use the canonical land-use profile sets in `profiles/`: `residential`,
+`institutions_public_service`, `retail_service`, `commercial`, `transportation`,
+`military_facility`, `recreation_entertainment`, and `agriculture`. The batch `--country`
+value controls which country to harvest in; for example, use `--profiles commercial --country PH`
+for a Philippines commercial pilot.
 
 ## Source Suitability
 

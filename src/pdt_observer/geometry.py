@@ -71,9 +71,25 @@ def qaqc_output_path(root: Path, child_run_id: str) -> Path:
 
 def load_geometry_reviews(root: Path, child_run_id: str) -> tuple[GeometryReviewItem, ...]:
     path = geometry_review_path(root, child_run_id)
-    if not path.is_file():
-        return ()
-    return GEOMETRY_LIST_ADAPTER.validate_json(path.read_text(encoding="utf-8"))
+    reviews_by_id: dict[str, GeometryReviewItem] = {}
+    if path.is_file():
+        reviews_by_id.update(
+            {
+                item.item_id: item
+                for item in GEOMETRY_LIST_ADAPTER.validate_json(path.read_text(encoding="utf-8"))
+            }
+        )
+    legacy_bundle_path = geometry_review_path(root, f"{child_run_id}-component-bundle")
+    if legacy_bundle_path.is_file():
+        legacy_reviews = GEOMETRY_LIST_ADAPTER.validate_json(
+            legacy_bundle_path.read_text(encoding="utf-8")
+        )
+        for item in legacy_reviews:
+            reviews_by_id.setdefault(
+                item.item_id,
+                item.model_copy(update={"child_run_id": child_run_id}),
+            )
+    return tuple(reviews_by_id.values())
 
 
 def save_geometry_review_item(root: Path, item: GeometryReviewItem) -> GeometryReviewItem:
@@ -92,6 +108,9 @@ def item_id_for_lead(child_run_id: str, lead_index: int) -> str:
 
 
 def parse_geometry_item_id(item_id: str) -> tuple[str, int]:
+    if "-component-bundle-" in item_id:
+        child_run_id, lead_index_text = item_id.rsplit("-component-bundle-", 1)
+        return child_run_id, int(lead_index_text)
     child_run_id, lead_index_text = item_id.rsplit("-", 1)
     return child_run_id, int(lead_index_text)
 
@@ -283,6 +302,283 @@ def geometry_set(
 
 def verified_json(records: Sequence[dict[str, Any]]) -> str:
     return json.dumps(list(records), indent=2)
+
+
+def _record_location(record: dict[str, Any]) -> dict[str, Any]:
+    lead = record.get("lead")
+    if isinstance(lead, dict) and isinstance(lead.get("location"), dict):
+        return dict(lead["location"])
+    bundle = record.get("component_bundle")
+    if isinstance(bundle, dict):
+        location = bundle.get("location")
+        if isinstance(location, dict):
+            return dict(location)
+        return {
+            "facility_name": bundle.get("geography_name"),
+            "country": bundle.get("country"),
+        }
+    return {}
+
+
+def _record_source_url(record: dict[str, Any]) -> str:
+    lead = record.get("lead")
+    if isinstance(lead, dict):
+        return str(lead.get("source_url") or "")
+    for component_lead in record.get("component_leads", ()):
+        if isinstance(component_lead, dict) and component_lead.get("source_url"):
+            return str(component_lead["source_url"])
+    return ""
+
+
+def _record_counts_summary(record: dict[str, Any]) -> str:
+    lead = record.get("lead")
+    if isinstance(lead, dict):
+        return "; ".join(
+            f"{datum['count']} {datum['group_type']}" for datum in lead.get("occupancy_data", ())
+        )
+    component_parts: list[str] = []
+    for component_lead in record.get("component_leads", ()):
+        if not isinstance(component_lead, dict):
+            continue
+        for datum in component_lead.get("component_data", ()):
+            component_parts.append(
+                f"{datum.get('component_type')}: {datum.get('value')} {datum.get('unit')}"
+            )
+    return "; ".join(component_parts)
+
+
+def _record_evidence_role(record: dict[str, Any]) -> str:
+    if isinstance(record.get("component_bundle"), dict):
+        return "component_bundle"
+    lead = record.get("lead")
+    if isinstance(lead, dict):
+        return str(lead.get("evidence_role") or "direct_occupancy")
+    return ""
+
+
+def _accepted_facility_point(record: dict[str, Any]) -> bool:
+    status = str(record.get("geometry_status") or "")
+    geometry = record.get("geometry")
+    return (
+        status in {GeometryStatus.POINT_CONFIRMED.value, GeometryStatus.FOOTPRINT_DRAWN.value}
+        and isinstance(geometry, dict)
+        and isinstance(geometry.get("point"), dict)
+    )
+
+
+def _admin_scope_from_address(record: dict[str, Any]) -> dict[str, str] | None:
+    address = record.get("address_enrichment")
+    if not isinstance(address, dict):
+        return None
+    country = str(address.get("country") or "").strip()
+    admin1 = str(address.get("state_or_province") or "").strip()
+    locality = str(address.get("city_or_region") or "").strip()
+    postal_code = str(address.get("postal_code") or "").strip()
+    if not country or not (admin1 or locality or postal_code):
+        return None
+    admin_name = locality or admin1 or postal_code
+    admin_level = "locality" if locality else ("admin1" if admin1 else "postal_code")
+    return {
+        "country": country,
+        "admin1": admin1,
+        "admin2": locality,
+        "admin3": "",
+        "locality": locality,
+        "postal_code": postal_code,
+        "admin_level": admin_level,
+        "admin_name": admin_name,
+        "admin_scope_source": "address_enrichment",
+        "admin_scope_confidence": str(address.get("confidence") or "medium"),
+    }
+
+
+def _admin_scope_from_geocoder(record: dict[str, Any]) -> dict[str, str] | None:
+    geometry = record.get("geometry")
+    validation = geometry.get("spatial_validation") if isinstance(geometry, dict) else None
+    raw_candidate_options = (
+        validation.get("candidate_options") if isinstance(validation, dict) else None
+    )
+    candidate_options = raw_candidate_options if isinstance(raw_candidate_options, list) else []
+    for candidate in candidate_options:
+        if not isinstance(candidate, dict):
+            continue
+        raw_address = candidate.get("address")
+        if isinstance(raw_address, dict):
+            address: dict[str, Any] = raw_address
+        else:
+            geocode_result = candidate.get("geocode_result")
+            geocode_address = (
+                geocode_result.get("address") if isinstance(geocode_result, dict) else None
+            )
+            address = geocode_address if isinstance(geocode_address, dict) else {}
+        country = str(address.get("country") or "").strip()
+        if not country:
+            continue
+        admin1 = str(address.get("state") or address.get("province") or "").strip()
+        admin2 = str(
+            address.get("city")
+            or address.get("county")
+            or address.get("municipality")
+            or address.get("town")
+            or ""
+        ).strip()
+        admin3 = str(
+            address.get("district")
+            or address.get("city_district")
+            or address.get("borough")
+            or address.get("suburb")
+            or ""
+        ).strip()
+        locality = str(
+            address.get("neighbourhood")
+            or address.get("village")
+            or address.get("hamlet")
+            or ""
+        ).strip()
+        postal_code = str(address.get("postcode") or "").strip()
+        admin_name = admin3 or admin2 or locality or admin1 or postal_code
+        if not admin_name:
+            continue
+        admin_level = (
+            "admin3"
+            if admin3
+            else "admin2"
+            if admin2
+            else "locality"
+            if locality
+            else "admin1"
+            if admin1
+            else "postal_code"
+        )
+        return {
+            "country": country,
+            "admin1": admin1,
+            "admin2": admin2,
+            "admin3": admin3,
+            "locality": locality,
+            "postal_code": postal_code,
+            "admin_level": admin_level,
+            "admin_name": admin_name,
+            "admin_scope_source": "geocoder_candidate",
+            "admin_scope_confidence": str(candidate.get("confidence") or "possible"),
+        }
+    return None
+
+
+def _admin_scope_from_source(record: dict[str, Any]) -> dict[str, str] | None:
+    location = _record_location(record)
+    country = str(location.get("country") or "").strip()
+    locality = str(location.get("city_or_region") or "").strip()
+    if not country or not locality:
+        return None
+    return {
+        "country": country,
+        "admin1": "",
+        "admin2": locality,
+        "admin3": "",
+        "locality": locality,
+        "postal_code": "",
+        "admin_level": "locality",
+        "admin_name": locality,
+        "admin_scope_source": "source_location",
+        "admin_scope_confidence": "medium",
+    }
+
+
+def admin_scope_for_record(record: dict[str, Any]) -> dict[str, str] | None:
+    if _accepted_facility_point(record):
+        return None
+    return (
+        _admin_scope_from_address(record)
+        or _admin_scope_from_geocoder(record)
+        or _admin_scope_from_source(record)
+    )
+
+
+def admin_scoped_records(records: Sequence[dict[str, Any]]) -> tuple[dict[str, Any], ...]:
+    scoped: list[dict[str, Any]] = []
+    for record in records:
+        admin_scope = admin_scope_for_record(record)
+        if admin_scope is None:
+            continue
+        location = _record_location(record)
+        review = record.get("qaqc_review") or record.get("component_bundle_qaqc_review") or {}
+        address = record.get("address_enrichment") or {}
+        payload = {
+            "item_id": record["item_id"],
+            "sample_set_id": record.get("sample_set_id", ""),
+            "sample_round": record.get("sample_round", ""),
+            "child_run_id": record["child_run_id"],
+            "lead_index": record["lead_index"],
+            "facility_type": record.get("facility_type", ""),
+            "evidence_role": _record_evidence_role(record),
+            "source_url": _record_source_url(record),
+            "facility_name": str(location.get("facility_name") or ""),
+            "spatial_certainty": "admin_scoped",
+            "country": admin_scope["country"],
+            "admin_level": admin_scope["admin_level"],
+            "admin_name": admin_scope["admin_name"],
+            "admin1": admin_scope["admin1"],
+            "admin2": admin_scope["admin2"],
+            "admin3": admin_scope["admin3"],
+            "locality": admin_scope["locality"],
+            "postal_code": admin_scope["postal_code"],
+            "admin_scope_source": admin_scope["admin_scope_source"],
+            "admin_scope_confidence": admin_scope["admin_scope_confidence"],
+            "point_status": "no_verified_point",
+            "geometry_status": record.get("geometry_status", GeometryStatus.NEEDS_REVIEW.value),
+            "qaqc_status": review.get("verification_status", ""),
+            "address_status": record.get("address_status", "not_run"),
+            "enriched_address": address.get("formatted_address", ""),
+            "address_source_url": address.get("address_source_url", ""),
+            "counts": _record_counts_summary(record),
+            "review_notes": record.get("review_notes") or review.get("review_notes", ""),
+        }
+        scoped.append(payload)
+    return tuple(scoped)
+
+
+def admin_scoped_json(records: Sequence[dict[str, Any]]) -> str:
+    return json.dumps(list(admin_scoped_records(records)), indent=2)
+
+
+def admin_scoped_csv(records: Sequence[dict[str, Any]]) -> str:
+    output = io.StringIO()
+    fieldnames = (
+        "item_id",
+        "sample_set_id",
+        "sample_round",
+        "child_run_id",
+        "lead_index",
+        "facility_type",
+        "evidence_role",
+        "source_url",
+        "facility_name",
+        "spatial_certainty",
+        "country",
+        "admin_level",
+        "admin_name",
+        "admin1",
+        "admin2",
+        "admin3",
+        "locality",
+        "postal_code",
+        "admin_scope_source",
+        "admin_scope_confidence",
+        "point_status",
+        "geometry_status",
+        "qaqc_status",
+        "address_status",
+        "enriched_address",
+        "address_source_url",
+        "counts",
+        "review_notes",
+    )
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+    for record in admin_scoped_records(records):
+        writer.writerow(record)
+    return output.getvalue()
 
 
 def verified_csv(records: Sequence[dict[str, Any]]) -> str:

@@ -1,0 +1,342 @@
+{
+  "profile_set_id": "commercial",
+  "label": "Commercial",
+  "profiles": [
+    {
+      "profile_id": "office_building",
+      "label": "Office Building",
+      "land_use": "Commercial",
+      "facility_class": "Office Building",
+      "pdt_subtype": "Office Building",
+      "area_defined": "Direct count if available",
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Employees",
+        "shifts"
+      ],
+      "regional_stat_fields": [],
+      "component_source_guidance": "Collect source-backed component inputs only for this facility class. Keep each component role-labeled with value, unit, time basis, and geography level. Do not calculate a final derived occupancy estimate in v1.",
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find source-backed population component inputs for Office Building in the Commercial land-use group. Target fields: Employees, shifts. Do not derive a final occupancy estimate.",
+      "preferred_source_types": [
+        "official facility statistics",
+        "operator annual reports",
+        "government or regulator datasets",
+        "facility factsheets",
+        "regional demographic or sector statistics"
+      ],
+      "context_only_source_types": [
+        "unsourced estimates",
+        "marketing descriptions without numeric component values",
+        "calculated occupancy totals derived by the model"
+      ],
+      "positive_evidence_patterns": [
+        "Employees: numeric source-backed component input",
+        "shifts: numeric source-backed component input"
+      ],
+      "negative_evidence_patterns": [
+        "derived total occupancy estimate without source support",
+        "component value with no exact quote",
+        "numeric value without unit or time basis"
+      ],
+      "venue_aliases": [
+        "Office Building"
+      ],
+      "priority": 0,
+      "enabled": true
+    },
+    {
+      "profile_id": "light_manufacturing",
+      "label": "Light Manufacturing",
+      "land_use": "Commercial",
+      "facility_class": "Light Manufacturing",
+      "pdt_subtype": "Light Manufacturing",
+      "area_defined": "Direct count if available",
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Employees",
+        "shifts"
+      ],
+      "regional_stat_fields": [],
+      "component_source_guidance": "Collect source-backed component inputs only for this facility class. Keep each component role-labeled with value, unit, time basis, and geography level. Do not calculate a final derived occupancy estimate in v1.",
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find source-backed population component inputs for Light Manufacturing in the Commercial land-use group. Target fields: Employees, shifts. Do not derive a final occupancy estimate.",
+      "preferred_source_types": [
+        "official facility statistics",
+        "operator annual reports",
+        "government or regulator datasets",
+        "facility factsheets",
+        "regional demographic or sector statistics"
+      ],
+      "context_only_source_types": [
+        "unsourced estimates",
+        "marketing descriptions without numeric component values",
+        "calculated occupancy totals derived by the model"
+      ],
+      "positive_evidence_patterns": [
+        "Employees: numeric source-backed component input",
+        "shifts: numeric source-backed component input"
+      ],
+      "negative_evidence_patterns": [
+        "derived total occupancy estimate without source support",
+        "component value with no exact quote",
+        "numeric value without unit or time basis"
+      ],
+      "venue_aliases": [
+        "Light Manufacturing"
+      ],
+      "priority": 10,
+      "enabled": true
+    },
+    {
+      "profile_id": "heavy_manufacturing",
+      "label": "Heavy Manufacturing",
+      "land_use": "Commercial",
+      "facility_class": "Heavy Manufacturing",
+      "pdt_subtype": "Heavy Manufacturing",
+      "area_defined": "Direct count if available",
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Employees",
+        "shifts"
+      ],
+      "regional_stat_fields": [],
+      "component_source_guidance": "Collect source-backed component inputs only for this facility class. Keep each component role-labeled with value, unit, time basis, and geography level. Do not calculate a final derived occupancy estimate in v1.",
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find source-backed population component inputs for Heavy Manufacturing in the Commercial land-use group. Target fields: Employees, shifts. Do not derive a final occupancy estimate.",
+      "preferred_source_types": [
+        "official facility statistics",
+        "operator annual reports",
+        "government or regulator datasets",
+        "facility factsheets",
+        "regional demographic or sector statistics"
+      ],
+      "context_only_source_types": [
+        "unsourced estimates",
+        "marketing descriptions without numeric component values",
+        "calculated occupancy totals derived by the model"
+      ],
+      "positive_evidence_patterns": [
+        "Employees: numeric source-backed component input",
+        "shifts: numeric source-backed component input"
+      ],
+      "negative_evidence_patterns": [
+        "derived total occupancy estimate without source support",
+        "component value with no exact quote",
+        "numeric value without unit or time basis"
+      ],
+      "venue_aliases": [
+        "Heavy Manufacturing"
+      ],
+      "priority": 20,
+      "enabled": true
+    },
+    {
+      "profile_id": "chemical_refining_cement",
+      "label": "Chemical, Refining, Cement",
+      "land_use": "Commercial",
+      "facility_class": "Chemical, Refining, Cement",
+      "pdt_subtype": "Chemical, Refining, Cement",
+      "area_defined": "Direct count if available",
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Employees",
+        "shifts"
+      ],
+      "regional_stat_fields": [],
+      "component_source_guidance": "Collect source-backed component inputs only for this facility class. Keep each component role-labeled with value, unit, time basis, and geography level. Do not calculate a final derived occupancy estimate in v1.",
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find source-backed population component inputs for Chemical, Refining, Cement in the Commercial land-use group. Target fields: Employees, shifts. Do not derive a final occupancy estimate.",
+      "preferred_source_types": [
+        "official facility statistics",
+        "operator annual reports",
+        "government or regulator datasets",
+        "facility factsheets",
+        "regional demographic or sector statistics"
+      ],
+      "context_only_source_types": [
+        "unsourced estimates",
+        "marketing descriptions without numeric component values",
+        "calculated occupancy totals derived by the model"
+      ],
+      "positive_evidence_patterns": [
+        "Employees: numeric source-backed component input",
+        "shifts: numeric source-backed component input"
+      ],
+      "negative_evidence_patterns": [
+        "derived total occupancy estimate without source support",
+        "component value with no exact quote",
+        "numeric value without unit or time basis"
+      ],
+      "venue_aliases": [
+        "Chemical, Refining, Cement"
+      ],
+      "priority": 30,
+      "enabled": true
+    },
+    {
+      "profile_id": "heat_processing",
+      "label": "Heat Processing",
+      "land_use": "Commercial",
+      "facility_class": "Heat Processing",
+      "pdt_subtype": "Heat Processing",
+      "area_defined": "Direct count if available",
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Employees",
+        "shifts"
+      ],
+      "regional_stat_fields": [],
+      "component_source_guidance": "Collect source-backed component inputs only for this facility class. Keep each component role-labeled with value, unit, time basis, and geography level. Do not calculate a final derived occupancy estimate in v1.",
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find source-backed population component inputs for Heat Processing in the Commercial land-use group. Target fields: Employees, shifts. Do not derive a final occupancy estimate.",
+      "preferred_source_types": [
+        "official facility statistics",
+        "operator annual reports",
+        "government or regulator datasets",
+        "facility factsheets",
+        "regional demographic or sector statistics"
+      ],
+      "context_only_source_types": [
+        "unsourced estimates",
+        "marketing descriptions without numeric component values",
+        "calculated occupancy totals derived by the model"
+      ],
+      "positive_evidence_patterns": [
+        "Employees: numeric source-backed component input",
+        "shifts: numeric source-backed component input"
+      ],
+      "negative_evidence_patterns": [
+        "derived total occupancy estimate without source support",
+        "component value with no exact quote",
+        "numeric value without unit or time basis"
+      ],
+      "venue_aliases": [
+        "Heat Processing"
+      ],
+      "priority": 40,
+      "enabled": true
+    },
+    {
+      "profile_id": "craftworks",
+      "label": "Craftworks",
+      "land_use": "Commercial",
+      "facility_class": "Craftworks",
+      "pdt_subtype": "Craftworks",
+      "area_defined": "Direct count if available",
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Employees",
+        "shifts"
+      ],
+      "regional_stat_fields": [],
+      "component_source_guidance": "Collect source-backed component inputs only for this facility class. Keep each component role-labeled with value, unit, time basis, and geography level. Do not calculate a final derived occupancy estimate in v1.",
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find source-backed population component inputs for Craftworks in the Commercial land-use group. Target fields: Employees, shifts. Do not derive a final occupancy estimate.",
+      "preferred_source_types": [
+        "official facility statistics",
+        "operator annual reports",
+        "government or regulator datasets",
+        "facility factsheets",
+        "regional demographic or sector statistics"
+      ],
+      "context_only_source_types": [
+        "unsourced estimates",
+        "marketing descriptions without numeric component values",
+        "calculated occupancy totals derived by the model"
+      ],
+      "positive_evidence_patterns": [
+        "Employees: numeric source-backed component input",
+        "shifts: numeric source-backed component input"
+      ],
+      "negative_evidence_patterns": [
+        "derived total occupancy estimate without source support",
+        "component value with no exact quote",
+        "numeric value without unit or time basis"
+      ],
+      "venue_aliases": [
+        "Craftworks"
+      ],
+      "priority": 50,
+      "enabled": true
+    },
+    {
+      "profile_id": "powerplants",
+      "label": "Powerplants",
+      "land_use": "Commercial",
+      "facility_class": "Powerplants",
+      "pdt_subtype": "Powerplants",
+      "area_defined": "Direct count if available",
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [],
+      "count_method": "population_subcomponent",
+      "component_count_fields": [
+        "Employees",
+        "shifts"
+      ],
+      "regional_stat_fields": [],
+      "component_source_guidance": "Collect source-backed component inputs only for this facility class. Keep each component role-labeled with value, unit, time basis, and geography level. Do not calculate a final derived occupancy estimate in v1.",
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find source-backed population component inputs for Powerplants in the Commercial land-use group. Target fields: Employees, shifts. Do not derive a final occupancy estimate.",
+      "preferred_source_types": [
+        "official facility statistics",
+        "operator annual reports",
+        "government or regulator datasets",
+        "facility factsheets",
+        "regional demographic or sector statistics"
+      ],
+      "context_only_source_types": [
+        "unsourced estimates",
+        "marketing descriptions without numeric component values",
+        "calculated occupancy totals derived by the model"
+      ],
+      "positive_evidence_patterns": [
+        "Employees: numeric source-backed component input",
+        "shifts: numeric source-backed component input"
+      ],
+      "negative_evidence_patterns": [
+        "derived total occupancy estimate without source support",
+        "component value with no exact quote",
+        "numeric value without unit or time basis"
+      ],
+      "venue_aliases": [
+        "Powerplants"
+      ],
+      "priority": 60,
+      "enabled": true
+    }
+  ]
+}

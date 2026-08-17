@@ -802,15 +802,23 @@ def run_gap_fill(
 
     completed_results = [result for result in child_results if result is not None]
     child_run_ids = [manifest.run_id for manifest, _ in completed_results]
-    child_summaries: list[dict[str, object]] = [
-        {
-            "run_id": manifest.run_id,
-            "status": manifest.status.value,
-            "summary": manifest.summary or {},
-            "geographer_plan_path": geographer_path,
-        }
-        for manifest, geographer_path in completed_results
-    ]
+    child_summaries: list[dict[str, object]] = []
+    for index, result in enumerate(child_results):
+        if result is None:
+            continue
+        manifest, geographer_path = result
+        job, _ = jobs[index]
+        child_summaries.append(
+            {
+                "run_id": manifest.run_id,
+                "status": manifest.status.value,
+                "locality": job.locality,
+                "facility_type": job.facility_type,
+                "summary": manifest.summary or {},
+                "error_message": manifest.error_message,
+                "geographer_plan_path": geographer_path,
+            }
+        )
     failed = [item for item in child_summaries if item["status"] != HarvestRunStatus.COMPLETED]
     append_dialogue(
         root,

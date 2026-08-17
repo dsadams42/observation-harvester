@@ -34,8 +34,12 @@ def _profile_context(profile_set: BuildingProfileSet) -> str:
             continue
         details: list[str] = [f"profile_id={profile.profile_id}", f"label={profile.label}"]
         details.append(f"count_method={profile.count_method.value}")
-        if profile.pdt_subtype:
-            details.append(f"PDT subtype={profile.pdt_subtype}")
+        if profile.land_use:
+            details.append(f"land_use={profile.land_use}")
+        if profile.facility_class:
+            details.append(f"facility_class={profile.facility_class}")
+        elif profile.pdt_subtype:
+            details.append(f"facility_class={profile.pdt_subtype}")
         if profile.occupancy_groups:
             details.append(f"groups={', '.join(profile.occupancy_groups)}")
         if profile.day_occurrence:
@@ -95,9 +99,9 @@ strategy IDs. You may reorder, emphasize, or de-emphasize only these allowed str
 Run: {run_id}
 Country: {country}
 Locality: {locality or "countrywide"}
-Facility type: {profile_set.label} (`{profile_set.profile_set_id}`)
+Land use: {profile_set.label} (`{profile_set.profile_set_id}`)
 Facility family: {profile_set.label} (`{profile_set.profile_set_id}`)
-Selected subtype: {profile_id or "all enabled subtypes"}
+Selected facility class: {profile_id or "all enabled facility classes"}
 
 Facility and PDT context:
 {_profile_context(profile_set)}

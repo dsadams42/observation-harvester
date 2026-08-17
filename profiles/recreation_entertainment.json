@@ -1,291 +1,262 @@
 {
   "profile_set_id": "recreation_entertainment",
-  "label": "Recreation and entertainment",
+  "label": "Recreation/Entertainment",
   "profiles": [
     {
-      "profile_id": "indoor_recreation_centers",
-      "label": "Indoor recreation centers",
+      "profile_id": "indoor_recreation_center",
+      "label": "Indoor Recreation Center",
+      "land_use": "Recreation/Entertainment",
+      "facility_class": "Indoor Recreation Center",
       "pdt_subtype": "Indoor Recreation Center",
-      "area_defined": "All indoor recreation buildings.",
-      "day_occurrence": "Open during sports, classes, clubs, community programs, and staff work periods.",
-      "night_occurrence": "Usually closed, with possible staff, maintenance, janitorial, or security presence.",
-      "episodic_occurrence": [
-        "activities",
-        "classes",
-        "sports events",
-        "evacuations",
-        "community gatherings"
-      ],
-      "occupancy_groups": [
-        "visitors",
-        "participants",
-        "attendees",
-        "employees",
-        "staff"
-      ],
+      "area_defined": null,
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
       "contextual_count_fields": [
-        "capacity",
-        "membership",
-        "registered participants"
+        "Annual visitors/daily visitors",
+        "staff",
+        "average visit time",
+        "hours open",
+        "days open"
       ],
-      "preferred_strategy_ids": [
-        "official_event_attendance",
-        "incident_evacuation",
-        "temporary_use_occupancy",
-        "routine_dated_attendance"
-      ],
-      "source_search_prompt": "Find count-bearing reports for community centers, gyms, exercise facilities, indoor recreation centers, and club facilities. Good evidence includes visitors, participants, attendees, employees, or staff present, evacuated, checked in, or attending a bounded class, activity, event, or incident. Treat capacity, membership, and registered participants as context only.",
-      "preferred_source_types": [
-        "official recreation center announcement",
-        "official event report",
-        "local or national news article",
-        "official emergency report"
-      ],
-      "context_only_source_types": [
-        "facility directory",
-        "membership page",
-        "capacity page",
-        "program listing without attendance"
-      ],
-      "positive_evidence_patterns": [
-        "people attended",
-        "participants attended",
-        "visitors were inside",
-        "people were evacuated",
-        "checked in",
-        "inside the gym when"
-      ],
-      "negative_evidence_patterns": [
-        "capacity",
-        "membership",
-        "registered participants",
-        "program capacity"
-      ],
-      "venue_aliases": [
-        "community center",
-        "gym",
-        "exercise facility",
-        "recreation center",
-        "sports center"
-      ],
-      "priority": 10,
       "count_method": "direct_count",
       "component_count_fields": [],
       "regional_stat_fields": [],
-      "component_source_guidance": null
+      "component_source_guidance": null,
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find direct people-present occupancy evidence for Indoor Recreation Center in the Recreation/Entertainment land-use group. Use only direct evidence of people physically present during a bounded incident, event, shift, measurement, or observation. Treat capacities, staffing, rooms, area, ridership, and annual traffic as context unless the analyst overrides count mode.",
+      "preferred_source_types": [
+        "incident reports",
+        "inspection reports",
+        "event attendance records",
+        "credible news reports with observed counts",
+        "official operational logs"
+      ],
+      "context_only_source_types": [
+        "capacity lists",
+        "floor area tables",
+        "employee totals",
+        "room counts",
+        "annual visitors or traffic totals"
+      ],
+      "positive_evidence_patterns": [
+        "people present at a bounded time",
+        "observed attendance or occupancy count",
+        "incident/event/shift count tied to a facility and date or period"
+      ],
+      "negative_evidence_patterns": [
+        "Annual visitors/daily visitors alone is not a direct occupancy count",
+        "staff alone is not a direct occupancy count",
+        "average visit time alone is not a direct occupancy count",
+        "hours open alone is not a direct occupancy count",
+        "days open alone is not a direct occupancy count"
+      ],
+      "venue_aliases": [
+        "Indoor Recreation Center"
+      ],
+      "priority": 0,
+      "enabled": true
     },
     {
-      "profile_id": "theaters",
-      "label": "Theaters and concert venues",
+      "profile_id": "theater",
+      "label": "Theater",
+      "land_use": "Recreation/Entertainment",
+      "facility_class": "Theater",
       "pdt_subtype": "Theater",
-      "area_defined": "Seating and spectator area only; exclude stage and other non-spectator areas unless the source ties people to those areas.",
-      "day_occurrence": "Open during films, performances, concerts, rehearsals, and staff work periods.",
-      "night_occurrence": "Usually closed, with possible staff, maintenance, janitorial, or security presence.",
-      "episodic_occurrence": [
-        "films",
-        "shows",
-        "concerts",
-        "performances",
-        "evacuations"
-      ],
-      "occupancy_groups": [
-        "attendees",
-        "audience members",
-        "patrons",
-        "visitors",
-        "employees",
-        "staff"
-      ],
+      "area_defined": null,
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
       "contextual_count_fields": [
-        "seating capacity",
-        "tickets sold",
-        "venue capacity"
+        "Capacity"
       ],
-      "preferred_strategy_ids": [
-        "official_event_attendance",
-        "temporary_use_occupancy",
-        "incident_evacuation",
-        "enforcement_inspection"
-      ],
-      "source_search_prompt": "Find count-bearing reports for theaters, opera houses, movie theaters, concert venues, and performance halls. Good evidence includes attendees, audience members, patrons, visitors, employees, or staff attending, checked in, inside, evacuated, or counted during a bounded show or incident. Treat seating capacity and tickets sold as context only unless attendance/check-in is confirmed.",
-      "preferred_source_types": [
-        "official venue or organizer announcement",
-        "ticket-scan or attendance report",
-        "local or national news article",
-        "official emergency report"
-      ],
-      "context_only_source_types": [
-        "seating chart",
-        "capacity page",
-        "ticketing page without attendance",
-        "venue directory"
-      ],
-      "positive_evidence_patterns": [
-        "people attended",
-        "attendees were inside",
-        "audience members were evacuated",
-        "patrons were evacuated",
-        "people were evacuated",
-        "checked in"
-      ],
-      "negative_evidence_patterns": [
-        "seating capacity",
-        "tickets sold",
-        "venue capacity",
-        "box office gross"
-      ],
-      "venue_aliases": [
-        "theater",
-        "movie theater",
-        "opera house",
-        "concert venue",
-        "performance hall"
-      ],
-      "priority": 20,
       "count_method": "direct_count",
       "component_count_fields": [],
       "regional_stat_fields": [],
-      "component_source_guidance": null
+      "component_source_guidance": null,
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find direct people-present occupancy evidence for Theater in the Recreation/Entertainment land-use group. Use only direct evidence of people physically present during a bounded incident, event, shift, measurement, or observation. Treat capacities, staffing, rooms, area, ridership, and annual traffic as context unless the analyst overrides count mode.",
+      "preferred_source_types": [
+        "incident reports",
+        "inspection reports",
+        "event attendance records",
+        "credible news reports with observed counts",
+        "official operational logs"
+      ],
+      "context_only_source_types": [
+        "capacity lists",
+        "floor area tables",
+        "employee totals",
+        "room counts",
+        "annual visitors or traffic totals"
+      ],
+      "positive_evidence_patterns": [
+        "people present at a bounded time",
+        "observed attendance or occupancy count",
+        "incident/event/shift count tied to a facility and date or period"
+      ],
+      "negative_evidence_patterns": [
+        "Capacity alone is not a direct occupancy count"
+      ],
+      "venue_aliases": [
+        "Theater"
+      ],
+      "priority": 10,
+      "enabled": true
     },
     {
       "profile_id": "stadiums",
       "label": "Stadiums",
+      "land_use": "Recreation/Entertainment",
+      "facility_class": "Stadiums",
       "pdt_subtype": "Stadiums",
-      "area_defined": "Spectator and seating area only; exclude the field unless the source ties the count to occupied spectator/venue areas.",
-      "day_occurrence": "Open during sporting events, concerts, tours, and staff work periods.",
-      "night_occurrence": "Usually closed, with possible staff, maintenance, janitorial, or security presence.",
-      "episodic_occurrence": [
-        "sporting events",
-        "concerts",
-        "evacuations",
-        "crowd incidents"
-      ],
-      "occupancy_groups": [
-        "attendees",
-        "spectators",
-        "fans",
-        "visitors",
-        "employees",
-        "staff"
-      ],
+      "area_defined": null,
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
       "contextual_count_fields": [
-        "seating capacity",
-        "tickets sold",
-        "stadium capacity"
+        "Capacity"
       ],
-      "preferred_strategy_ids": [
-        "official_event_attendance",
-        "temporary_use_occupancy",
-        "incident_evacuation",
-        "enforcement_inspection"
-      ],
-      "source_search_prompt": "Find count-bearing reports for sports stadiums and large formal-seating venues. Good evidence includes spectators, fans, attendees, visitors, employees, or staff attending, checked in, inside, evacuated, or counted during a bounded event or incident. Treat stadium capacity and tickets sold as context only unless attendance/check-in is confirmed.",
-      "preferred_source_types": [
-        "official venue or organizer announcement",
-        "official attendance report",
-        "local or national news article",
-        "official emergency report"
-      ],
-      "context_only_source_types": [
-        "capacity page",
-        "seating chart",
-        "ticketing page without attendance",
-        "venue directory"
-      ],
-      "positive_evidence_patterns": [
-        "attendance was",
-        "people attended",
-        "fans attended",
-        "spectators were evacuated",
-        "attendees were inside",
-        "checked in"
-      ],
-      "negative_evidence_patterns": [
-        "stadium capacity",
-        "seating capacity",
-        "tickets sold",
-        "sellout"
-      ],
-      "venue_aliases": [
-        "stadium",
-        "sports stadium",
-        "arena",
-        "ballpark",
-        "formal seating venue"
-      ],
-      "priority": 30,
       "count_method": "direct_count",
       "component_count_fields": [],
       "regional_stat_fields": [],
-      "component_source_guidance": null
+      "component_source_guidance": null,
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find direct people-present occupancy evidence for Stadiums in the Recreation/Entertainment land-use group. Use only direct evidence of people physically present during a bounded incident, event, shift, measurement, or observation. Treat capacities, staffing, rooms, area, ridership, and annual traffic as context unless the analyst overrides count mode.",
+      "preferred_source_types": [
+        "incident reports",
+        "inspection reports",
+        "event attendance records",
+        "credible news reports with observed counts",
+        "official operational logs"
+      ],
+      "context_only_source_types": [
+        "capacity lists",
+        "floor area tables",
+        "employee totals",
+        "room counts",
+        "annual visitors or traffic totals"
+      ],
+      "positive_evidence_patterns": [
+        "people present at a bounded time",
+        "observed attendance or occupancy count",
+        "incident/event/shift count tied to a facility and date or period"
+      ],
+      "negative_evidence_patterns": [
+        "Capacity alone is not a direct occupancy count"
+      ],
+      "venue_aliases": [
+        "Stadiums"
+      ],
+      "priority": 20,
+      "enabled": true
     },
     {
       "profile_id": "outdoor_recreation_fields",
-      "label": "Outdoor recreation fields",
+      "label": "Outdoor Recreation Fields",
+      "land_use": "Recreation/Entertainment",
+      "facility_class": "Outdoor Recreation Fields",
       "pdt_subtype": "Outdoor Recreation Fields",
-      "area_defined": "Outdoor areas accessible by visitors; for zoos, exclude areas where animals are kept.",
-      "day_occurrence": "Open during visitor, recreation, event, and staff periods.",
-      "night_occurrence": "Usually closed, with reduced staff and visitors.",
-      "episodic_occurrence": [
-        "visits",
-        "sports events",
-        "park events",
-        "evacuations"
-      ],
-      "occupancy_groups": [
-        "visitors",
-        "participants",
-        "attendees",
-        "employees",
-        "staff"
-      ],
+      "area_defined": null,
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
       "contextual_count_fields": [
-        "annual visitors",
-        "park capacity",
-        "registered participants"
+        "Annual visitors/daily visitors",
+        "staff",
+        "average visit time",
+        "hours open",
+        "days open"
       ],
-      "preferred_strategy_ids": [
-        "official_event_attendance",
-        "incident_evacuation",
-        "temporary_use_occupancy"
-      ],
-      "source_search_prompt": "Find count-bearing reports for public parks, sports fields without formal seating, playgrounds, zoos, and outdoor recreation fields. Good evidence includes visitors, participants, attendees, employees, or staff present, evacuated, or attending a bounded event. Treat annual visitors and park capacity as context only.",
-      "preferred_source_types": [
-        "official parks or event report",
-        "local or national news article",
-        "official emergency report"
-      ],
-      "context_only_source_types": [
-        "park directory",
-        "annual visitor page",
-        "capacity page",
-        "map listing"
-      ],
-      "positive_evidence_patterns": [
-        "visitors were evacuated",
-        "people attended",
-        "participants attended",
-        "people were at the park",
-        "attendees were present"
-      ],
-      "negative_evidence_patterns": [
-        "annual visitors",
-        "park capacity",
-        "registered participants",
-        "acreage"
-      ],
-      "venue_aliases": [
-        "park",
-        "sports field",
-        "playground",
-        "zoo",
-        "outdoor recreation field"
-      ],
-      "priority": 40,
       "count_method": "direct_count",
       "component_count_fields": [],
       "regional_stat_fields": [],
-      "component_source_guidance": null
+      "component_source_guidance": null,
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find direct people-present occupancy evidence for Outdoor Recreation Fields in the Recreation/Entertainment land-use group. Use only direct evidence of people physically present during a bounded incident, event, shift, measurement, or observation. Treat capacities, staffing, rooms, area, ridership, and annual traffic as context unless the analyst overrides count mode.",
+      "preferred_source_types": [
+        "incident reports",
+        "inspection reports",
+        "event attendance records",
+        "credible news reports with observed counts",
+        "official operational logs"
+      ],
+      "context_only_source_types": [
+        "capacity lists",
+        "floor area tables",
+        "employee totals",
+        "room counts",
+        "annual visitors or traffic totals"
+      ],
+      "positive_evidence_patterns": [
+        "people present at a bounded time",
+        "observed attendance or occupancy count",
+        "incident/event/shift count tied to a facility and date or period"
+      ],
+      "negative_evidence_patterns": [
+        "Annual visitors/daily visitors alone is not a direct occupancy count",
+        "staff alone is not a direct occupancy count",
+        "average visit time alone is not a direct occupancy count",
+        "hours open alone is not a direct occupancy count",
+        "days open alone is not a direct occupancy count"
+      ],
+      "venue_aliases": [
+        "Outdoor Recreation Fields"
+      ],
+      "priority": 30,
+      "enabled": true
+    },
+    {
+      "profile_id": "night_club",
+      "label": "Night Club",
+      "land_use": "Recreation/Entertainment",
+      "facility_class": "Night Club",
+      "pdt_subtype": "Night Club",
+      "area_defined": null,
+      "day_occurrence": null,
+      "night_occurrence": null,
+      "episodic_occurrence": [],
+      "occupancy_groups": [],
+      "contextual_count_fields": [
+        "Capacity"
+      ],
+      "count_method": "direct_count",
+      "component_count_fields": [],
+      "regional_stat_fields": [],
+      "component_source_guidance": null,
+      "preferred_strategy_ids": [],
+      "source_search_prompt": "Find direct people-present occupancy evidence for Night Club in the Recreation/Entertainment land-use group. Use only direct evidence of people physically present during a bounded incident, event, shift, measurement, or observation. Treat capacities, staffing, rooms, area, ridership, and annual traffic as context unless the analyst overrides count mode.",
+      "preferred_source_types": [
+        "incident reports",
+        "inspection reports",
+        "event attendance records",
+        "credible news reports with observed counts",
+        "official operational logs"
+      ],
+      "context_only_source_types": [
+        "capacity lists",
+        "floor area tables",
+        "employee totals",
+        "room counts",
+        "annual visitors or traffic totals"
+      ],
+      "positive_evidence_patterns": [
+        "people present at a bounded time",
+        "observed attendance or occupancy count",
+        "incident/event/shift count tied to a facility and date or period"
+      ],
+      "negative_evidence_patterns": [
+        "Capacity alone is not a direct occupancy count"
+      ],
+      "venue_aliases": [
+        "Night Club"
+      ],
+      "priority": 40,
+      "enabled": true
     }
   ]
 }

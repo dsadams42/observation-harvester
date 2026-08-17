@@ -40,15 +40,15 @@ def test_create_batch_writes_public_venue_work_items(tmp_path: Path) -> None:
     items = list_work_items(tmp_path)
 
     assert batch.batch_id == "batch-test"
-    assert len(items) == 5
+    assert len(items) == 7
     assert all(item.status == WorkStatus.OPEN for item in items)
     assert all(item.quota.target_accepted_count == 5 for item in items)
     assert all(item.strategy_plan is not None for item in items)
-    retail_events = next(item for item in items if item.profile_id == "retail_events")
-    assert retail_events.strategy_plan is not None
+    theaters_events = next(item for item in items if item.profile_id == "theaters_events")
+    assert theaters_events.strategy_plan is not None
     assert any(
         recommendation.strategy_id.value == "temporary_use_occupancy"
-        for recommendation in retail_events.strategy_plan.recommendations
+        for recommendation in theaters_events.strategy_plan.recommendations
     )
 
 

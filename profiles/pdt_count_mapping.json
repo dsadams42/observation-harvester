@@ -1,0 +1,1405 @@
+{
+  "schema_version": 2,
+  "source_workbook": "PDT Facility Types - Direct Count vs Population Subcomponent.xlsx",
+  "taxonomy": {
+    "land_use_count": 8,
+    "facility_class_count": 65,
+    "land_uses": [
+      "Residential",
+      "Institutions/Public Service",
+      "Retail and Service Outlets",
+      "Commercial",
+      "Transportation",
+      "Military Facility",
+      "Recreation/Entertainment",
+      "Agriculture"
+    ]
+  },
+  "rows": [
+    {
+      "land_use": "Residential",
+      "land_use_id": "residential",
+      "facility_class": "Overall Residential",
+      "facility_class_id": "overall_residential",
+      "facility_type": "Overall Residential",
+      "strategy": "Population Subcomponent Counts",
+      "count_method": "population_subcomponent",
+      "arguments": [
+        "Household size",
+        "dwelling size"
+      ],
+      "component_count_fields": [
+        "Household size",
+        "dwelling size"
+      ],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [
+        "School attendance rate",
+        "unemployment rate",
+        "age/sex breakdown"
+      ],
+      "notes": "We use a different process for residential buildings using the country level census - revengc",
+      "regional_country_level_stats_used": "Yes - School attendance rate, unemployment rate, age/sex breakdown"
+    },
+    {
+      "land_use": "Residential",
+      "land_use_id": "residential",
+      "facility_class": "Urban",
+      "facility_class_id": "urban",
+      "facility_type": "Urban",
+      "strategy": "Population Subcomponent Counts",
+      "count_method": "population_subcomponent",
+      "arguments": [
+        "Household size",
+        "dwelling size"
+      ],
+      "component_count_fields": [
+        "Household size",
+        "dwelling size"
+      ],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [
+        "School attendance rate",
+        "unemployment rate",
+        "age/sex breakdown"
+      ],
+      "notes": "We use a different process for residential buildings using the country level census - revengc",
+      "regional_country_level_stats_used": "Yes - School attendance rate, unemployment rate, age/sex breakdown"
+    },
+    {
+      "land_use": "Residential",
+      "land_use_id": "residential",
+      "facility_class": "Single-Family",
+      "facility_class_id": "single_family",
+      "facility_type": "Single-Family",
+      "strategy": "Population Subcomponent Counts",
+      "count_method": "population_subcomponent",
+      "arguments": [
+        "Household size",
+        "dwelling size"
+      ],
+      "component_count_fields": [
+        "Household size",
+        "dwelling size"
+      ],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [
+        "School attendance rate",
+        "unemployment rate",
+        "age/sex breakdown"
+      ],
+      "notes": "We use a different process for residential buildings using the country level census - revengc",
+      "regional_country_level_stats_used": "Yes - School attendance rate, unemployment rate, age/sex breakdown"
+    },
+    {
+      "land_use": "Residential",
+      "land_use_id": "residential",
+      "facility_class": "Single-Family Urban",
+      "facility_class_id": "single_family_urban",
+      "facility_type": "Single-Family Urban",
+      "strategy": "Population Subcomponent Counts",
+      "count_method": "population_subcomponent",
+      "arguments": [
+        "Household size",
+        "dwelling size"
+      ],
+      "component_count_fields": [
+        "Household size",
+        "dwelling size"
+      ],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [
+        "School attendance rate",
+        "unemployment rate",
+        "age/sex breakdown"
+      ],
+      "notes": "We use a different process for residential buildings using the country level census - revengc",
+      "regional_country_level_stats_used": "Yes - School attendance rate, unemployment rate, age/sex breakdown"
+    },
+    {
+      "land_use": "Residential",
+      "land_use_id": "residential",
+      "facility_class": "Single-Family Urban Upper/Middle",
+      "facility_class_id": "single_family_urban_upper_middle",
+      "facility_type": "Single-Family Urban Upper/Middle",
+      "strategy": "Population Subcomponent Counts",
+      "count_method": "population_subcomponent",
+      "arguments": [
+        "Household size",
+        "dwelling size"
+      ],
+      "component_count_fields": [
+        "Household size",
+        "dwelling size"
+      ],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [
+        "School attendance rate",
+        "unemployment rate",
+        "age/sex breakdown"
+      ],
+      "notes": "We use a different process for residential buildings using the country level census - revengc",
+      "regional_country_level_stats_used": "Yes - School attendance rate, unemployment rate, age/sex breakdown"
+    },
+    {
+      "land_use": "Residential",
+      "land_use_id": "residential",
+      "facility_class": "Single-Family Urban Lower",
+      "facility_class_id": "single_family_urban_lower",
+      "facility_type": "Single-Family Urban Lower",
+      "strategy": "Population Subcomponent Counts",
+      "count_method": "population_subcomponent",
+      "arguments": [
+        "Household size",
+        "dwelling size"
+      ],
+      "component_count_fields": [
+        "Household size",
+        "dwelling size"
+      ],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [
+        "School attendance rate",
+        "unemployment rate",
+        "age/sex breakdown"
+      ],
+      "notes": "We use a different process for residential buildings using the country level census - revengc",
+      "regional_country_level_stats_used": "Yes - School attendance rate, unemployment rate, age/sex breakdown"
+    },
+    {
+      "land_use": "Residential",
+      "land_use_id": "residential",
+      "facility_class": "Multi-Family",
+      "facility_class_id": "multi_family",
+      "facility_type": "Multi-Family",
+      "strategy": "Population Subcomponent Counts",
+      "count_method": "population_subcomponent",
+      "arguments": [
+        "Household size",
+        "dwelling size"
+      ],
+      "component_count_fields": [
+        "Household size",
+        "dwelling size"
+      ],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [
+        "School attendance rate",
+        "unemployment rate",
+        "age/sex breakdown"
+      ],
+      "notes": "We use a different process for residential buildings using the country level census - revengc",
+      "regional_country_level_stats_used": "Yes - School attendance rate, unemployment rate, age/sex breakdown"
+    },
+    {
+      "land_use": "Residential",
+      "land_use_id": "residential",
+      "facility_class": "Multi-Family Urban",
+      "facility_class_id": "multi_family_urban",
+      "facility_type": "Multi-Family Urban",
+      "strategy": "Population Subcomponent Counts",
+      "count_method": "population_subcomponent",
+      "arguments": [
+        "Household size",
+        "dwelling size"
+      ],
+      "component_count_fields": [
+        "Household size",
+        "dwelling size"
+      ],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [
+        "School attendance rate",
+        "unemployment rate",
+        "age/sex breakdown"
+      ],
+      "notes": "We use a different process for residential buildings using the country level census - revengc",
+      "regional_country_level_stats_used": "Yes - School attendance rate, unemployment rate, age/sex breakdown"
+    },
+    {
+      "land_use": "Residential",
+      "land_use_id": "residential",
+      "facility_class": "Slum",
+      "facility_class_id": "slum",
+      "facility_type": "Slum",
+      "strategy": "Population Subcomponent Counts",
+      "count_method": "population_subcomponent",
+      "arguments": [
+        "Household size",
+        "dwelling size"
+      ],
+      "component_count_fields": [
+        "Household size",
+        "dwelling size"
+      ],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [
+        "School attendance rate",
+        "unemployment rate",
+        "age/sex breakdown"
+      ],
+      "notes": "We use a different process for residential buildings using the country level census - revengc",
+      "regional_country_level_stats_used": "Yes - School attendance rate, unemployment rate, age/sex breakdown"
+    },
+    {
+      "land_use": "Residential",
+      "land_use_id": "residential",
+      "facility_class": "Rural",
+      "facility_class_id": "rural",
+      "facility_type": "Rural",
+      "strategy": "Population Subcomponent Counts",
+      "count_method": "population_subcomponent",
+      "arguments": [
+        "Household size",
+        "dwelling size"
+      ],
+      "component_count_fields": [
+        "Household size",
+        "dwelling size"
+      ],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [
+        "School attendance rate",
+        "unemployment rate",
+        "age/sex breakdown"
+      ],
+      "notes": "We use a different process for residential buildings using the country level census - revengc",
+      "regional_country_level_stats_used": "Yes - School attendance rate, unemployment rate, age/sex breakdown"
+    },
+    {
+      "land_use": "Residential",
+      "land_use_id": "residential",
+      "facility_class": "Single-Family Rural",
+      "facility_class_id": "single_family_rural",
+      "facility_type": "Single-Family Rural",
+      "strategy": "Population Subcomponent Counts",
+      "count_method": "population_subcomponent",
+      "arguments": [
+        "Household size",
+        "dwelling size"
+      ],
+      "component_count_fields": [
+        "Household size",
+        "dwelling size"
+      ],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [
+        "School attendance rate",
+        "unemployment rate",
+        "age/sex breakdown"
+      ],
+      "notes": "We use a different process for residential buildings using the country level census - revengc",
+      "regional_country_level_stats_used": "Yes - School attendance rate, unemployment rate, age/sex breakdown"
+    },
+    {
+      "land_use": "Residential",
+      "land_use_id": "residential",
+      "facility_class": "Multi-Family Rural",
+      "facility_class_id": "multi_family_rural",
+      "facility_type": "Multi-Family Rural",
+      "strategy": "Population Subcomponent Counts",
+      "count_method": "population_subcomponent",
+      "arguments": [
+        "Household size",
+        "dwelling size"
+      ],
+      "component_count_fields": [
+        "Household size",
+        "dwelling size"
+      ],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [
+        "School attendance rate",
+        "unemployment rate",
+        "age/sex breakdown"
+      ],
+      "notes": "We use a different process for residential buildings using the country level census - revengc",
+      "regional_country_level_stats_used": "Yes - School attendance rate, unemployment rate, age/sex breakdown"
+    },
+    {
+      "land_use": "Residential",
+      "land_use_id": "residential",
+      "facility_class": "Refugee Settlement",
+      "facility_class_id": "refugee_settlement",
+      "facility_type": "Refugee Settlement",
+      "strategy": "Population Subcomponent Counts",
+      "count_method": "population_subcomponent",
+      "arguments": [
+        "Number of tents",
+        "household size",
+        "average tent size",
+        "total population"
+      ],
+      "component_count_fields": [
+        "Number of tents",
+        "household size",
+        "average tent size",
+        "total population"
+      ],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [
+        "School attendance rate",
+        "unemployment rate",
+        "age/sex breakdown"
+      ],
+      "notes": "Could be a direct count if total refugee camp population is found",
+      "regional_country_level_stats_used": "Yes - School attendance rate, unemployment rate, age/sex breakdown"
+    },
+    {
+      "land_use": "Residential",
+      "land_use_id": "residential",
+      "facility_class": "Tents",
+      "facility_class_id": "tents",
+      "facility_type": "Tents",
+      "strategy": "Population Subcomponent Counts",
+      "count_method": "population_subcomponent",
+      "arguments": [
+        "Number of tents",
+        "household size",
+        "average tent size",
+        "total population"
+      ],
+      "component_count_fields": [
+        "Number of tents",
+        "household size",
+        "average tent size",
+        "total population"
+      ],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [
+        "School attendance rate",
+        "unemployment rate",
+        "age/sex breakdown"
+      ],
+      "notes": "Could be a direct count if total population is found for a singular grouping (nomadic population)",
+      "regional_country_level_stats_used": "Yes - School attendance rate, unemployment rate, age/sex breakdown"
+    },
+    {
+      "land_use": "Residential",
+      "land_use_id": "residential",
+      "facility_class": "Temporary Resident",
+      "facility_class_id": "temporary_resident",
+      "facility_type": "Temporary Resident",
+      "strategy": "Population Subcomponent Counts",
+      "count_method": "population_subcomponent",
+      "arguments": [
+        "Average household size",
+        "dwelling area"
+      ],
+      "component_count_fields": [
+        "Average household size",
+        "dwelling area"
+      ],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [
+        "School attendance rate",
+        "unemployment rate",
+        "age/sex breakdown"
+      ],
+      "notes": "Could be a direct count if total population is found for a singular building",
+      "regional_country_level_stats_used": "Yes - School attendance rate, unemployment rate, age/sex breakdown"
+    },
+    {
+      "land_use": "Institutions/Public Service",
+      "land_use_id": "institutions_public_service",
+      "facility_class": "Religious",
+      "facility_class_id": "religious",
+      "facility_type": "Religious",
+      "strategy": "Direct Count",
+      "count_method": "direct_count",
+      "arguments": [
+        "Capacity",
+        "staff"
+      ],
+      "component_count_fields": [],
+      "direct_contextual_count_fields": [
+        "Capacity",
+        "staff"
+      ],
+      "regional_stat_fields": [],
+      "notes": "Generally we use capacity for episodic services",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Institutions/Public Service",
+      "land_use_id": "institutions_public_service",
+      "facility_class": "Museum - Urban",
+      "facility_class_id": "museum_urban",
+      "facility_type": "Museum - Urban",
+      "strategy": "Population Subcomponent Counts",
+      "count_method": "population_subcomponent",
+      "arguments": [
+        "Annual visitors",
+        "museum staff",
+        "average hours open",
+        "days open",
+        "visit time in hours"
+      ],
+      "component_count_fields": [
+        "Annual visitors",
+        "museum staff",
+        "average hours open",
+        "days open",
+        "visit time in hours"
+      ],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [],
+      "notes": "",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Institutions/Public Service",
+      "land_use_id": "institutions_public_service",
+      "facility_class": "Museum - Rural",
+      "facility_class_id": "museum_rural",
+      "facility_type": "Museum - Rural",
+      "strategy": "Population Subcomponent Counts",
+      "count_method": "population_subcomponent",
+      "arguments": [
+        "Annual visitors",
+        "museum staff",
+        "average hours open",
+        "days open",
+        "visit time in hours"
+      ],
+      "component_count_fields": [
+        "Annual visitors",
+        "museum staff",
+        "average hours open",
+        "days open",
+        "visit time in hours"
+      ],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [],
+      "notes": "",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Institutions/Public Service",
+      "land_use_id": "institutions_public_service",
+      "facility_class": "University Library",
+      "facility_class_id": "university_library",
+      "facility_type": "University Library",
+      "strategy": "Population Subcomponent Counts",
+      "count_method": "population_subcomponent",
+      "arguments": [
+        "Annual visitors",
+        "library staff",
+        "average hours open",
+        "days open",
+        "visit time in hours"
+      ],
+      "component_count_fields": [
+        "Annual visitors",
+        "library staff",
+        "average hours open",
+        "days open",
+        "visit time in hours"
+      ],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [],
+      "notes": "",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Institutions/Public Service",
+      "land_use_id": "institutions_public_service",
+      "facility_class": "Public Library",
+      "facility_class_id": "public_library",
+      "facility_type": "Public Library",
+      "strategy": "Population Subcomponent Counts",
+      "count_method": "population_subcomponent",
+      "arguments": [
+        "Annual visitors",
+        "library staff",
+        "average hours open",
+        "days open",
+        "visit time in hours"
+      ],
+      "component_count_fields": [
+        "Annual visitors",
+        "library staff",
+        "average hours open",
+        "days open",
+        "visit time in hours"
+      ],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [],
+      "notes": "",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Institutions/Public Service",
+      "land_use_id": "institutions_public_service",
+      "facility_class": "School (D-12)",
+      "facility_class_id": "school_d_12",
+      "facility_type": "School (D-12)",
+      "strategy": "Population Subcomponent Counts",
+      "count_method": "population_subcomponent",
+      "arguments": [
+        "Students",
+        "staff",
+        "faculty",
+        "shift schooling"
+      ],
+      "component_count_fields": [
+        "Students",
+        "staff",
+        "faculty",
+        "shift schooling"
+      ],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [
+        "School attendance Rate"
+      ],
+      "notes": "",
+      "regional_country_level_stats_used": "Yes - School attendance Rate"
+    },
+    {
+      "land_use": "Institutions/Public Service",
+      "land_use_id": "institutions_public_service",
+      "facility_class": "University",
+      "facility_class_id": "university",
+      "facility_type": "University",
+      "strategy": "Population Subcomponent Counts",
+      "count_method": "population_subcomponent",
+      "arguments": [
+        "Students",
+        "staff",
+        "faculty"
+      ],
+      "component_count_fields": [
+        "Students",
+        "staff",
+        "faculty"
+      ],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [
+        "School attendance Rate"
+      ],
+      "notes": "",
+      "regional_country_level_stats_used": "Yes - School attendance Rate"
+    },
+    {
+      "land_use": "Institutions/Public Service",
+      "land_use_id": "institutions_public_service",
+      "facility_class": "Hospital/Clinic with Beds",
+      "facility_class_id": "hospital_clinic_with_beds",
+      "facility_type": "Hospital/Clinic with Beds",
+      "strategy": "Population Subcomponent Counts",
+      "count_method": "population_subcomponent",
+      "arguments": [
+        "Inpatients",
+        "outpatients",
+        "beds",
+        "nurses",
+        "doctors",
+        "staff"
+      ],
+      "component_count_fields": [
+        "Inpatients",
+        "outpatients",
+        "beds",
+        "nurses",
+        "doctors",
+        "staff"
+      ],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [
+        "Bed Occupancy Rate"
+      ],
+      "notes": "",
+      "regional_country_level_stats_used": "Yes - Bed Occupancy Rate"
+    },
+    {
+      "land_use": "Institutions/Public Service",
+      "land_use_id": "institutions_public_service",
+      "facility_class": "Hospital/Clinic without Beds",
+      "facility_class_id": "hospital_clinic_without_beds",
+      "facility_type": "Hospital/Clinic without Beds",
+      "strategy": "Population Subcomponent Counts",
+      "count_method": "population_subcomponent",
+      "arguments": [
+        "Outpatients",
+        "nurses",
+        "doctors",
+        "staff"
+      ],
+      "component_count_fields": [
+        "Outpatients",
+        "nurses",
+        "doctors",
+        "staff"
+      ],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [],
+      "notes": "",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Institutions/Public Service",
+      "land_use_id": "institutions_public_service",
+      "facility_class": "Courts",
+      "facility_class_id": "courts",
+      "facility_type": "Courts",
+      "strategy": "Direct Count",
+      "count_method": "direct_count",
+      "arguments": [],
+      "component_count_fields": [],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [],
+      "notes": "",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Institutions/Public Service",
+      "land_use_id": "institutions_public_service",
+      "facility_class": "Police Stations",
+      "facility_class_id": "police_stations",
+      "facility_type": "Police Stations",
+      "strategy": "Direct Count",
+      "count_method": "direct_count",
+      "arguments": [],
+      "component_count_fields": [],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [],
+      "notes": "",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Institutions/Public Service",
+      "land_use_id": "institutions_public_service",
+      "facility_class": "Conference Centers",
+      "facility_class_id": "conference_centers",
+      "facility_type": "Conference Centers",
+      "strategy": "Direct Count",
+      "count_method": "direct_count",
+      "arguments": [
+        "Capacity"
+      ],
+      "component_count_fields": [],
+      "direct_contextual_count_fields": [
+        "Capacity"
+      ],
+      "regional_stat_fields": [],
+      "notes": "",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Institutions/Public Service",
+      "land_use_id": "institutions_public_service",
+      "facility_class": "Fire Stations",
+      "facility_class_id": "fire_stations",
+      "facility_type": "Fire Stations",
+      "strategy": "Direct Count",
+      "count_method": "direct_count",
+      "arguments": [],
+      "component_count_fields": [],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [],
+      "notes": "",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Institutions/Public Service",
+      "land_use_id": "institutions_public_service",
+      "facility_class": "Public Service",
+      "facility_class_id": "public_service",
+      "facility_type": "Public Service",
+      "strategy": "Direct Count",
+      "count_method": "direct_count",
+      "arguments": [],
+      "component_count_fields": [],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [],
+      "notes": "",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Institutions/Public Service",
+      "land_use_id": "institutions_public_service",
+      "facility_class": "Post Office",
+      "facility_class_id": "post_office",
+      "facility_type": "Post Office",
+      "strategy": "Direct Count",
+      "count_method": "direct_count",
+      "arguments": [],
+      "component_count_fields": [],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [],
+      "notes": "",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Institutions/Public Service",
+      "land_use_id": "institutions_public_service",
+      "facility_class": "TV Stations",
+      "facility_class_id": "tv_stations",
+      "facility_type": "TV Stations",
+      "strategy": "Direct Count",
+      "count_method": "direct_count",
+      "arguments": [],
+      "component_count_fields": [],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [],
+      "notes": "",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Institutions/Public Service",
+      "land_use_id": "institutions_public_service",
+      "facility_class": "Radio Stations",
+      "facility_class_id": "radio_stations",
+      "facility_type": "Radio Stations",
+      "strategy": "Direct Count",
+      "count_method": "direct_count",
+      "arguments": [],
+      "component_count_fields": [],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [],
+      "notes": "",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Institutions/Public Service",
+      "land_use_id": "institutions_public_service",
+      "facility_class": "Water Treatment",
+      "facility_class_id": "water_treatment",
+      "facility_type": "Water Treatment",
+      "strategy": "Population Subcomponent Counts",
+      "count_method": "population_subcomponent",
+      "arguments": [
+        "Employees"
+      ],
+      "component_count_fields": [
+        "Employees"
+      ],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [],
+      "notes": "Direct count if available",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Institutions/Public Service",
+      "land_use_id": "institutions_public_service",
+      "facility_class": "Prisons",
+      "facility_class_id": "prisons",
+      "facility_type": "Prisons",
+      "strategy": "Direct Count",
+      "count_method": "direct_count",
+      "arguments": [
+        "Capacity",
+        "number of prisoners",
+        "employees"
+      ],
+      "component_count_fields": [],
+      "direct_contextual_count_fields": [
+        "Capacity",
+        "number of prisoners",
+        "employees"
+      ],
+      "regional_stat_fields": [],
+      "notes": "Mixture of capacity and direct prisoner count",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Institutions/Public Service",
+      "land_use_id": "institutions_public_service",
+      "facility_class": "Civil Protection Shelters",
+      "facility_class_id": "civil_protection_shelters",
+      "facility_type": "Civil Protection Shelters",
+      "strategy": "Direct Count",
+      "count_method": "direct_count",
+      "arguments": [
+        "Capacity"
+      ],
+      "component_count_fields": [],
+      "direct_contextual_count_fields": [
+        "Capacity"
+      ],
+      "regional_stat_fields": [],
+      "notes": "",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Institutions/Public Service",
+      "land_use_id": "institutions_public_service",
+      "facility_class": "Cemeteries - Urban",
+      "facility_class_id": "cemeteries_urban",
+      "facility_type": "Cemeteries - Urban",
+      "strategy": "Direct Count",
+      "count_method": "direct_count",
+      "arguments": [],
+      "component_count_fields": [],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [],
+      "notes": "",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Institutions/Public Service",
+      "land_use_id": "institutions_public_service",
+      "facility_class": "Cemeteries - Rural",
+      "facility_class_id": "cemeteries_rural",
+      "facility_type": "Cemeteries - Rural",
+      "strategy": "Direct Count",
+      "count_method": "direct_count",
+      "arguments": [],
+      "component_count_fields": [],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [],
+      "notes": "",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Retail and Service Outlets",
+      "land_use_id": "retail_service",
+      "facility_class": "Stores",
+      "facility_class_id": "stores",
+      "facility_type": "Stores",
+      "strategy": "Direct Count",
+      "count_method": "direct_count",
+      "arguments": [],
+      "component_count_fields": [],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [],
+      "notes": "",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Retail and Service Outlets",
+      "land_use_id": "retail_service",
+      "facility_class": "Restaurant",
+      "facility_class_id": "restaurant",
+      "facility_type": "Restaurant",
+      "strategy": "Direct Count",
+      "count_method": "direct_count",
+      "arguments": [],
+      "component_count_fields": [],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [],
+      "notes": "",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Retail and Service Outlets",
+      "land_use_id": "retail_service",
+      "facility_class": "Open Front Shop",
+      "facility_class_id": "open_front_shop",
+      "facility_type": "Open Front Shop",
+      "strategy": "Direct Count",
+      "count_method": "direct_count",
+      "arguments": [],
+      "component_count_fields": [],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [],
+      "notes": "",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Retail and Service Outlets",
+      "land_use_id": "retail_service",
+      "facility_class": "Public Market",
+      "facility_class_id": "public_market",
+      "facility_type": "Public Market",
+      "strategy": "Direct Count",
+      "count_method": "direct_count",
+      "arguments": [],
+      "component_count_fields": [],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [],
+      "notes": "",
+      "regional_country_level_stats_used": "NO"
+    },
+    {
+      "land_use": "Retail and Service Outlets",
+      "land_use_id": "retail_service",
+      "facility_class": "Kiosk",
+      "facility_class_id": "kiosk",
+      "facility_type": "Kiosk",
+      "strategy": "Direct Count",
+      "count_method": "direct_count",
+      "arguments": [],
+      "component_count_fields": [],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [],
+      "notes": "",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Retail and Service Outlets",
+      "land_use_id": "retail_service",
+      "facility_class": "Hotel/Motel",
+      "facility_class_id": "hotel_motel",
+      "facility_type": "Hotel/Motel",
+      "strategy": "Population Subcomponent Counts",
+      "count_method": "population_subcomponent",
+      "arguments": [
+        "Number of rooms",
+        "number of suites",
+        "hotel stars",
+        "average room size",
+        "average suite size"
+      ],
+      "component_count_fields": [
+        "Number of rooms",
+        "number of suites",
+        "hotel stars",
+        "average room size",
+        "average suite size"
+      ],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [
+        "Hotel Occupancy Rate"
+      ],
+      "notes": "",
+      "regional_country_level_stats_used": "Yes - Hotel Occupancy Rate"
+    },
+    {
+      "land_use": "Retail and Service Outlets",
+      "land_use_id": "retail_service",
+      "facility_class": "Filling Stations",
+      "facility_class_id": "filling_stations",
+      "facility_type": "Filling Stations",
+      "strategy": "Direct Count",
+      "count_method": "direct_count",
+      "arguments": [],
+      "component_count_fields": [],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [],
+      "notes": "",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Commercial",
+      "land_use_id": "commercial",
+      "facility_class": "Office Building",
+      "facility_class_id": "office_building",
+      "facility_type": "Office Building",
+      "strategy": "Population Subcomponent Counts",
+      "count_method": "population_subcomponent",
+      "arguments": [
+        "Employees",
+        "shifts"
+      ],
+      "component_count_fields": [
+        "Employees",
+        "shifts"
+      ],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [],
+      "notes": "Direct count if available",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Commercial",
+      "land_use_id": "commercial",
+      "facility_class": "Light Manufacturing",
+      "facility_class_id": "light_manufacturing",
+      "facility_type": "Light Manufacturing",
+      "strategy": "Population Subcomponent Counts",
+      "count_method": "population_subcomponent",
+      "arguments": [
+        "Employees",
+        "shifts"
+      ],
+      "component_count_fields": [
+        "Employees",
+        "shifts"
+      ],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [],
+      "notes": "Direct count if available",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Commercial",
+      "land_use_id": "commercial",
+      "facility_class": "Heavy Manufacturing",
+      "facility_class_id": "heavy_manufacturing",
+      "facility_type": "Heavy Manufacturing",
+      "strategy": "Population Subcomponent Counts",
+      "count_method": "population_subcomponent",
+      "arguments": [
+        "Employees",
+        "shifts"
+      ],
+      "component_count_fields": [
+        "Employees",
+        "shifts"
+      ],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [],
+      "notes": "Direct count if available",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Commercial",
+      "land_use_id": "commercial",
+      "facility_class": "Chemical, Refining, Cement",
+      "facility_class_id": "chemical_refining_cement",
+      "facility_type": "Chemical, Refining, Cement",
+      "strategy": "Population Subcomponent Counts",
+      "count_method": "population_subcomponent",
+      "arguments": [
+        "Employees",
+        "shifts"
+      ],
+      "component_count_fields": [
+        "Employees",
+        "shifts"
+      ],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [],
+      "notes": "Direct count if available",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Commercial",
+      "land_use_id": "commercial",
+      "facility_class": "Heat Processing",
+      "facility_class_id": "heat_processing",
+      "facility_type": "Heat Processing",
+      "strategy": "Population Subcomponent Counts",
+      "count_method": "population_subcomponent",
+      "arguments": [
+        "Employees",
+        "shifts"
+      ],
+      "component_count_fields": [
+        "Employees",
+        "shifts"
+      ],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [],
+      "notes": "Direct count if available",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Commercial",
+      "land_use_id": "commercial",
+      "facility_class": "Craftworks",
+      "facility_class_id": "craftworks",
+      "facility_type": "Craftworks",
+      "strategy": "Population Subcomponent Counts",
+      "count_method": "population_subcomponent",
+      "arguments": [
+        "Employees",
+        "shifts"
+      ],
+      "component_count_fields": [
+        "Employees",
+        "shifts"
+      ],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [],
+      "notes": "Direct count if available",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Commercial",
+      "land_use_id": "commercial",
+      "facility_class": "Powerplants",
+      "facility_class_id": "powerplants",
+      "facility_type": "Powerplants",
+      "strategy": "Population Subcomponent Counts",
+      "count_method": "population_subcomponent",
+      "arguments": [
+        "Employees",
+        "shifts"
+      ],
+      "component_count_fields": [
+        "Employees",
+        "shifts"
+      ],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [],
+      "notes": "Direct count if available",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Transportation",
+      "land_use_id": "transportation",
+      "facility_class": "Airports",
+      "facility_class_id": "airports",
+      "facility_type": "Airports",
+      "strategy": "Population Subcomponent Counts",
+      "count_method": "population_subcomponent",
+      "arguments": [
+        "Freight MT",
+        "annual visitors",
+        "employees",
+        "days open",
+        "average hours open"
+      ],
+      "component_count_fields": [
+        "Freight MT",
+        "annual visitors",
+        "employees",
+        "days open",
+        "average hours open"
+      ],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [
+        "Airport traffic unit to employee ration"
+      ],
+      "notes": "",
+      "regional_country_level_stats_used": "Yes - Airport traffic unit to employee ration"
+    },
+    {
+      "land_use": "Transportation",
+      "land_use_id": "transportation",
+      "facility_class": "Bus",
+      "facility_class_id": "bus",
+      "facility_type": "Bus",
+      "strategy": "Direct Count",
+      "count_method": "direct_count",
+      "arguments": [],
+      "component_count_fields": [],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [],
+      "notes": "Specifically refering to bus station/stop",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Transportation",
+      "land_use_id": "transportation",
+      "facility_class": "Train",
+      "facility_class_id": "train",
+      "facility_type": "Train",
+      "strategy": "Direct Count",
+      "count_method": "direct_count",
+      "arguments": [],
+      "component_count_fields": [],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [],
+      "notes": "Specifically refering to train station/stop",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Transportation",
+      "land_use_id": "transportation",
+      "facility_class": "Transportation Repair Facility",
+      "facility_class_id": "transportation_repair_facility",
+      "facility_type": "Transportation Repair Facility",
+      "strategy": "Direct Count",
+      "count_method": "direct_count",
+      "arguments": [],
+      "component_count_fields": [],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [],
+      "notes": "",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Transportation",
+      "land_use_id": "transportation",
+      "facility_class": "Warehouse",
+      "facility_class_id": "warehouse",
+      "facility_type": "Warehouse",
+      "strategy": "Direct Count",
+      "count_method": "direct_count",
+      "arguments": [],
+      "component_count_fields": [],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [],
+      "notes": "",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Transportation",
+      "land_use_id": "transportation",
+      "facility_class": "Port",
+      "facility_class_id": "port",
+      "facility_type": "Port",
+      "strategy": "Population Subcomponent Counts",
+      "count_method": "population_subcomponent",
+      "arguments": [
+        "Dock employees",
+        "ship employees",
+        "ship passengers",
+        "cranes",
+        "trains",
+        "trucks"
+      ],
+      "component_count_fields": [
+        "Dock employees",
+        "ship employees",
+        "ship passengers",
+        "cranes",
+        "trains",
+        "trucks"
+      ],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [],
+      "notes": "I would ignore ports for now, its an odd facility that Sarah has been working on",
+      "regional_country_level_stats_used": "Yes"
+    },
+    {
+      "land_use": "Military Facility",
+      "land_use_id": "military_facility",
+      "facility_class": "Barracks",
+      "facility_class_id": "barracks",
+      "facility_type": "Barracks",
+      "strategy": "Population Subcomponent Counts",
+      "count_method": "population_subcomponent",
+      "arguments": [],
+      "component_count_fields": [],
+      "direct_contextual_count_fields": [],
+      "regional_stat_fields": [],
+      "notes": "We typically never put in barracks, also would ignore for now",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Recreation/Entertainment",
+      "land_use_id": "recreation_entertainment",
+      "facility_class": "Indoor Recreation Center",
+      "facility_class_id": "indoor_recreation_center",
+      "facility_type": "Indoor Recreation Center",
+      "strategy": "Direct Count",
+      "count_method": "direct_count",
+      "arguments": [
+        "Annual visitors/daily visitors",
+        "staff",
+        "average visit time",
+        "hours open",
+        "days open"
+      ],
+      "component_count_fields": [],
+      "direct_contextual_count_fields": [
+        "Annual visitors/daily visitors",
+        "staff",
+        "average visit time",
+        "hours open",
+        "days open"
+      ],
+      "regional_stat_fields": [],
+      "notes": "",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Recreation/Entertainment",
+      "land_use_id": "recreation_entertainment",
+      "facility_class": "Theater",
+      "facility_class_id": "theater",
+      "facility_type": "Theater",
+      "strategy": "Direct Count",
+      "count_method": "direct_count",
+      "arguments": [
+        "Capacity"
+      ],
+      "component_count_fields": [],
+      "direct_contextual_count_fields": [
+        "Capacity"
+      ],
+      "regional_stat_fields": [],
+      "notes": "",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Recreation/Entertainment",
+      "land_use_id": "recreation_entertainment",
+      "facility_class": "Stadiums",
+      "facility_class_id": "stadiums",
+      "facility_type": "Stadiums",
+      "strategy": "Direct Count",
+      "count_method": "direct_count",
+      "arguments": [
+        "Capacity"
+      ],
+      "component_count_fields": [],
+      "direct_contextual_count_fields": [
+        "Capacity"
+      ],
+      "regional_stat_fields": [],
+      "notes": "",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Recreation/Entertainment",
+      "land_use_id": "recreation_entertainment",
+      "facility_class": "Outdoor Recreation Fields",
+      "facility_class_id": "outdoor_recreation_fields",
+      "facility_type": "Outdoor Recreation Fields",
+      "strategy": "Direct Count",
+      "count_method": "direct_count",
+      "arguments": [
+        "Annual visitors/daily visitors",
+        "staff",
+        "average visit time",
+        "hours open",
+        "days open"
+      ],
+      "component_count_fields": [],
+      "direct_contextual_count_fields": [
+        "Annual visitors/daily visitors",
+        "staff",
+        "average visit time",
+        "hours open",
+        "days open"
+      ],
+      "regional_stat_fields": [],
+      "notes": "",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Recreation/Entertainment",
+      "land_use_id": "recreation_entertainment",
+      "facility_class": "Night Club",
+      "facility_class_id": "night_club",
+      "facility_type": "Night Club",
+      "strategy": "Direct Count",
+      "count_method": "direct_count",
+      "arguments": [
+        "Capacity"
+      ],
+      "component_count_fields": [],
+      "direct_contextual_count_fields": [
+        "Capacity"
+      ],
+      "regional_stat_fields": [],
+      "notes": "",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Agriculture",
+      "land_use_id": "agriculture",
+      "facility_class": "Indoor Agriculture",
+      "facility_class_id": "indoor_agriculture",
+      "facility_type": "Indoor Agriculture",
+      "strategy": "Direct Count",
+      "count_method": "direct_count",
+      "arguments": [
+        "Employees"
+      ],
+      "component_count_fields": [],
+      "direct_contextual_count_fields": [
+        "Employees"
+      ],
+      "regional_stat_fields": [],
+      "notes": "",
+      "regional_country_level_stats_used": "No"
+    },
+    {
+      "land_use": "Agriculture",
+      "land_use_id": "agriculture",
+      "facility_class": "Outdoor Agriculture",
+      "facility_class_id": "outdoor_agriculture",
+      "facility_type": "Outdoor Agriculture",
+      "strategy": "Direct Count",
+      "count_method": "direct_count",
+      "arguments": [
+        "Employees",
+        "acres"
+      ],
+      "component_count_fields": [],
+      "direct_contextual_count_fields": [
+        "Employees",
+        "acres"
+      ],
+      "regional_stat_fields": [],
+      "notes": "",
+      "regional_country_level_stats_used": "No"
+    }
+  ]
+}

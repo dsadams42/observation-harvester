@@ -21,6 +21,9 @@ def test_manufacturing_plan_prioritizes_component_input_strategies() -> None:
     assert _ids("commercial", "light_manufacturing") == (
         "official_facility_statistics",
         "dataset_row_extraction",
+        "corporate_location_list_discovery",
+        "facility_universe_discovery",
+        "regional_component_allocation",
         "operational_schedule_factors",
     )
 
@@ -105,8 +108,10 @@ def test_strategy_queries_mix_component_evidence_pathways() -> None:
 
     assert '"Pittsburgh" United States steel mill official statistics' in queries
     assert any("dataset CSV" in query for query in queries)
+    assert any("company locations employees" in query for query in queries)
+    assert any("directory facilities" in query for query in queries)
+    assert any("regional employment allocation" in query for query in queries)
     assert any("shifts employees" in query for query in queries)
-    assert any("operating hours staff" in query for query in queries)
 
 
 def test_strategy_registry_preserves_semantics_and_representativeness() -> None:

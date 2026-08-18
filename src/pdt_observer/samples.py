@@ -35,6 +35,8 @@ from pdt_observer.models import (
     HarvestCampaignRunManifest,
     HarvestRunManifest,
     HarvestRunStatus,
+    LeadQaqcRecommendedAction,
+    LeadQaqcVerificationStatus,
     RecommendedGapFillJob,
     SampleSetManifest,
     SampleSetRound,
@@ -252,12 +254,59 @@ def _addressable_component_bundle_records_for_child(
     return tuple(records)
 
 
+def _approved_allocated_component_records_for_child(
+    root: Path,
+    manifest: HarvestRunManifest,
+) -> tuple[dict[str, Any], ...]:
+    qaqc_path = root / "qaqc_runs" / f"{manifest.run_id}-qaqc.json"
+    if not qaqc_path.is_file():
+        raise FileNotFoundError(f"QAQC review not found for run: {manifest.run_id}")
+    evidence_set = load_evidence_set(Path(manifest.lead_path))
+    review_set = load_qaqc_review_set(qaqc_path)
+    records: list[dict[str, Any]] = []
+    for review in review_set.allocated_component_reviews:
+        if review.lead_index >= len(evidence_set.allocated_component_leads):
+            continue
+        if review.verification_status != LeadQaqcVerificationStatus.VERIFIED:
+            continue
+        if review.recommended_action != LeadQaqcRecommendedAction.KEEP:
+            continue
+        if not review.counts_toward_target_approved:
+            continue
+        lead = evidence_set.allocated_component_leads[review.lead_index]
+        location = lead.facility_location
+        geocode_query = ", ".join(
+            value
+            for value in (
+                location.facility_name,
+                location.specific_address_or_landmark,
+                location.city_or_region,
+                location.country,
+            )
+            if value and value.casefold() != "unknown"
+        )
+        records.append(
+            {
+                "item_id": f"{manifest.run_id}-allocated-component-{review.lead_index}",
+                "child_run_id": manifest.run_id,
+                "lead_index": review.lead_index,
+                "facility_type": manifest.profile_set,
+                "geocode_query": geocode_query,
+                "allocated_component_lead": lead.model_dump(mode="json"),
+                "allocated_component_qaqc_review": review.model_dump(mode="json"),
+                "model_ready": True,
+            }
+        )
+    return tuple(records)
+
+
 def _reviewable_records_for_child(
     root: Path,
     manifest: HarvestRunManifest,
 ) -> tuple[dict[str, Any], ...]:
     records = tuple(approved_records_for_child(root, manifest))
     records += _addressable_component_bundle_records_for_child(root, manifest)
+    records += _approved_allocated_component_records_for_child(root, manifest)
     return tuple(merge_geometry_items(root, merge_address_results(root, records)))
 
 
@@ -375,6 +424,9 @@ def _record_location(record: dict[str, Any]) -> dict[str, Any]:
     bundle = record.get("component_bundle")
     if isinstance(bundle, dict) and isinstance(bundle.get("location"), dict):
         return dict(bundle["location"])
+    allocated = record.get("allocated_component_lead")
+    if isinstance(allocated, dict) and isinstance(allocated.get("facility_location"), dict):
+        return dict(allocated["facility_location"])
     address = record.get("address_enrichment")
     if isinstance(address, dict):
         return {
@@ -389,6 +441,13 @@ def _record_source_url(record: dict[str, Any]) -> str:
     lead = record.get("lead")
     if isinstance(lead, dict):
         return str(lead.get("source_url") or "")
+    allocated = record.get("allocated_component_lead")
+    if isinstance(allocated, dict):
+        return str(
+            allocated.get("facility_source_url")
+            or allocated.get("regional_source_url")
+            or ""
+        )
     for component_lead in record.get("component_leads", ()):
         if isinstance(component_lead, dict) and component_lead.get("source_url"):
             return str(component_lead["source_url"])

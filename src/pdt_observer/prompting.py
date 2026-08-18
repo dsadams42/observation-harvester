@@ -354,6 +354,11 @@ performance and prevent unlike observations from being treated as equivalent.
 - Treat metadata-only dataset pages, inaccessible downloads, and schemas without row values as
   context-only. When those are the best source family but no row value can be retrieved, record
   the source as examined and note that row-level component data was not retrieved.
+- When regional/country component data is found but facility examples are still needed, search
+  the same geography for named matching facilities and emit `allocated_component_leads` only when
+  both the regional value and facility existence are source-backed. Use only
+  `equal_weight_region_facility_count` in v1 and label the row as allocated, not source-backed
+  facility data.
 - Preserve an exact supporting quote or dataset row excerpt containing the count.
 - Preserve source time phrases in `observed_time_text` when present; normalize only supported
   clock times into `time_context`.

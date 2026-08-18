@@ -85,6 +85,10 @@ Review only:
 - Local facility vernacular not already represented by the aliases.
 - Local terms for census, enrollment, attendance, bed occupancy, staffing, hotel occupancy,
   visitor traffic, passenger traffic, and other component-statistic sources when relevant.
+- For commercial, industrial, retail, hospitality, manufacturing, logistics, and similar scopes,
+  major local or regional company players, corporate location-list pages, employer facility pages,
+  store locators, business registries, industrial park tenant lists, association directories, and
+  OSM/open-facility inventory terms that could help the Harvester find facility examples.
 - Locality-specific differences within the campaign scope, when relevant.
 - Short query adjustments that a later harvester can combine with its assigned evidence strategy.
 
@@ -115,6 +119,16 @@ Return exactly one JSON object with this schema and no Markdown:
   "facility_terms": [],
   "query_adjustments": ["short query adjustment"],
   "source_urls": ["https://source.example/context"],
+  "anchor_organization_hints": [
+    {{
+      "name": "Major company/operator name",
+      "reason": "Why this organization may expose relevant facility locations or staff counts",
+      "suggested_queries": ["company location query"]
+    }}
+  ],
+  "facility_universe_source_hints": [
+    "Registry, association directory, industrial park tenant list, store locator, or OSM tag idea"
+  ],
   "commentary": "I found ... so I adjusted ...",
   "rationale": "These changes should help because ..."
 }}
@@ -260,6 +274,15 @@ Additional facility terminology:
 
 Query adjustments:
 {_bullet_list(proposal.query_adjustments)}
+
+Anchor organization hints:
+{_bullet_list(tuple(
+    f"{item.name}: {item.reason}. Query ideas: {'; '.join(item.suggested_queries)}"
+    for item in proposal.anchor_organization_hints
+))}
+
+Facility-universe source hints:
+{_bullet_list(proposal.facility_universe_source_hints)}
 
 Preserve exact source quotations in their original language. If translating for review, keep the
 translation separate from the original evidence quote.

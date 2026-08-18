@@ -28,6 +28,7 @@ from starlette.responses import (
 )
 from starlette.routing import Route
 
+from pdt_observer.activity import load_harvester_activity_report
 from pdt_observer.addresses import (
     address_output_path,
     address_prompt_path,
@@ -113,12 +114,14 @@ from pdt_observer.harvest import (
 )
 from pdt_observer.jobs import create_job, job_payload, list_jobs, load_job
 from pdt_observer.leads import (
+    bundle_is_allocated_shadow,
     export_evidence_set,
     load_evidence_set,
     load_leads,
     load_qaqc_review_set,
     promote_lead_to_run,
     render_lead_qaqc_prompt,
+    summarize_evidence_set,
 )
 from pdt_observer.models import (
     AddressEnrichmentStatus,
@@ -1226,6 +1229,52 @@ def _approved_component_bundle_records_for_child(
     return tuple(records)
 
 
+def _approved_allocated_component_records_for_child(
+    root: Path,
+    manifest: HarvestRunManifest,
+) -> tuple[dict[str, Any], ...]:
+    qaqc_path = _qaqc_output_path(root, manifest.run_id)
+    if not qaqc_path.is_file():
+        raise FileNotFoundError(f"QAQC review not found for run: {manifest.run_id}")
+    evidence_set = load_evidence_set(Path(manifest.lead_path))
+    review_set = load_qaqc_review_set(qaqc_path)
+    records: list[dict[str, Any]] = []
+    for review in review_set.allocated_component_reviews:
+        if review.lead_index >= len(evidence_set.allocated_component_leads):
+            continue
+        if review.verification_status != LeadQaqcVerificationStatus.VERIFIED:
+            continue
+        if review.recommended_action != LeadQaqcRecommendedAction.KEEP:
+            continue
+        if not review.counts_toward_target_approved:
+            continue
+        lead = evidence_set.allocated_component_leads[review.lead_index]
+        location = lead.facility_location
+        geocode_query = ", ".join(
+            value
+            for value in (
+                location.facility_name,
+                location.specific_address_or_landmark,
+                location.city_or_region,
+                location.country,
+            )
+            if value and value.casefold() != "unknown"
+        )
+        records.append(
+            {
+                "item_id": f"{manifest.run_id}-allocated-component-{review.lead_index}",
+                "child_run_id": manifest.run_id,
+                "lead_index": review.lead_index,
+                "facility_type": manifest.profile_set,
+                "geocode_query": geocode_query,
+                "allocated_component_lead": lead.model_dump(mode="json"),
+                "allocated_component_qaqc_review": review.model_dump(mode="json"),
+                "model_ready": True,
+            }
+        )
+    return tuple(records)
+
+
 def _addressable_component_bundle_records_for_child(
     root: Path,
     manifest: HarvestRunManifest,
@@ -1313,6 +1362,17 @@ def _approved_component_bundle_records_for_manifest(
     for child_run_id in _manifest_child_run_ids(manifest):
         child_manifest = _load_run_manifest(root, child_run_id)
         records.extend(_approved_component_bundle_records_for_child(root, child_manifest))
+    return tuple(records)
+
+
+def _approved_allocated_component_records_for_manifest(
+    root: Path,
+    manifest: Any,
+) -> tuple[dict[str, Any], ...]:
+    records: list[dict[str, Any]] = []
+    for child_run_id in _manifest_child_run_ids(manifest):
+        child_manifest = _load_run_manifest(root, child_run_id)
+        records.extend(_approved_allocated_component_records_for_child(root, child_manifest))
     return tuple(records)
 
 
@@ -1455,6 +1515,16 @@ def _approved_component_records_for_manifest(
     return tuple(records)
 
 
+def _approved_component_export_records_for_manifest(
+    root: Path,
+    manifest: Any,
+) -> tuple[dict[str, Any], ...]:
+    return (
+        _approved_component_records_for_manifest(root, manifest)
+        + _approved_allocated_component_records_for_manifest(root, manifest)
+    )
+
+
 def _component_records_json(records: Sequence[dict[str, Any]]) -> str:
     return json.dumps(list(records), indent=2)
 
@@ -1466,10 +1536,13 @@ def _component_records_csv(records: Sequence[dict[str, Any]]) -> str:
         "child_run_id",
         "lead_index",
         "facility_type",
+        "evidence_role",
         "source_url",
         "source_title",
         "component_type",
         "value",
+        "allocated_value",
+        "regional_source_value",
         "unit",
         "time_basis",
         "geography_level",
@@ -1477,6 +1550,11 @@ def _component_records_csv(records: Sequence[dict[str, Any]]) -> str:
         "facility_name",
         "geography_name",
         "country",
+        "allocation_method",
+        "denominator_scope",
+        "facility_universe_count",
+        "allocation_confidence",
+        "allocation_notes",
         "qaqc_status",
         "recommended_action",
         "review_notes",
@@ -1484,6 +1562,41 @@ def _component_records_csv(records: Sequence[dict[str, Any]]) -> str:
     writer = csv.DictWriter(output, fieldnames=fieldnames)
     writer.writeheader()
     for record in records:
+        if "allocated_component_lead" in record:
+            lead = record["allocated_component_lead"]
+            review = record["allocated_component_qaqc_review"]
+            location = lead["facility_location"]
+            writer.writerow(
+                {
+                    "item_id": record["item_id"],
+                    "child_run_id": record["child_run_id"],
+                    "lead_index": record["lead_index"],
+                    "facility_type": record.get("facility_type", ""),
+                    "evidence_role": "allocated_component_input",
+                    "source_url": lead["regional_source_url"],
+                    "source_title": lead.get("regional_source_title", ""),
+                    "component_type": lead["component_type"],
+                    "value": lead["allocated_value"],
+                    "allocated_value": lead["allocated_value"],
+                    "regional_source_value": lead["regional_value"],
+                    "unit": lead["unit"],
+                    "time_basis": lead["time_basis"],
+                    "geography_level": "facility",
+                    "period_label": lead.get("period_label") or "",
+                    "facility_name": location["facility_name"],
+                    "geography_name": lead["regional_geography_name"],
+                    "country": lead["country"],
+                    "allocation_method": lead["allocation_method"],
+                    "denominator_scope": lead["denominator_scope"],
+                    "facility_universe_count": lead["facility_universe_count"],
+                    "allocation_confidence": lead["confidence"],
+                    "allocation_notes": lead["allocation_notes"],
+                    "qaqc_status": review["verification_status"],
+                    "recommended_action": review["recommended_action"],
+                    "review_notes": review.get("review_notes", ""),
+                }
+            )
+            continue
         lead = record["component_lead"]
         review = record["component_qaqc_review"]
         location = lead.get("location") or {}
@@ -1494,10 +1607,13 @@ def _component_records_csv(records: Sequence[dict[str, Any]]) -> str:
                     "child_run_id": record["child_run_id"],
                     "lead_index": record["lead_index"],
                     "facility_type": record.get("facility_type", ""),
+                    "evidence_role": "component_input",
                     "source_url": lead["source_url"],
                     "source_title": lead.get("source_title", ""),
                     "component_type": datum["component_type"],
                     "value": datum["value"],
+                    "allocated_value": "",
+                    "regional_source_value": "",
                     "unit": datum["unit"],
                     "time_basis": datum["time_basis"],
                     "geography_level": datum["geography_level"],
@@ -1505,6 +1621,11 @@ def _component_records_csv(records: Sequence[dict[str, Any]]) -> str:
                     "facility_name": location.get("facility_name", ""),
                     "geography_name": lead["geography_name"],
                     "country": lead["country"],
+                    "allocation_method": "",
+                    "denominator_scope": "",
+                    "facility_universe_count": "",
+                    "allocation_confidence": "",
+                    "allocation_notes": "",
                     "qaqc_status": review["verification_status"],
                     "recommended_action": review["recommended_action"],
                     "review_notes": review.get("review_notes", ""),
@@ -1823,12 +1944,117 @@ def _component_bundle_table_rows(
     return rows
 
 
+def _allocated_component_table_row(
+    *,
+    child_run_id: str,
+    child_manifest: HarvestRunManifest,
+    lead_index: int,
+    lead_payload: dict[str, Any],
+    review_payload: dict[str, Any] | None = None,
+    address_payload: dict[str, Any] | None = None,
+    sample_set_id: str = "",
+    sample_round: str | int = "",
+) -> dict[str, Any]:
+    location = lead_payload["facility_location"]
+    item_id = f"{child_run_id}-allocated-component-{lead_index}"
+    component_value = _format_component_table_value(
+        {
+            "component_type": lead_payload["component_type"],
+            "value": lead_payload["allocated_value"],
+            "unit": lead_payload["unit"],
+            "time_basis": lead_payload["time_basis"],
+            "geography_level": "facility",
+            "period_label": lead_payload.get("period_label"),
+        }
+    )
+    component_values = {lead_payload["component_type"]: component_value}
+    address = address_payload or {}
+    return {
+        "row_id": item_id,
+        "item_id": item_id,
+        "run_id": child_run_id,
+        "sample_set_id": sample_set_id,
+        "sample_round": sample_round,
+        "facility_type": child_manifest.profile_set,
+        "evidence_role": "allocated_component_input",
+        "lead_index": lead_index,
+        "count_index": "",
+        "facility_name": location["facility_name"],
+        "count": "",
+        "group_type": "",
+        "component_type": lead_payload["component_type"],
+        "component_values": component_values,
+        "value": f"{lead_payload['component_type']}: {component_value}",
+        "allocated_value": lead_payload["allocated_value"],
+        "regional_source_value": lead_payload["regional_value"],
+        "allocation_method": lead_payload["allocation_method"],
+        "denominator_scope": lead_payload["denominator_scope"],
+        "facility_universe_count": lead_payload["facility_universe_count"],
+        "allocation_confidence": lead_payload["confidence"],
+        "allocation_notes": lead_payload["allocation_notes"],
+        "unit": lead_payload["unit"],
+        "time_basis": lead_payload["time_basis"],
+        "geography_level": "facility",
+        "incident_date": "",
+        "incident_time": "",
+        "strategy_id": lead_payload.get("strategy_id") or "",
+        "representativeness": lead_payload.get("representativeness") or "",
+        "confidence": lead_payload.get("confidence") or "",
+        "city_or_region": location["city_or_region"],
+        "country": location["country"],
+        "source_url": lead_payload["regional_source_url"],
+        "source_urls": "; ".join(
+            (lead_payload["regional_source_url"], lead_payload["facility_source_url"])
+        ),
+        "source_count": 2,
+        "qaqc_status": review_payload.get("verification_status", "") if review_payload else "",
+        "recommended_action": (
+            review_payload.get("recommended_action", "") if review_payload else ""
+        ),
+        "address_status": str(address.get("status") or "not_run"),
+        "enriched_address": (
+            address.get("formatted_address")
+            or location.get("specific_address_or_landmark")
+            or ""
+        ),
+        "geometry_status": "not_applicable",
+        "area_m2": "",
+        "review_notes": (
+            review_payload.get("review_notes", "")
+            if review_payload
+            else lead_payload.get("review_notes") or lead_payload["allocation_notes"]
+        ),
+        "component_bundle_status": "",
+        "counts_toward_target": lead_payload.get("counts_toward_target", False),
+        "bundle_readiness": "",
+        "model_ready": bool(
+            review_payload
+            and review_payload.get("verification_status") == "verified"
+            and review_payload.get("recommended_action") == "keep"
+            and review_payload.get("counts_toward_target_approved")
+        ),
+        "bundle_review_required": False,
+        "missing_component_types": "",
+        "excluded_from_dataset": False,
+        "exclusion_reason_code": "",
+        "exclusion_reason_note": "",
+    }
+
+
 def _geometry_items_payload(root: Path, manifest: Any) -> dict[str, Any]:
     records = merge_address_results(root, _approved_records_for_manifest(root, manifest))
     bundle_records = merge_address_results(
         root, _addressable_component_bundle_records_for_manifest(root, manifest)
     )
-    items = tuple(merge_geometry_items(root, tuple(records) + tuple(bundle_records)))
+    allocated_records = merge_address_results(
+        root, _approved_allocated_component_records_for_manifest(root, manifest)
+    )
+    items = tuple(
+        merge_geometry_items(
+            root,
+            tuple(records) + tuple(bundle_records) + tuple(allocated_records),
+        )
+    )
     return {"item_count": len(items), "items": items}
 
 
@@ -1836,7 +2062,9 @@ def _geometry_record_context(
     root: Path,
     item_id: str,
 ) -> tuple[HarvestRunManifest, dict[str, Any]]:
-    if "-component-bundle-" in item_id:
+    if "-allocated-component-" in item_id:
+        child_run_id = item_id.split("-allocated-component-", 1)[0]
+    elif "-component-bundle-" in item_id:
         child_run_id = item_id.split("-component-bundle-", 1)[0]
     else:
         child_run_id, _ = item_id.rsplit("-", 1)
@@ -1938,6 +2166,25 @@ def _geocode_context(
                     location.get("facility_name") or bundle.get("geography_name"),
                     location.get("city_or_region"),
                     location.get("country") or bundle.get("country"),
+                )
+            )
+    allocated = record.get("allocated_component_lead")
+    if isinstance(allocated, dict):
+        location = allocated.get("facility_location")
+        if isinstance(location, dict):
+            add_query(
+                join_parts(
+                    location.get("facility_name"),
+                    location.get("specific_address_or_landmark"),
+                    location.get("city_or_region"),
+                    location.get("country") or allocated.get("country"),
+                )
+            )
+            add_query(
+                join_parts(
+                    location.get("facility_name"),
+                    location.get("city_or_region"),
+                    location.get("country") or allocated.get("country"),
                 )
             )
     return manifest, tuple(queries)
@@ -2217,7 +2464,7 @@ def _workflow_stage(
         "indeterminate": indeterminate,
         "display_mode": display_mode,
         "alert_message": alert_message if alert_message is not None else (
-            detail if status == "attention" else None
+            detail if status in {"attention", "failed"} else None
         ),
     }
 
@@ -2266,6 +2513,51 @@ def _activity_report_text(manifest: HarvestRunManifest) -> str:
 
     collect(payload)
     return " ".join(chunks).casefold()
+
+
+def _harvester_activity_alert_summary(manifest: HarvestRunManifest) -> str:
+    if manifest.activity_path is None:
+        return ""
+    path = Path(manifest.activity_path)
+    if not path.is_file():
+        return ""
+    try:
+        report = load_harvester_activity_report(path)
+    except (OSError, ValueError, ValidationError):
+        return ""
+
+    parts = [f"Agent report: {report.overall_summary}"]
+    unproductive = [
+        item
+        for item in report.strategy_activity
+        if item.accepted_lead_count == 0 or item.outcome.value != "productive"
+    ]
+    if unproductive:
+        outcomes = "; ".join(
+            f"{item.strategy_id.value}: {item.outcome.value} ({item.accepted_lead_count})"
+            for item in unproductive[:3]
+        )
+        parts.append(f"Limited pathways: {outcomes}.")
+    blocker_notes = [
+        note
+        for note in report.rejected_or_context_notes
+        if any(
+            marker in note.casefold()
+            for marker in (
+                "not retrieved",
+                "not found",
+                "missing",
+                "context",
+                "not visible",
+                "did not expose",
+            )
+        )
+    ] or list(report.rejected_or_context_notes[:2])
+    if blocker_notes:
+        parts.append("Blockers: " + " ".join(blocker_notes[:2]))
+    if report.follow_up_suggestions:
+        parts.append("Suggested next: " + " ".join(report.follow_up_suggestions[:2]))
+    return " ".join(parts)
 
 
 def _has_dataset_row_extraction_gap(manifest: HarvestRunManifest) -> bool:
@@ -2386,14 +2678,42 @@ def _workflow_status_payload(
     )
     failed_jobs = finished_jobs - successful_jobs
     observation_count = 0
+    source_backed_facility_row_count = 0
+    allocated_facility_row_count = 0
+    regional_support_row_count = 0
     for child in initial_manifests:
+        if child.validation_valid and Path(child.lead_path).is_file():
+            try:
+                fresh_summary = summarize_evidence_set(
+                    load_evidence_set(Path(child.lead_path))
+                )
+            except (OSError, ValueError, ValidationError):
+                observation_count += len(load_leads(Path(child.lead_path)))
+                continue
+            source_backed_facility_row_count += _summary_int(
+                fresh_summary, "source_backed_facility_rows"
+            )
+            allocated_facility_row_count += _summary_int(
+                fresh_summary, "allocated_facility_rows"
+            )
+            regional_support_row_count += _summary_int(
+                fresh_summary, "regional_support_rows"
+            )
+            observation_count += _summary_int(fresh_summary, "budget_observation_count")
+            continue
         if child.summary is not None:
+            source_backed_facility_row_count += _summary_int(
+                child.summary, "source_backed_facility_rows"
+            )
+            allocated_facility_row_count += _summary_int(
+                child.summary, "allocated_facility_rows"
+            )
+            regional_support_row_count += _summary_int(
+                child.summary, "regional_support_rows"
+            )
             budget_count = child.summary.get("budget_observation_count")
             if isinstance(budget_count, int):
                 observation_count += budget_count
-                continue
-        if child.validation_valid and Path(child.lead_path).is_file():
-            observation_count += len(load_leads(Path(child.lead_path)))
     lead_quota = planned_jobs * target_per_job
     harvest_running = active and finished_jobs < planned_jobs
     if harvest_running:
@@ -2419,6 +2739,40 @@ def _workflow_status_payload(
             f"{dataset_row_gap_count} run(s); inspect the Harvester activity report for the "
             "dataset/API/manual extraction path."
         )
+    harvest_alert_message = None
+    if harvest_status == "attention":
+        alert_parts: list[str] = []
+        if failed_jobs:
+            alert_parts.append(
+                f"{failed_jobs} of {planned_jobs} harvest job(s) failed or were cancelled."
+            )
+        if observation_count < lead_quota:
+            if source_backed_facility_row_count or allocated_facility_row_count:
+                alert_parts.append(
+                    f"Harvest stopped under target: {observation_count}/{lead_quota} "
+                    f"facility row(s). Assembled {source_backed_facility_row_count} "
+                    f"source-backed and {allocated_facility_row_count} allocated row(s); "
+                    f"{regional_support_row_count} regional support row(s) do not count "
+                    "unless converted into facility observations."
+                )
+            else:
+                alert_parts.append(
+                    f"Harvest stopped under target: {observation_count}/{lead_quota} "
+                    "countable observation(s)."
+                )
+        if dataset_row_gap_count:
+            alert_parts.append(
+                "No row-level component data was retrieved from dataset sources for "
+                f"{dataset_row_gap_count} run(s)."
+            )
+        activity_summaries = [
+            activity_summary
+            for child in initial_manifests
+            if (activity_summary := _harvester_activity_alert_summary(child))
+        ]
+        if activity_summaries:
+            alert_parts.append(activity_summaries[0])
+        harvest_alert_message = " ".join(alert_parts) or harvest_detail
 
     all_lead_count = 0
     review_count = 0
@@ -2426,6 +2780,9 @@ def _workflow_status_payload(
     target_review_count = 0
     verified_count = 0
     direct_verified_count = 0
+    allocated_component_evidence_count = 0
+    allocated_component_review_count = 0
+    allocated_component_verified_count = 0
     supporting_component_evidence_count = 0
     supporting_component_review_count = 0
     supporting_component_verified_count = 0
@@ -2445,13 +2802,25 @@ def _workflow_status_payload(
             and Path(child_manifest.lead_path).is_file()
         ):
             evidence_set = load_evidence_set(Path(child_manifest.lead_path))
-            all_lead_count += len(evidence_set.occupancy_leads) + len(
-                evidence_set.component_leads
-            ) + len(evidence_set.component_bundles)
+            all_lead_count += (
+                len(evidence_set.occupancy_leads)
+                + len(evidence_set.component_leads)
+                + len(evidence_set.component_bundles)
+                + len(evidence_set.allocated_component_leads)
+            )
+            allocated_component_evidence_count += len(
+                evidence_set.allocated_component_leads
+            )
+            countable_allocated_indexes = {
+                index
+                for index, lead in enumerate(evidence_set.allocated_component_leads)
+                if lead.counts_toward_target and lead.is_valid_allocated_component_report
+            }
             countable_bundle_indexes = {
                 index
                 for index, bundle in enumerate(evidence_set.component_bundles)
                 if bundle.counts_toward_target
+                and not bundle_is_allocated_shadow(bundle)
             }
             target_component_source_indexes = {
                 source_index
@@ -2461,17 +2830,22 @@ def _workflow_status_payload(
                 if 0 <= source_index < len(evidence_set.component_leads)
             }
             if evidence_set.component_bundles:
-                target_observation_count += len(evidence_set.occupancy_leads) + len(
-                    countable_bundle_indexes
+                target_observation_count += (
+                    len(evidence_set.occupancy_leads)
+                    + len(countable_bundle_indexes)
+                    + len(countable_allocated_indexes)
                 )
                 supporting_component_evidence_count += len(target_component_source_indexes)
             else:
-                target_observation_count += len(evidence_set.occupancy_leads) + len(
-                    evidence_set.component_leads
+                target_observation_count += (
+                    len(evidence_set.occupancy_leads)
+                    + len(evidence_set.component_leads)
+                    + len(countable_allocated_indexes)
                 )
         else:
             evidence_set = None
             countable_bundle_indexes = set()
+            countable_allocated_indexes = set()
             target_component_source_indexes = set()
         qaqc_path = _qaqc_output_path(root, child_run_id)
         if qaqc_path.is_file():
@@ -2479,24 +2853,39 @@ def _workflow_status_payload(
             reviews = review_set.occupancy_reviews
             component_reviews = review_set.component_reviews
             component_bundle_reviews = review_set.component_bundle_reviews
+            allocated_component_reviews = review_set.allocated_component_reviews
             review_count += len(reviews) + len(component_reviews) + len(
                 component_bundle_reviews
-            )
+            ) + len(allocated_component_reviews)
+            allocated_component_review_count += len(allocated_component_reviews)
             has_bundle_reviews = bool(component_bundle_reviews)
+            target_allocated_reviews = tuple(
+                review
+                for review in allocated_component_reviews
+                if review.lead_index in countable_allocated_indexes
+            )
             if has_bundle_reviews:
                 target_bundle_reviews = tuple(
                     review
                     for review in component_bundle_reviews
                     if review.bundle_index in countable_bundle_indexes
                 )
-                target_review_count += len(reviews) + len(target_bundle_reviews)
+                target_review_count += (
+                    len(reviews)
+                    + len(target_bundle_reviews)
+                    + len(target_allocated_reviews)
+                )
                 supporting_component_review_count += sum(
                     review.lead_index in target_component_source_indexes
                     for review in component_reviews
                 )
             else:
                 target_bundle_reviews = ()
-                target_review_count += len(reviews) + len(component_reviews)
+                target_review_count += (
+                    len(reviews)
+                    + len(component_reviews)
+                    + len(target_allocated_reviews)
+                )
             direct_keep_count = sum(
                 review.verification_status.value == "verified"
                 and review.recommended_action.value == "keep"
@@ -2509,6 +2898,10 @@ def _workflow_status_payload(
             )
             supporting_component_verified_count += sum(
                 review.verification_status == LeadQaqcVerificationStatus.VERIFIED
+                and (
+                    not has_bundle_reviews
+                    or review.lead_index in target_component_source_indexes
+                )
                 for review in component_reviews
             )
             bundle_keep_count = sum(
@@ -2516,6 +2909,12 @@ def _workflow_status_payload(
                 and review.recommended_action == LeadQaqcRecommendedAction.KEEP
                 and review.counts_toward_target_approved
                 for review in component_bundle_reviews
+            )
+            allocated_keep_count = sum(
+                review.verification_status == LeadQaqcVerificationStatus.VERIFIED
+                and review.recommended_action == LeadQaqcRecommendedAction.KEEP
+                and review.counts_toward_target_approved
+                for review in allocated_component_reviews
             )
             partial_bundle_count = 0
             held_bundle_count = 0
@@ -2544,11 +2943,14 @@ def _workflow_status_payload(
             else:
                 held_bundle_count = len(component_bundle_reviews) - bundle_keep_count
             approved_component_bundle_count += bundle_keep_count
+            allocated_component_verified_count += allocated_keep_count
             partial_component_bundle_count += partial_bundle_count
             held_component_bundle_count += held_bundle_count
             direct_verified_count += direct_keep_count
-            verified_count += direct_keep_count + (
-                bundle_keep_count if has_bundle_reviews else component_keep_count
+            verified_count += (
+                direct_keep_count
+                + (bundle_keep_count if has_bundle_reviews else component_keep_count)
+                + allocated_keep_count
             )
             target_rejected_count += sum(
                 review.recommended_action.value in {"reject", "retry"}
@@ -2567,6 +2969,11 @@ def _workflow_status_payload(
                     or review.verification_status.value != "verified"
                     for review in component_reviews
                 )
+            ) + sum(
+                review.recommended_action.value in {"reject", "retry"}
+                or review.verification_status.value != "verified"
+                or not review.counts_toward_target_approved
+                for review in target_allocated_reviews
             )
             rejected_count += sum(
                 review.recommended_action.value in {"reject", "retry"}
@@ -2581,6 +2988,11 @@ def _workflow_status_payload(
                 or review.verification_status.value != "verified"
                 or not review.counts_toward_target_approved
                 for review in component_bundle_reviews
+            ) + sum(
+                review.recommended_action.value in {"reject", "retry"}
+                or review.verification_status.value != "verified"
+                or not review.counts_toward_target_approved
+                for review in allocated_component_reviews
             )
             if child_manifest is not None:
                 address_target_count += len(
@@ -2614,6 +3026,23 @@ def _workflow_status_payload(
         supporting_component_evidence_count - supporting_component_review_count,
         0,
     )
+    facility_row_summary = (
+        f"{observation_count}/{lead_quota} facility row(s) assembled"
+        if lead_quota
+        else f"{observation_count} facility row(s) assembled"
+    )
+    if source_backed_facility_row_count or allocated_facility_row_count:
+        facility_row_summary += (
+            f": {source_backed_facility_row_count} source-backed, "
+            f"{allocated_facility_row_count} allocated"
+        )
+        if regional_support_row_count:
+            facility_row_summary += f"; {regional_support_row_count} regional support row(s)"
+        facility_row_summary += "."
+        harvest_detail = (
+            f"{successful_jobs}/{planned_jobs} jobs completed successfully; "
+            f"{failed_jobs} failed or cancelled; {facility_row_summary}"
+        )
 
     if address_target_count > 0 and address_count >= address_target_count:
         address_status = "complete"
@@ -2827,9 +3256,13 @@ def _workflow_status_payload(
                 "failed_jobs": failed_jobs,
                 "lead_count": observation_count,
                 "lead_quota": lead_quota,
+                "source_backed_facility_row_count": source_backed_facility_row_count,
+                "allocated_facility_row_count": allocated_facility_row_count,
+                "regional_support_row_count": regional_support_row_count,
                 "dataset_row_gap_count": dataset_row_gap_count,
                 "dataset_row_gap_run_ids": dataset_row_gap_run_ids,
             },
+            alert_message=harvest_alert_message,
             indeterminate=harvest_running,
             display_mode="progress",
         ),
@@ -2844,6 +3277,12 @@ def _workflow_status_payload(
                 f"reviewed; {verified_count} approved; "
                 f"{target_needs_review_count} need human review; "
                 f"{target_rejected_count} not approved."
+                + (
+                    f" {allocated_component_review_count} allocated row(s) checked; "
+                    f"{allocated_component_verified_count} approved."
+                    if allocated_component_review_count
+                    else ""
+                )
                 + (
                     f" {supporting_component_review_count} supporting component evidence "
                     f"record(s) checked; {supporting_component_verified_count} verified."
@@ -2869,6 +3308,9 @@ def _workflow_status_payload(
                 "supporting_component_review_count": supporting_component_review_count,
                 "supporting_component_verified_count": supporting_component_verified_count,
                 "supporting_component_unreviewed_count": supporting_component_unreviewed_count,
+                "allocated_component_evidence_count": allocated_component_evidence_count,
+                "allocated_component_review_count": allocated_component_review_count,
+                "allocated_component_verified_count": allocated_component_verified_count,
                 "verified_count": verified_count,
                 "direct_verified_count": direct_verified_count,
                 "rejected_count": rejected_count,
@@ -2889,21 +3331,33 @@ def _workflow_status_payload(
                     f"{address_count}/{address_target_count} addressable target(s) "
                     f"processed; {address_found_count} addresses found. "
                     f"{approved_component_bundle_count} model-ready bundle(s), "
+                    f"{allocated_component_verified_count} allocated component row(s), "
                     f"{partial_component_bundle_count} partial candidate bundle(s), and "
                     f"{held_component_bundle_count} held bundle(s)."
                 )
                 if address_target_count
                 else (
-                    "No addressable targets exist. "
-                    f"{held_component_bundle_count} component bundle(s) are held because they "
-                    "lack a specific facility identity or useful source-backed population "
-                    "component."
+                    (
+                        "No addressable targets are approved yet. "
+                        f"{allocated_component_review_count} allocated component row(s) "
+                        "were reviewed, but QAQC did not approve them for target counting; "
+                        "check allocation denominator and math notes."
+                    )
+                    if allocated_component_review_count
+                    and not allocated_component_verified_count
+                    else (
+                        "No addressable targets exist. "
+                        f"{held_component_bundle_count} component bundle(s) are held because "
+                        "they lack a specific facility identity or useful source-backed "
+                        "population component."
+                    )
                 )
             ),
             metrics={
                 "target_count": address_target_count,
                 "found_count": address_found_count,
                 "approved_component_bundle_count": approved_component_bundle_count,
+                "allocated_component_verified_count": allocated_component_verified_count,
                 "partial_component_bundle_count": partial_component_bundle_count,
                 "held_component_bundle_count": held_component_bundle_count,
             },
@@ -3161,7 +3615,11 @@ def _sample_component_export_response(
                 round_by_child[child_run_id] = sample_round.round_number
         for child_run_id in sample_set.combined_child_run_ids:
             manifest = _load_run_manifest(root, child_run_id)
-            for record in _approved_component_records_for_child(root, manifest):
+            child_records = (
+                _approved_component_records_for_child(root, manifest)
+                + _approved_allocated_component_records_for_child(root, manifest)
+            )
+            for record in child_records:
                 payload = dict(record)
                 payload["sample_set_id"] = sample_set.sample_set_id
                 payload["sample_round"] = round_by_child.get(child_run_id, "")
@@ -3333,7 +3791,7 @@ def _admin_scoped_export_response(root: Path, run_id: str, *, output_format: str
 def _component_export_response(root: Path, run_id: str, *, output_format: str) -> Response:
     try:
         manifest = _load_any_manifest(root, run_id)
-        records = _approved_component_records_for_manifest(root, manifest)
+        records = _approved_component_export_records_for_manifest(root, manifest)
     except FileNotFoundError as exc:
         return _json_error(str(exc), status_code=409)
     except ValueError as exc:
@@ -3486,6 +3944,33 @@ def _all_lead_table_rows(root: Path, manifest: Any) -> list[dict[str, Any]]:
                 evidence_set=evidence_set,
             )
         )
+        allocated_reviews: dict[int, dict[str, Any]] = {}
+        qaqc_path = _qaqc_output_path(root, child_run_id)
+        if qaqc_path.is_file():
+            review_set = load_qaqc_review_set(qaqc_path)
+            allocated_reviews = {
+                review.lead_index: review.model_dump(mode="json")
+                for review in review_set.allocated_component_reviews
+            }
+        address_by_item_id: dict[str, dict[str, Any]] = {}
+        address_path = address_output_path(root, child_run_id)
+        if address_path.is_file():
+            address_by_item_id = {
+                result.item_id: result.model_dump(mode="json")
+                for result in load_address_results(address_path)
+            }
+        for lead_index, allocated_lead in enumerate(evidence_set.allocated_component_leads):
+            item_id = f"{child_run_id}-allocated-component-{lead_index}"
+            rows.append(
+                _allocated_component_table_row(
+                    child_run_id=child_run_id,
+                    child_manifest=child_manifest,
+                    lead_index=lead_index,
+                    lead_payload=allocated_lead.model_dump(mode="json"),
+                    review_payload=allocated_reviews.get(lead_index),
+                    address_payload=address_by_item_id.get(item_id),
+                )
+            )
     return rows
 
 
@@ -3699,6 +4184,31 @@ def _table_rows_from_component_bundle_records(
     return rows
 
 
+def _table_rows_from_allocated_component_records(
+    root: Path,
+    records: Sequence[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for record in records:
+        manifest = _load_run_manifest(root, str(record["child_run_id"]))
+        address = record.get("address_enrichment")
+        rows.append(
+            _allocated_component_table_row(
+                child_run_id=str(record["child_run_id"]),
+                child_manifest=manifest,
+                lead_index=int(record["lead_index"]),
+                lead_payload=record["allocated_component_lead"],
+                review_payload=record.get("allocated_component_qaqc_review"),
+                address_payload=address if isinstance(address, dict) else None,
+                sample_set_id=str(record.get("sample_set_id", "")),
+                sample_round=record.get("sample_round", ""),
+            )
+        )
+        rows[-1]["geometry_status"] = record.get("geometry_status", "not_applicable")
+        rows[-1]["area_m2"] = record.get("area_m2") or ""
+    return rows
+
+
 def _run_table_payload(root: Path, run_id: str, *, mode: str) -> dict[str, Any]:
     manifest = _load_any_manifest(root, run_id)
     if mode == "all":
@@ -3716,6 +4226,10 @@ def _run_table_payload(root: Path, run_id: str, *, mode: str) -> dict[str, Any]:
                 root, _approved_component_records_for_manifest(root, manifest)
             )
             rows.extend(_table_rows_from_component_records(component_records))
+        allocated_records = merge_address_results(
+            root, _approved_allocated_component_records_for_manifest(root, manifest)
+        )
+        rows.extend(_table_rows_from_allocated_component_records(root, allocated_records))
     else:
         raise ValueError(f"unsupported table mode: {mode}")
     return {
@@ -3738,8 +4252,14 @@ def _sample_table_payload(root: Path, sample_set_id: str, *, mode: str) -> dict[
     component_bundle_records = tuple(
         record for record in records if "component_bundle" in record
     )
+    allocated_component_records = tuple(
+        record for record in records if "allocated_component_lead" in record
+    )
     rows = _table_rows_from_records(direct_records)
     rows.extend(_table_rows_from_component_bundle_records(component_bundle_records))
+    rows.extend(
+        _table_rows_from_allocated_component_records(root, allocated_component_records)
+    )
     for row in rows:
         decision = decisions.get(str(row["item_id"]))
         if decision is None:

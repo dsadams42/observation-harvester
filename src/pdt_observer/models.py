@@ -50,6 +50,9 @@ class EvidenceStrategyType(StrEnum):
     RESEARCH_MEASURED_OCCUPANCY = "research_measured_occupancy"
     OFFICIAL_FACILITY_STATISTICS = "official_facility_statistics"
     DATASET_ROW_EXTRACTION = "dataset_row_extraction"
+    CORPORATE_LOCATION_LIST_DISCOVERY = "corporate_location_list_discovery"
+    FACILITY_UNIVERSE_DISCOVERY = "facility_universe_discovery"
+    REGIONAL_COMPONENT_ALLOCATION = "regional_component_allocation"
     REGIONAL_DEMOGRAPHIC_STATISTICS = "regional_demographic_statistics"
     OPERATIONAL_SCHEDULE_FACTORS = "operational_schedule_factors"
     VISITOR_TRAFFIC_VOLUME = "visitor_traffic_volume"
@@ -64,6 +67,7 @@ class CountMethod(StrEnum):
 class EvidenceRole(StrEnum):
     DIRECT_OCCUPANCY = "direct_occupancy"
     COMPONENT_INPUT = "component_input"
+    ALLOCATED_COMPONENT_INPUT = "allocated_component_input"
 
 
 class GeographyLevel(StrEnum):
@@ -92,6 +96,10 @@ class ComponentBundleStatus(StrEnum):
     MOSTLY_COMPLETE = "mostly_complete"
     PARTIAL = "partial"
     SEED_ONLY = "seed_only"
+
+
+class AllocationMethod(StrEnum):
+    EQUAL_WEIGHT_REGION_FACILITY_COUNT = "equal_weight_region_facility_count"
 
 
 class SourceType(StrEnum):
@@ -469,11 +477,72 @@ class ComponentFacilityBundle(StrictModel):
         return self
 
 
+class AllocatedPopulationComponentLead(StrictModel):
+    evidence_role: EvidenceRole = EvidenceRole.ALLOCATED_COMPONENT_INPUT
+    is_valid_allocated_component_report: bool
+    facility_location: LeadLocation
+    facility_source_url: str = Field(min_length=1)
+    facility_source_title: str = ""
+    facility_source_type: SourceType = SourceType.UNKNOWN
+    facility_evidence_quote: str = Field(min_length=1)
+    regional_source_url: str = Field(min_length=1)
+    regional_source_title: str = ""
+    regional_source_type: SourceType = SourceType.UNKNOWN
+    regional_evidence_quote: str = Field(min_length=1)
+    regional_geography_name: str = Field(min_length=1)
+    regional_geography_level: GeographyLevel = GeographyLevel.REGION
+    component_type: str = Field(min_length=1)
+    regional_value: float = Field(gt=0)
+    allocated_value: float = Field(ge=0)
+    unit: str = Field(min_length=1)
+    time_basis: TimeBasis = TimeBasis.UNKNOWN
+    period_label: str | None = None
+    facility_universe_count: int = Field(gt=0)
+    denominator_scope: str = Field(min_length=1)
+    allocation_method: AllocationMethod = AllocationMethod.EQUAL_WEIGHT_REGION_FACILITY_COUNT
+    country: str = Field(min_length=2)
+    counts_toward_target: bool = False
+    confidence: LeadConfidence = LeadConfidence.UNKNOWN
+    review_flags: tuple[str, ...] = ()
+    review_notes: str | None = None
+    strategy_id: EvidenceStrategyType | None = None
+    count_semantics: str | None = None
+    representativeness: str | None = None
+    allocation_notes: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def allocated_component_must_be_transparent(self) -> Self:
+        if self.evidence_role != EvidenceRole.ALLOCATED_COMPONENT_INPUT:
+            raise ValueError("allocated component evidence_role must be allocated_component_input")
+        if self.regional_geography_level == GeographyLevel.FACILITY:
+            raise ValueError("allocated component regional geography cannot be facility-level")
+        if self.allocation_method == AllocationMethod.EQUAL_WEIGHT_REGION_FACILITY_COUNT:
+            expected = self.regional_value / self.facility_universe_count
+            tolerance = max(0.01, abs(expected) * 0.01)
+            if abs(self.allocated_value - expected) > tolerance:
+                raise ValueError(
+                    "allocated_value must equal regional_value / facility_universe_count "
+                    "within 1% for equal-weight allocation"
+                )
+        if self.counts_toward_target and not (
+            self.is_valid_allocated_component_report
+            and self.facility_evidence_quote.strip()
+            and self.regional_evidence_quote.strip()
+            and self.denominator_scope.strip()
+        ):
+            raise ValueError(
+                "allocated component can count toward target only with valid regional source, "
+                "facility source, denominator, and allocation notes"
+            )
+        return self
+
+
 class HarvestEvidenceSet(StrictModel):
     schema_version: int = Field(default=1, ge=1)
     occupancy_leads: tuple[OccupancyLead, ...] = ()
     component_leads: tuple[PopulationComponentLead, ...] = ()
     component_bundles: tuple[ComponentFacilityBundle, ...] = ()
+    allocated_component_leads: tuple[AllocatedPopulationComponentLead, ...] = ()
 
 
 class LeadQaqcCountCheck(StrictModel):
@@ -546,11 +615,32 @@ class ComponentBundleQaqcReview(StrictModel):
     review_notes: str = Field(min_length=1)
 
 
+class AllocatedComponentQaqcReview(StrictModel):
+    lead_index: int = Field(ge=0)
+    item_id: str = Field(min_length=1)
+    verification_status: LeadQaqcVerificationStatus
+    regional_source_reachable: bool
+    facility_source_reachable: bool
+    evidence_role_match: bool
+    regional_value_match: bool
+    regional_geography_match: bool
+    facility_location_match: bool
+    facility_type_match: bool | None = None
+    denominator_match: bool
+    allocation_method_match: bool
+    allocation_math_match: bool
+    counts_toward_target_approved: bool
+    supporting_quote: str | None = None
+    recommended_action: LeadQaqcRecommendedAction
+    review_notes: str = Field(min_length=1)
+
+
 class HarvestQaqcReviewSet(StrictModel):
     schema_version: int = Field(default=1, ge=1)
     occupancy_reviews: tuple[LeadQaqcReview, ...] = ()
     component_reviews: tuple[ComponentQaqcReview, ...] = ()
     component_bundle_reviews: tuple[ComponentBundleQaqcReview, ...] = ()
+    allocated_component_reviews: tuple[AllocatedComponentQaqcReview, ...] = ()
 
 
 class AddressEnrichmentResult(StrictModel):
@@ -633,6 +723,12 @@ class VernacularTerm(StrictModel):
     usage_note: str = Field(min_length=1)
 
 
+class AnchorOrganizationHint(StrictModel):
+    name: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+    suggested_queries: tuple[str, ...] = ()
+
+
 class GeographerProposal(StrictModel):
     country_code: str | None = None
     country_aliases: tuple[str, ...] = ()
@@ -643,6 +739,8 @@ class GeographerProposal(StrictModel):
     facility_terms: tuple[VernacularTerm, ...] = ()
     query_adjustments: tuple[str, ...] = ()
     source_urls: tuple[str, ...] = ()
+    anchor_organization_hints: tuple[AnchorOrganizationHint, ...] = ()
+    facility_universe_source_hints: tuple[str, ...] = ()
     commentary: str = Field(min_length=1)
     rationale: str = Field(min_length=1)
 

@@ -317,6 +317,9 @@ def _record_location(record: dict[str, Any]) -> dict[str, Any]:
             "facility_name": bundle.get("geography_name"),
             "country": bundle.get("country"),
         }
+    allocated = record.get("allocated_component_lead")
+    if isinstance(allocated, dict) and isinstance(allocated.get("facility_location"), dict):
+        return dict(allocated["facility_location"])
     return {}
 
 
@@ -324,6 +327,13 @@ def _record_source_url(record: dict[str, Any]) -> str:
     lead = record.get("lead")
     if isinstance(lead, dict):
         return str(lead.get("source_url") or "")
+    allocated = record.get("allocated_component_lead")
+    if isinstance(allocated, dict):
+        return str(
+            allocated.get("facility_source_url")
+            or allocated.get("regional_source_url")
+            or ""
+        )
     for component_lead in record.get("component_leads", ()):
         if isinstance(component_lead, dict) and component_lead.get("source_url"):
             return str(component_lead["source_url"])
@@ -335,6 +345,12 @@ def _record_counts_summary(record: dict[str, Any]) -> str:
     if isinstance(lead, dict):
         return "; ".join(
             f"{datum['count']} {datum['group_type']}" for datum in lead.get("occupancy_data", ())
+        )
+    allocated = record.get("allocated_component_lead")
+    if isinstance(allocated, dict):
+        return (
+            f"{allocated.get('component_type')}: {allocated.get('allocated_value')} "
+            f"{allocated.get('unit')} allocated"
         )
     component_parts: list[str] = []
     for component_lead in record.get("component_leads", ()):
@@ -348,6 +364,8 @@ def _record_counts_summary(record: dict[str, Any]) -> str:
 
 
 def _record_evidence_role(record: dict[str, Any]) -> str:
+    if isinstance(record.get("allocated_component_lead"), dict):
+        return "allocated_component_input"
     if isinstance(record.get("component_bundle"), dict):
         return "component_bundle"
     lead = record.get("lead")
@@ -502,7 +520,12 @@ def admin_scoped_records(records: Sequence[dict[str, Any]]) -> tuple[dict[str, A
         if admin_scope is None:
             continue
         location = _record_location(record)
-        review = record.get("qaqc_review") or record.get("component_bundle_qaqc_review") or {}
+        review = (
+            record.get("qaqc_review")
+            or record.get("component_bundle_qaqc_review")
+            or record.get("allocated_component_qaqc_review")
+            or {}
+        )
         address = record.get("address_enrichment") or {}
         payload = {
             "item_id": record["item_id"],
@@ -608,8 +631,14 @@ def verified_csv(records: Sequence[dict[str, Any]]) -> str:
     for record in records:
         address = record.get("address_enrichment") or {}
         lead = record.get("lead")
-        review = record.get("qaqc_review") or record.get("component_bundle_qaqc_review") or {}
+        review = (
+            record.get("qaqc_review")
+            or record.get("component_bundle_qaqc_review")
+            or record.get("allocated_component_qaqc_review")
+            or {}
+        )
         bundle = record.get("component_bundle")
+        allocated = record.get("allocated_component_lead")
         if isinstance(lead, dict):
             source_url = str(lead["source_url"])
             location = lead["location"]
@@ -642,6 +671,17 @@ def verified_csv(records: Sequence[dict[str, Any]]) -> str:
                         f"{datum.get('unit')}"
                     )
             counts = "; ".join(component_parts)
+        elif isinstance(allocated, dict):
+            location = allocated["facility_location"]
+            source_url = str(allocated.get("facility_source_url") or "")
+            facility_name = str(location["facility_name"])
+            city_or_region = str(location["city_or_region"])
+            country = str(location["country"])
+            counts = (
+                f"{allocated.get('component_type')}: {allocated.get('allocated_value')} "
+                f"{allocated.get('unit')} allocated from "
+                f"{allocated.get('regional_geography_name')}"
+            )
         else:
             continue
         writer.writerow(
@@ -678,7 +718,9 @@ def footprints_geojson(records: Sequence[dict[str, Any]]) -> str:
         polygon = geometry.get("polygon_geojson")
         if not isinstance(polygon, dict):
             continue
-        lead = record["lead"]
+        lead = record.get("lead")
+        if not isinstance(lead, dict):
+            continue
         address = record.get("address_enrichment") or {}
         features.append(
             {

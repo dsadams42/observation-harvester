@@ -280,6 +280,88 @@ STRATEGIES: dict[EvidenceStrategyType, EvidenceStrategy] = {
         ),
         default_representativeness="component_input",
     ),
+    EvidenceStrategyType.CORPORATE_LOCATION_LIST_DISCOVERY: EvidenceStrategy(
+        strategy_id=EvidenceStrategyType.CORPORATE_LOCATION_LIST_DISCOVERY,
+        label="Corporate location-list discovery",
+        objective=(
+            "Find named facilities from company location pages, store locators, plant lists, "
+            "employer pages, or operator network pages for the selected facility class."
+        ),
+        query_templates=(
+            '"{locality}" {alias} company locations employees',
+            '"{locality}" {alias} plant locations',
+            '"{locality}" {alias} store locator site:*.com',
+        ),
+        preferred_source_types=(
+            "corporate location page",
+            "company plant or branch list",
+            "operator store locator",
+            "employer facility profile",
+        ),
+        accepted_count_semantics=("facility_universe_seed", "corporate_location_record"),
+        negative_traps=(
+            "corporate total silently assigned to one facility",
+            "headquarters address treated as every location",
+            "facility outside the allocation geography",
+        ),
+        default_representativeness="facility_universe_input",
+    ),
+    EvidenceStrategyType.FACILITY_UNIVERSE_DISCOVERY: EvidenceStrategy(
+        strategy_id=EvidenceStrategyType.FACILITY_UNIVERSE_DISCOVERY,
+        label="Facility universe discovery",
+        objective=(
+            "Build a denominator of findable named facilities in the same geography as a "
+            "regional component statistic using registries, directories, OSM, association "
+            "lists, industrial park tenant lists, or official facility inventories."
+        ),
+        query_templates=(
+            '"{locality}" {alias} directory facilities',
+            '"{locality}" {alias} industrial park tenants',
+            '"{locality}" {alias} registry establishments',
+        ),
+        preferred_source_types=(
+            "government or industry registry",
+            "industrial park tenant directory",
+            "business association directory",
+            "OpenStreetMap or open facility inventory",
+        ),
+        accepted_count_semantics=("facility_universe_denominator", "findable_facility_list"),
+        negative_traps=(
+            "denominator without stated geography",
+            "mixed facility classes without filtering notes",
+            "duplicate facilities counted twice",
+        ),
+        default_representativeness="facility_universe_input",
+    ),
+    EvidenceStrategyType.REGIONAL_COMPONENT_ALLOCATION: EvidenceStrategy(
+        strategy_id=EvidenceStrategyType.REGIONAL_COMPONENT_ALLOCATION,
+        label="Regional component allocation",
+        objective=(
+            "Allocate a verified regional or country component value across named facility "
+            "examples in the same geography using transparent equal-weight allocation."
+        ),
+        query_templates=(
+            '"{locality}" {alias} regional employees facilities',
+            '"{locality}" {alias} establishments employees statistics',
+            '"{locality}" {alias} facilities regional employment allocation',
+        ),
+        preferred_source_types=(
+            "verified regional component statistic",
+            "facility universe directory",
+            "corporate location list",
+            "official establishment inventory",
+        ),
+        accepted_count_semantics=(
+            "allocated_component_input",
+            "equal_weight_region_facility_count",
+        ),
+        negative_traps=(
+            "allocated value presented as a source-backed facility statistic",
+            "facility universe denominator missing or non-positive",
+            "allocation geography does not match facility geography",
+        ),
+        default_representativeness="allocated_component_input",
+    ),
     EvidenceStrategyType.REGIONAL_DEMOGRAPHIC_STATISTICS: EvidenceStrategy(
         strategy_id=EvidenceStrategyType.REGIONAL_DEMOGRAPHIC_STATISTICS,
         label="Regional demographic statistics",
@@ -462,6 +544,9 @@ def _recommendation_reason(
     if strategy_id in {
         EvidenceStrategyType.OFFICIAL_FACILITY_STATISTICS,
         EvidenceStrategyType.DATASET_ROW_EXTRACTION,
+        EvidenceStrategyType.CORPORATE_LOCATION_LIST_DISCOVERY,
+        EvidenceStrategyType.FACILITY_UNIVERSE_DISCOVERY,
+        EvidenceStrategyType.REGIONAL_COMPONENT_ALLOCATION,
         EvidenceStrategyType.REGIONAL_DEMOGRAPHIC_STATISTICS,
         EvidenceStrategyType.OPERATIONAL_SCHEDULE_FACTORS,
         EvidenceStrategyType.VISITOR_TRAFFIC_VOLUME,
@@ -526,6 +611,9 @@ def build_strategy_plan(
     component_strategy_ids = [
         EvidenceStrategyType.OFFICIAL_FACILITY_STATISTICS,
         EvidenceStrategyType.DATASET_ROW_EXTRACTION,
+        EvidenceStrategyType.CORPORATE_LOCATION_LIST_DISCOVERY,
+        EvidenceStrategyType.FACILITY_UNIVERSE_DISCOVERY,
+        EvidenceStrategyType.REGIONAL_COMPONENT_ALLOCATION,
         EvidenceStrategyType.OPERATIONAL_SCHEDULE_FACTORS,
     ]
     if any(profile.regional_stat_fields for profile in profiles):

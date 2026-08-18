@@ -6,15 +6,19 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from pdt_observer.leads import summarize_evidence_set
+from pdt_observer.leads import bundle_is_allocated_shadow, summarize_evidence_set
 from pdt_observer.models import (
     AddressConfidence,
     AddressEnrichmentResult,
     AddressEnrichmentStatus,
+    AllocatedComponentQaqcReview,
+    AllocatedPopulationComponentLead,
+    AllocationMethod,
     BuildingTypeProfile,
     ComponentBundleStatus,
     CountMethod,
     CoverageSteeringReview,
+    EvidenceRole,
     GeographyLevel,
     HarvestEvidenceSet,
     HarvestQaqcReviewSet,
@@ -304,6 +308,115 @@ def test_partial_component_bundle_cannot_count_toward_target() -> None:
         )
 
 
+def _allocated_component_payload(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "evidence_role": "allocated_component_input",
+        "is_valid_allocated_component_report": True,
+        "facility_location": {
+            "facility_name": "Example Factory",
+            "specific_address_or_landmark": "Industrial Park",
+            "city_or_region": "Bavaria",
+            "country": "DE",
+        },
+        "facility_source_url": "https://example.test/factories",
+        "facility_source_title": "Factory directory",
+        "facility_source_type": "directory",
+        "facility_evidence_quote": "Example Factory is listed in Bavaria.",
+        "regional_source_url": "https://example.test/regional-employment",
+        "regional_source_title": "Regional employment",
+        "regional_source_type": "official",
+        "regional_evidence_quote": "Manufacturing employment in Bavaria was 300.",
+        "regional_geography_name": "Bavaria",
+        "regional_geography_level": "region",
+        "component_type": "employees",
+        "regional_value": 300,
+        "allocated_value": 100,
+        "unit": "people",
+        "time_basis": "annual",
+        "period_label": "2025",
+        "facility_universe_count": 3,
+        "denominator_scope": "Three named factories found in Bavaria.",
+        "allocation_method": "equal_weight_region_facility_count",
+        "country": "DE",
+        "counts_toward_target": True,
+        "confidence": "low",
+        "strategy_id": "regional_component_allocation",
+        "count_semantics": "allocated_component_input",
+        "representativeness": "allocated_component_input",
+        "allocation_notes": "300 regional employees / 3 discovered factories = 100.",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_harvest_evidence_set_accepts_allocated_component_leads() -> None:
+    evidence_set = HarvestEvidenceSet.model_validate(
+        {
+            "schema_version": 1,
+            "allocated_component_leads": [_allocated_component_payload()],
+        }
+    )
+
+    allocated = evidence_set.allocated_component_leads[0]
+    assert isinstance(allocated, AllocatedPopulationComponentLead)
+    assert allocated.evidence_role == EvidenceRole.ALLOCATED_COMPONENT_INPUT
+    assert allocated.allocation_method == AllocationMethod.EQUAL_WEIGHT_REGION_FACILITY_COUNT
+
+    summary = summarize_evidence_set(evidence_set)
+    assert summary["allocated_component_lead_count"] == 1
+    assert summary["countable_allocated_component_observations"] == 1
+    assert summary["budget_observation_count"] == 1
+    assert summary["source_backed_facility_rows"] == 0
+    assert summary["allocated_facility_rows"] == 1
+    assert summary["allocated_counts_by_method"] == {
+        "equal_weight_region_facility_count": 1
+    }
+
+
+def test_allocated_component_lead_rejects_bad_math() -> None:
+    with pytest.raises(ValidationError, match="regional_value / facility_universe_count"):
+        HarvestEvidenceSet.model_validate(
+            {
+                "schema_version": 1,
+                "allocated_component_leads": [
+                    _allocated_component_payload(allocated_value=80)
+                ],
+            }
+        )
+
+
+def test_harvest_qaqc_review_set_accepts_allocated_component_reviews() -> None:
+    review_set = HarvestQaqcReviewSet.model_validate(
+        {
+            "schema_version": 1,
+            "allocated_component_reviews": [
+                {
+                    "lead_index": 0,
+                    "item_id": "run-allocated-component-0",
+                    "verification_status": "verified",
+                    "regional_source_reachable": True,
+                    "facility_source_reachable": True,
+                    "evidence_role_match": True,
+                    "regional_value_match": True,
+                    "regional_geography_match": True,
+                    "facility_location_match": True,
+                    "facility_type_match": True,
+                    "denominator_match": True,
+                    "allocation_method_match": True,
+                    "allocation_math_match": True,
+                    "counts_toward_target_approved": True,
+                    "recommended_action": "keep",
+                    "review_notes": "Regional source, facility source, and math all check out.",
+                }
+            ],
+        }
+    )
+
+    review = review_set.allocated_component_reviews[0]
+    assert isinstance(review, AllocatedComponentQaqcReview)
+    assert review.counts_toward_target_approved is True
+
+
 def test_evidence_summary_counts_only_complete_component_bundles_for_budget() -> None:
     evidence_set = HarvestEvidenceSet.model_validate(
         {
@@ -338,7 +451,36 @@ def test_evidence_summary_counts_only_complete_component_bundles_for_budget() ->
     assert summary["component_bundle_count"] == 2
     assert summary["countable_component_observations"] == 1
     assert summary["budget_observation_count"] == 1
+    assert summary["source_backed_facility_rows"] == 1
     assert summary["component_bundles_by_status"] == {"complete": 1, "partial": 1}
+
+
+def test_allocated_shadow_bundles_do_not_count_as_source_backed_rows() -> None:
+    evidence_set = HarvestEvidenceSet.model_validate(
+        {
+            "schema_version": 1,
+            "component_bundles": [
+                {
+                    "geography_name": "Example Factory",
+                    "country": "DE",
+                    "target_component_fields": ["employees", "shifts"],
+                    "found_component_types": ["Employees (allocated)"],
+                    "missing_component_types": ["shifts"],
+                    "completion_status": "mostly_complete",
+                    "counts_toward_target": True,
+                    "completion_notes": "Employees are allocated from a regional statistic.",
+                }
+            ],
+        }
+    )
+
+    bundle = evidence_set.component_bundles[0]
+    summary = summarize_evidence_set(evidence_set)
+
+    assert bundle_is_allocated_shadow(bundle)
+    assert summary["countable_component_observations"] == 0
+    assert summary["source_backed_facility_rows"] == 0
+    assert summary["budget_observation_count"] == 0
 
 
 def test_harvest_qaqc_review_set_accepts_component_reviews() -> None:

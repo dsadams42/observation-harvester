@@ -915,7 +915,11 @@ def test_workflow_status_explains_dataset_row_extraction_gap(tmp_path: Path) -> 
     assert "No row-level component data retrieved from dataset sources" in (
         harvest_stage["detail"]
     )
-    assert harvest_stage["alert_message"] == harvest_stage["detail"]
+    assert "Harvest stopped under target: 0/20 countable observation(s)." in (
+        harvest_stage["alert_message"]
+    )
+    assert "Agent report:" in harvest_stage["alert_message"]
+    assert "Suggested next:" in harvest_stage["alert_message"]
     assert harvest_stage["metrics"]["dataset_row_gap_count"] == 1
     assert harvest_stage["metrics"]["dataset_row_gap_run_ids"] == [run_id]
 
@@ -1958,6 +1962,124 @@ def test_run_table_and_exports_include_verified_component_rows(tmp_path: Path) -
     assert component_json.status_code == 200
     assert component_json.json()[0]["component_lead"]["geography_name"] == "Example School"
     assert "Students" in component_csv.text
+
+
+def test_run_table_and_exports_include_verified_allocated_component_rows(
+    tmp_path: Path,
+) -> None:
+    client = TestClient(create_app(workspace=tmp_path, runner=successful_runner, background=False))
+    created = client.post(
+        "/api/harvest/run",
+        json={
+            "country": "US",
+            "locality": "Tennessee",
+            "profiles": "commercial",
+            "profile": "light_manufacturing",
+            "target": 1,
+        },
+    ).json()
+    run_id = created["manifest"]["run_id"]
+    lead_path = tmp_path / f"lead_runs/{run_id}.json"
+    qaqc_path = tmp_path / f"qaqc_runs/{run_id}-qaqc.json"
+    lead_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "occupancy_leads": [],
+                "component_leads": [],
+                "component_bundles": [],
+                "allocated_component_leads": [
+                    {
+                        "evidence_role": "allocated_component_input",
+                        "is_valid_allocated_component_report": True,
+                        "facility_location": {
+                            "facility_name": "Example Factory",
+                            "specific_address_or_landmark": "Industrial Drive",
+                            "city_or_region": "Tennessee",
+                            "country": "US",
+                        },
+                        "facility_source_url": "https://example.test/factories",
+                        "facility_source_title": "Factory directory",
+                        "facility_source_type": "directory",
+                        "facility_evidence_quote": "Example Factory is in Tennessee.",
+                        "regional_source_url": "https://example.test/employment",
+                        "regional_source_title": "Employment statistics",
+                        "regional_source_type": "official",
+                        "regional_evidence_quote": "Manufacturing employment was 300.",
+                        "regional_geography_name": "Tennessee",
+                        "regional_geography_level": "region",
+                        "component_type": "employees",
+                        "regional_value": 300,
+                        "allocated_value": 100,
+                        "unit": "people",
+                        "time_basis": "annual",
+                        "period_label": "2025",
+                        "facility_universe_count": 3,
+                        "denominator_scope": "Three named factories in Tennessee.",
+                        "allocation_method": "equal_weight_region_facility_count",
+                        "country": "US",
+                        "counts_toward_target": True,
+                        "confidence": "low",
+                        "strategy_id": "regional_component_allocation",
+                        "count_semantics": "allocated_component_input",
+                        "representativeness": "allocated_component_input",
+                        "allocation_notes": "300 regional employees / 3 factories = 100.",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    qaqc_path.parent.mkdir(exist_ok=True)
+    qaqc_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "allocated_component_reviews": [
+                    {
+                        "lead_index": 0,
+                        "item_id": f"{run_id}-allocated-component-0",
+                        "verification_status": "verified",
+                        "regional_source_reachable": True,
+                        "facility_source_reachable": True,
+                        "evidence_role_match": True,
+                        "regional_value_match": True,
+                        "regional_geography_match": True,
+                        "facility_location_match": True,
+                        "facility_type_match": True,
+                        "denominator_match": True,
+                        "allocation_method_match": True,
+                        "allocation_math_match": True,
+                        "counts_toward_target_approved": True,
+                        "recommended_action": "keep",
+                        "review_notes": "Regional source, facility source, and math verify.",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    address = client.post(f"/api/runs/{run_id}/address-run")
+    table = client.get(f"/api/runs/{run_id}/table?mode=verified")
+    component_json = client.get(f"/api/runs/{run_id}/export.components.json")
+    component_csv = client.get(f"/api/runs/{run_id}/export.components.csv")
+
+    assert address.status_code == 200
+    assert address.json()["address"]["summary"]["result_count"] == 1
+    assert table.status_code == 200
+    row = table.json()["rows"][0]
+    assert row["evidence_role"] == "allocated_component_input"
+    assert row["component_type"] == "employees"
+    assert row["allocated_value"] == 100
+    assert row["regional_source_value"] == 300
+    assert row["facility_universe_count"] == 3
+    assert row["allocation_method"] == "equal_weight_region_facility_count"
+    assert row["address_status"] == "found"
+    assert component_json.status_code == 200
+    assert component_json.json()[0]["allocated_component_lead"]["component_type"] == "employees"
+    assert "allocated_component_input" in component_csv.text
+    assert "equal_weight_region_facility_count" in component_csv.text
 
 
 def test_component_bundle_address_reconciliation_and_verified_table(

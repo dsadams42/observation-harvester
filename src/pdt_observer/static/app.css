@@ -384,6 +384,7 @@
     .workflow-step.complete .workflow-marker { background: var(--ok); color: white; }
     .workflow-step.running .workflow-marker { background: var(--primary-bg); color: white; }
     .workflow-step.attention .workflow-marker { background: var(--danger); color: white; }
+    .workflow-step.failed .workflow-marker { background: var(--danger); color: white; }
     .workflow-title { font-weight: 700; }
     .workflow-detail { color: var(--muted); font-size: 12px; margin-top: 2px; }
     .workflow-alert {

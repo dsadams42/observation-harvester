@@ -146,6 +146,48 @@ def approved_address_inputs_from_files(
                 "component_summary": component_summary,
             }
         )
+    for allocated_review in review_set.allocated_component_reviews:
+        if allocated_review.lead_index >= len(evidence_set.allocated_component_leads):
+            continue
+        if allocated_review.verification_status != LeadQaqcVerificationStatus.VERIFIED:
+            continue
+        if allocated_review.recommended_action != LeadQaqcRecommendedAction.KEEP:
+            continue
+        if not allocated_review.counts_toward_target_approved:
+            continue
+        allocated_lead = evidence_set.allocated_component_leads[allocated_review.lead_index]
+        inputs.append(
+            {
+                "evidence_role": EvidenceRole.ALLOCATED_COMPONENT_INPUT.value,
+                "lead_index": allocated_review.lead_index,
+                "item_id": f"{run_id}-allocated-component-{allocated_review.lead_index}",
+                "source_url": allocated_lead.facility_source_url,
+                "source_urls": [
+                    allocated_lead.facility_source_url,
+                    allocated_lead.regional_source_url,
+                ],
+                "source_title": allocated_lead.facility_source_title,
+                "facility_name": allocated_lead.facility_location.facility_name,
+                "reported_address_or_landmark": (
+                    allocated_lead.facility_location.specific_address_or_landmark
+                ),
+                "city_or_region": allocated_lead.facility_location.city_or_region,
+                "country": allocated_lead.facility_location.country,
+                "qaqc_supporting_quote": (
+                    allocated_review.supporting_quote
+                    or allocated_lead.facility_evidence_quote
+                ),
+                "qaqc_review_notes": allocated_review.review_notes,
+                "component_summary": (
+                    f"{allocated_lead.component_type}: {allocated_lead.allocated_value:g} "
+                    f"{allocated_lead.unit} allocated from "
+                    f"{allocated_lead.regional_geography_name}"
+                ),
+                "allocation_method": allocated_lead.allocation_method.value,
+                "regional_source_value": allocated_lead.regional_value,
+                "facility_universe_count": allocated_lead.facility_universe_count,
+            }
+        )
     bundle_reviews = {
         review.bundle_index: review for review in review_set.component_bundle_reviews
     }
@@ -314,6 +356,8 @@ For each input record:
 - `component_bundle` records are the facility observation for population-subcomponent harvests.
   Find one address for the named facility/store/building/campus, not separate addresses for the
   individual component values in the bundle.
+- `allocated_component_input` records are allocated facility examples. Enrich only the named
+  facility's address; do not validate or revise the regional allocation math.
 - `partial_component_bundle` records are addressable supervisor-review candidates, not final
   model-ready observations. Research their facility address when the facility identity is specific.
 - Prefer a specific street/campus/site address over a broad city, district, or province.

@@ -458,6 +458,7 @@
         complete: '✓',
         running: '●',
         attention: '!',
+        failed: '!',
         ready: '→',
         blocked: '○'
       };
@@ -478,7 +479,7 @@
           ? `<button class="secondary" type="button" data-workflow-action="` +
             `${escapeHtml(stage.action_id)}">${escapeHtml(stage.action_label)}</button>`
           : '';
-        const alertMessage = stage.status === 'attention'
+        const alertMessage = ['attention', 'failed'].includes(stage.status)
           ? String(stage.alert_message || stage.detail || '').trim()
           : '';
         const alertBox = alertMessage
@@ -923,6 +924,13 @@
       ['count_relationship', 'Count Relationship'],
       ['component_type', 'Component'],
       ['value', 'Component Summary'],
+      ['allocated_value', 'Allocated Value'],
+      ['regional_source_value', 'Regional Source Value'],
+      ['facility_universe_count', 'Facility Universe Count'],
+      ['allocation_method', 'Allocation Method'],
+      ['denominator_scope', 'Denominator Scope'],
+      ['allocation_confidence', 'Allocation Confidence'],
+      ['allocation_notes', 'Allocation Notes'],
       ['unit', 'Unit'],
       ['time_basis', 'Time Basis'],
       ['geography_level', 'Geography Level'],
@@ -1774,6 +1782,8 @@
     function geometryLocation(item) {
       const leadLocation = item?.lead?.location;
       if (leadLocation) return leadLocation;
+      const allocatedLocation = item?.allocated_component_lead?.facility_location;
+      if (allocatedLocation) return allocatedLocation;
       const bundle = item?.component_bundle || {};
       const bundleLocation = bundle.location || {};
       return {
@@ -1794,12 +1804,24 @@
 
     function geometrySourceUrl(item) {
       if (item?.lead?.source_url) return item.lead.source_url;
+      if (item?.allocated_component_lead?.facility_source_url) {
+        return item.allocated_component_lead.facility_source_url;
+      }
       const componentLead = (item?.component_leads || []).find((lead) => lead.source_url);
       return componentLead?.source_url || '';
     }
 
     function geometryCounts(item) {
       if (item?.lead?.occupancy_data) return item.lead.occupancy_data;
+      if (item?.allocated_component_lead) {
+        const lead = item.allocated_component_lead;
+        return [{
+          component_type: lead.component_type,
+          value: lead.allocated_value,
+          unit: lead.unit,
+          evidence_role: 'allocated_component_input'
+        }];
+      }
       return (item?.component_leads || []).flatMap((lead) => lead.component_data || []);
     }
 

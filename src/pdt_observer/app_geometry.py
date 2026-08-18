@@ -25,6 +25,12 @@ def _record_facility_name(record: dict[str, Any]) -> str:
     if isinstance(bundle_location, dict):
         geography_name = bundle.get("geography_name") if isinstance(bundle, dict) else ""
         return str(bundle_location.get("facility_name") or geography_name or "")
+    allocated = record.get("allocated_component_lead")
+    allocated_location = (
+        allocated.get("facility_location") if isinstance(allocated, dict) else None
+    )
+    if isinstance(allocated_location, dict):
+        return str(allocated_location.get("facility_name") or "")
     return ""
 
 

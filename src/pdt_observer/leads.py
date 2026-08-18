@@ -10,10 +10,13 @@ from pydantic import TypeAdapter
 from pdt_observer.activity import render_activity_prompt_instructions
 from pdt_observer.geographer import geographer_prompt_guidance
 from pdt_observer.models import (
+    AllocatedComponentQaqcReview,
+    AllocatedPopulationComponentLead,
     BuildingProfileSet,
     CandidateObservation,
     ComponentBundleQaqcReview,
     ComponentBundleStatus,
+    ComponentFacilityBundle,
     ComponentQaqcReview,
     CountMethod,
     Evidence,
@@ -48,6 +51,9 @@ LEAD_LIST_ADAPTER: TypeAdapter[tuple[OccupancyLead, ...]] = TypeAdapter(
 COMPONENT_LEAD_LIST_ADAPTER: TypeAdapter[tuple[PopulationComponentLead, ...]] = TypeAdapter(
     tuple[PopulationComponentLead, ...]
 )
+ALLOCATED_COMPONENT_LEAD_LIST_ADAPTER: TypeAdapter[
+    tuple[AllocatedPopulationComponentLead, ...]
+] = TypeAdapter(tuple[AllocatedPopulationComponentLead, ...])
 EVIDENCE_SET_ADAPTER: TypeAdapter[HarvestEvidenceSet] = TypeAdapter(HarvestEvidenceSet)
 QAQC_REVIEW_LIST_ADAPTER: TypeAdapter[tuple[LeadQaqcReview, ...]] = TypeAdapter(
     tuple[LeadQaqcReview, ...]
@@ -58,6 +64,9 @@ COMPONENT_QAQC_REVIEW_LIST_ADAPTER: TypeAdapter[tuple[ComponentQaqcReview, ...]]
 COMPONENT_BUNDLE_QAQC_REVIEW_LIST_ADAPTER: TypeAdapter[
     tuple[ComponentBundleQaqcReview, ...]
 ] = TypeAdapter(tuple[ComponentBundleQaqcReview, ...])
+ALLOCATED_COMPONENT_QAQC_REVIEW_LIST_ADAPTER: TypeAdapter[
+    tuple[AllocatedComponentQaqcReview, ...]
+] = TypeAdapter(tuple[AllocatedComponentQaqcReview, ...])
 QAQC_REVIEW_SET_ADAPTER: TypeAdapter[HarvestQaqcReviewSet] = TypeAdapter(HarvestQaqcReviewSet)
 
 
@@ -68,6 +77,7 @@ def load_evidence_set(path: Path) -> HarvestEvidenceSet:
         return HarvestEvidenceSet(
             occupancy_leads=LEAD_LIST_ADAPTER.validate_python(payload),
             component_leads=(),
+            allocated_component_leads=(),
         )
     return EVIDENCE_SET_ADAPTER.validate_python(payload)
 
@@ -92,6 +102,7 @@ def load_qaqc_review_set(path: Path) -> HarvestQaqcReviewSet:
             occupancy_reviews=QAQC_REVIEW_LIST_ADAPTER.validate_python(payload),
             component_reviews=(),
             component_bundle_reviews=(),
+            allocated_component_reviews=(),
         )
     return QAQC_REVIEW_SET_ADAPTER.validate_python(payload)
 
@@ -106,6 +117,23 @@ def load_component_qaqc_reviews(path: Path) -> tuple[ComponentQaqcReview, ...]:
 
 def load_component_bundle_qaqc_reviews(path: Path) -> tuple[ComponentBundleQaqcReview, ...]:
     return load_qaqc_review_set(path).component_bundle_reviews
+
+
+def load_allocated_component_qaqc_reviews(
+    path: Path,
+) -> tuple[AllocatedComponentQaqcReview, ...]:
+    return load_qaqc_review_set(path).allocated_component_reviews
+
+
+def bundle_is_allocated_shadow(bundle: ComponentFacilityBundle) -> bool:
+    text = " ".join(
+        (
+            *bundle.found_component_types,
+            *bundle.missing_component_types,
+            bundle.completion_notes,
+        )
+    ).casefold()
+    return "allocated" in text or "allocation" in text
 
 
 def leads_to_json(leads: tuple[OccupancyLead, ...]) -> str:
@@ -133,11 +161,21 @@ def summarize_evidence_set(evidence_set: HarvestEvidenceSet) -> dict[str, object
     component_leads = evidence_set.component_leads
     valid_components = [lead for lead in component_leads if lead.is_valid_component_report]
     component_values = sum(len(lead.component_data) for lead in valid_components)
+    allocated_component_leads = evidence_set.allocated_component_leads
+    valid_allocated_components = [
+        lead
+        for lead in allocated_component_leads
+        if lead.is_valid_allocated_component_report
+    ]
+    countable_allocated_components = [
+        lead for lead in valid_allocated_components if lead.counts_toward_target
+    ]
     component_bundles = evidence_set.component_bundles
     countable_component_bundles = [
         bundle
         for bundle in component_bundles
         if bundle.counts_toward_target
+        and not bundle_is_allocated_shadow(bundle)
         and bundle.completion_status
         in {ComponentBundleStatus.COMPLETE, ComponentBundleStatus.MOSTLY_COMPLETE}
     ]
@@ -155,6 +193,8 @@ def summarize_evidence_set(evidence_set: HarvestEvidenceSet) -> dict[str, object
     component_counts_by_type: dict[str, int] = {}
     component_counts_by_geography_level: dict[str, int] = {}
     component_bundles_by_status: dict[str, int] = {}
+    allocated_counts_by_method: dict[str, int] = {}
+    allocated_counts_by_denominator_scope: dict[str, int] = {}
     for bundle in component_bundles:
         status = bundle.completion_status.value
         component_bundles_by_status[status] = component_bundles_by_status.get(status, 0) + 1
@@ -175,6 +215,29 @@ def summarize_evidence_set(evidence_set: HarvestEvidenceSet) -> dict[str, object
             component_counts_by_geography_level[level] = (
                 component_counts_by_geography_level.get(level, 0) + 1
             )
+    for allocated_lead in valid_allocated_components:
+        method = allocated_lead.allocation_method.value
+        allocated_counts_by_method[method] = allocated_counts_by_method.get(method, 0) + 1
+        denominator_scope = allocated_lead.denominator_scope
+        allocated_counts_by_denominator_scope[denominator_scope] = (
+            allocated_counts_by_denominator_scope.get(denominator_scope, 0) + 1
+        )
+    facility_component_leads = sum(
+        any(datum.geography_level.value == "facility" for datum in lead.component_data)
+        for lead in valid_components
+    )
+    source_backed_facility_rows = len(valid) + (
+        len(countable_component_bundles)
+        if component_bundles
+        else facility_component_leads
+    )
+    regional_support_rows = sum(
+        any(
+            datum.geography_level.value in {"region", "country", "locality"}
+            for datum in lead.component_data
+        )
+        for lead in valid_components
+    )
     return {
         "lead_count": len(leads),
         "valid_occupancy_reports": len(valid),
@@ -183,8 +246,13 @@ def summarize_evidence_set(evidence_set: HarvestEvidenceSet) -> dict[str, object
         "valid_component_reports": len(valid_components),
         "component_value_rows": component_values,
         "component_bundle_count": len(component_bundles),
+        "allocated_component_lead_count": len(allocated_component_leads),
+        "valid_allocated_component_reports": len(valid_allocated_components),
+        "countable_allocated_component_observations": len(countable_allocated_components),
         "countable_component_observations": len(countable_component_bundles),
-        "budget_observation_count": len(valid) + len(countable_component_bundles),
+        "budget_observation_count": len(valid)
+        + len(countable_component_bundles)
+        + len(countable_allocated_components),
         "countries": countries,
         "cities_or_regions": cities,
         "component_countries": component_countries,
@@ -194,12 +262,18 @@ def summarize_evidence_set(evidence_set: HarvestEvidenceSet) -> dict[str, object
         "counts_by_role": {
             "direct_occupancy": len(valid),
             "component_input": len(valid_components),
+            "allocated_component_input": len(valid_allocated_components),
         },
+        "source_backed_facility_rows": source_backed_facility_rows,
+        "allocated_facility_rows": len(countable_allocated_components),
+        "regional_support_rows": regional_support_rows,
         "counts_by_strategy": counts_by_strategy,
         "component_counts_by_strategy": component_counts_by_strategy,
         "component_counts_by_type": component_counts_by_type,
         "component_counts_by_geography_level": component_counts_by_geography_level,
         "component_bundles_by_status": component_bundles_by_status,
+        "allocated_counts_by_method": allocated_counts_by_method,
+        "allocated_counts_by_denominator_scope": allocated_counts_by_denominator_scope,
     }
 
 
@@ -285,6 +359,7 @@ def evidence_set_to_jsonl(evidence_set: HarvestEvidenceSet) -> str:
     payloads: list[dict[str, object]] = []
     payloads.extend(lead.model_dump(mode="json") for lead in evidence_set.occupancy_leads)
     payloads.extend(lead.model_dump(mode="json") for lead in evidence_set.component_leads)
+    payloads.extend(lead.model_dump(mode="json") for lead in evidence_set.allocated_component_leads)
     for bundle in evidence_set.component_bundles:
         payload = bundle.model_dump(mode="json")
         payload["record_type"] = "component_bundle"
@@ -361,15 +436,89 @@ def component_leads_to_csv(component_leads: tuple[PopulationComponentLead, ...])
     return output.getvalue()
 
 
+def allocated_component_leads_to_csv(
+    allocated_component_leads: tuple[AllocatedPopulationComponentLead, ...],
+) -> str:
+    fieldnames = (
+        "lead_index",
+        "facility_name",
+        "specific_address_or_landmark",
+        "city_or_region",
+        "country",
+        "component_type",
+        "allocated_value",
+        "regional_value",
+        "unit",
+        "time_basis",
+        "period_label",
+        "regional_geography_name",
+        "regional_geography_level",
+        "facility_universe_count",
+        "denominator_scope",
+        "allocation_method",
+        "counts_toward_target",
+        "confidence",
+        "facility_source_url",
+        "regional_source_url",
+        "allocation_notes",
+        "review_flags",
+        "review_notes",
+        "strategy_id",
+    )
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+    for lead_index, lead in enumerate(allocated_component_leads):
+        writer.writerow(
+            {
+                "lead_index": lead_index,
+                "facility_name": lead.facility_location.facility_name,
+                "specific_address_or_landmark": (
+                    lead.facility_location.specific_address_or_landmark
+                ),
+                "city_or_region": lead.facility_location.city_or_region,
+                "country": lead.country,
+                "component_type": lead.component_type,
+                "allocated_value": lead.allocated_value,
+                "regional_value": lead.regional_value,
+                "unit": lead.unit,
+                "time_basis": lead.time_basis.value,
+                "period_label": lead.period_label or "",
+                "regional_geography_name": lead.regional_geography_name,
+                "regional_geography_level": lead.regional_geography_level.value,
+                "facility_universe_count": lead.facility_universe_count,
+                "denominator_scope": lead.denominator_scope,
+                "allocation_method": lead.allocation_method.value,
+                "counts_toward_target": lead.counts_toward_target,
+                "confidence": lead.confidence.value,
+                "facility_source_url": lead.facility_source_url,
+                "regional_source_url": lead.regional_source_url,
+                "allocation_notes": lead.allocation_notes,
+                "review_flags": ";".join(lead.review_flags),
+                "review_notes": lead.review_notes or "",
+                "strategy_id": lead.strategy_id.value if lead.strategy_id is not None else "",
+            }
+        )
+    return output.getvalue()
+
+
 def export_evidence_set(evidence_set: HarvestEvidenceSet, *, output_format: str) -> str:
     if output_format == "jsonl":
         return evidence_set_to_jsonl(evidence_set)
     if output_format == "csv":
         occupancy_csv = leads_to_csv(evidence_set.occupancy_leads)
         component_csv = component_leads_to_csv(evidence_set.component_leads)
-        if not evidence_set.component_leads:
+        allocated_csv = allocated_component_leads_to_csv(
+            evidence_set.allocated_component_leads
+        )
+        if not evidence_set.component_leads and not evidence_set.allocated_component_leads:
             return occupancy_csv
-        return occupancy_csv + "\n# Component evidence\n" + component_csv
+        output = occupancy_csv
+        if evidence_set.component_leads:
+            output += "\n# Component evidence\n" + component_csv
+        if evidence_set.allocated_component_leads:
+            output += "\n# Allocated component evidence\n" + allocated_csv
+        return output
     raise ValueError("evidence export format must be csv or jsonl")
 
 
@@ -506,6 +655,9 @@ For each facility bundle in `component_bundles`:
   geography.
 - Check whether `found_component_types` and `missing_component_types` honestly summarize the
   source-backed component data and configured targets.
+- Reject target counting for bundles whose only facility component is an allocated value. Allocated
+  observations must be reviewed through `allocated_component_reviews[]`, not duplicated as
+  source-backed facility bundles.
 - `counts_toward_target` is acceptable only when `completion_status` is `complete` or
   `mostly_complete`.
 - Partial and seed-only bundles may remain in the artifact as useful notes, but they should not
@@ -520,6 +672,28 @@ For each facility bundle in `component_bundles`:
   store/building/campus address is available.
 - Return one `component_bundle_reviews[]` item per component bundle. Do not put bundle-level
   decisions into `component_reviews[]`.
+
+For each allocated component row in `allocated_component_leads`:
+- Verify the regional source quote supports `regional_value`, `component_type`, unit, period,
+  time basis, and regional geography.
+- Verify the facility source quote supports the named facility and location inside the allocation
+  geography.
+- Verify the facility class is plausible for the selected harvest scope when the sources provide
+  enough context.
+- Verify `facility_universe_count`, `denominator_scope`, and `allocation_method`.
+- Approve target counting only when `denominator_scope` describes a source-backed denominator
+  that plausibly covers the same geography and facility class as the regional value. This may be
+  an official establishment count, a complete register/directory, or a clearly bounded universe.
+  A convenience sample, partial member subset, or "first N found" denominator should be reviewed
+  or rejected for target counting even if the arithmetic is correct.
+- Recalculate `allocated_value` as `regional_value / facility_universe_count` for
+  `equal_weight_region_facility_count`; allow only small rounding differences.
+- Confirm the row is labeled `allocated_component_input` and does not claim the allocated value
+  was directly reported for the facility.
+- `counts_toward_target` is acceptable only when both sources, denominator, geography, and math
+  are explicit and the denominator is not merely a sampled subset. Conservative confidence is
+  expected for non-official but bounded source lists.
+- Return one `allocated_component_reviews[]` item per allocated component row.
 
 ## Status And Action Rules
 
@@ -615,6 +789,27 @@ exact schema:
       "supporting_quote": "Short bundle-level quote or null",
       "recommended_action": "keep",
       "review_notes": "Short explanation of the bundle-level verification decision"
+    }}
+  ],
+  "allocated_component_reviews": [
+    {{
+      "lead_index": 0,
+      "item_id": "child-run-id-allocated-component-0",
+      "verification_status": "verified",
+      "regional_source_reachable": true,
+      "facility_source_reachable": true,
+      "evidence_role_match": true,
+      "regional_value_match": true,
+      "regional_geography_match": true,
+      "facility_location_match": true,
+      "facility_type_match": true,
+      "denominator_match": true,
+      "allocation_method_match": true,
+      "allocation_math_match": true,
+      "counts_toward_target_approved": true,
+      "supporting_quote": "Quote or row excerpt for regional value/facility, or null",
+      "recommended_action": "keep",
+      "review_notes": "Short explanation of the allocation verification decision"
     }}
   ]
 }}
@@ -935,6 +1130,40 @@ rows whenever access allows it.
 
 Dataset rows are valid component evidence only when the value, unit or column meaning, time basis,
 geography level, and source row/table are clear. Do not derive final occupancy estimates from them.
+
+## Regional Component Allocation Loop
+
+When a regional, locality, or country component statistic is found but the target still needs
+facility examples, the Harvester may create allocated facility component rows.
+
+- Keep the regional statistic as regional support evidence in `component_leads[]`.
+- Search within the same geography for named facility examples matching the selected facility
+  class, using registries, corporate location pages, store locators, industrial park tenant lists,
+  company plant pages, business directories, OSM/open facility inventories, and geographer hints.
+- Build a clear facility universe denominator. For v1, use only
+  `equal_weight_region_facility_count`: `regional_value / facility_universe_count`.
+- The denominator does not have to equal the number of emitted rows. Prefer a source-backed total
+  establishment/facility count for the same geography and facility class, then emit whatever named
+  facilities you can source as examples. Do not divide a national or regional total by the first
+  few facilities found.
+- If the denominator is a sampled directory subset, partial member list, or "first N found" search
+  result, keep the evidence as support but set `counts_toward_target: false` and explain the
+  denominator limitation in `allocation_notes`.
+- Emit one `allocated_component_leads[]` row per named facility. Preserve both the regional
+  statistic source and the facility existence/location source.
+- Do not also emit a `component_bundles[]` row for the same facility when the only component value
+  is allocated. Bundles are for source-backed facility component values; allocated rows are the
+  facility observation artifact for allocation.
+- Put the allocated value in `allocated_value`; put the source regional number in
+  `regional_value`. Do not claim the allocated value was directly reported for the facility.
+- Set `counts_toward_target` to true only when the regional source, facility source, denominator,
+  allocation method, and math are explicit and the denominator is not just a sampled subset.
+- Use conservative confidence for allocated rows; use low confidence when the denominator is a
+  bounded non-official universe.
+- Facility-specific source-backed component values override allocated values for the same
+  facility and component.
+
+Allocated rows are derived component inputs, not final occupancy totals.
 """
         if component_only or hybrid
         else ""
@@ -1151,6 +1380,46 @@ disaster totals. Add short machine-readable `review_flags` such as "missing_quot
       "counts_toward_target": true,
       "confidence": "high | medium | low | unknown",
       "completion_notes": "Bundle completion rationale"
+    }}
+  ],
+  "allocated_component_leads": [
+    {{
+      "evidence_role": "allocated_component_input",
+      "is_valid_allocated_component_report": true,
+      "facility_location": {{
+        "facility_name": "String",
+        "specific_address_or_landmark": "String or 'Unknown'",
+        "city_or_region": "String",
+        "country": "{country}"
+      }},
+      "facility_source_url": "Source URL proving the facility/location exists",
+      "facility_source_title": "String or ''",
+      "facility_source_type": "news | official | wire | encyclopedia | directory | unknown",
+      "facility_evidence_quote": "Exact quote or row proving the facility/location exists",
+      "regional_source_url": "Source URL proving the regional component value",
+      "regional_source_title": "String or ''",
+      "regional_source_type": "news | official | wire | encyclopedia | directory | unknown",
+      "regional_evidence_quote": "Exact quote or dataset row proving the regional value",
+      "regional_geography_name": "Region, locality, or country name",
+      "regional_geography_level": "locality | region | country",
+      "component_type": "String such as employees",
+      "regional_value": 0,
+      "allocated_value": 0,
+      "unit": "String such as people",
+      "time_basis": "Allowed TimeBasis value",
+      "period_label": "String or null",
+      "facility_universe_count": 1,
+      "denominator_scope": "String describing the facility universe and geography",
+      "allocation_method": "equal_weight_region_facility_count",
+      "country": "{country}",
+      "counts_toward_target": true,
+      "confidence": "high | medium | low | unknown",
+      "review_flags": ["String"],
+      "review_notes": "String or null",
+      "strategy_id": "regional_component_allocation",
+      "count_semantics": "allocated_component_input",
+      "representativeness": "allocated_component_input",
+      "allocation_notes": "Explain the source, denominator, formula, and confidence."
     }}
   ]
 }}

@@ -170,6 +170,98 @@ def successful_runner(
     return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
 
+def dataset_row_gap_runner(
+    command: Sequence[str],
+    prompt: str,
+    cwd: Path,
+) -> subprocess.CompletedProcess[str]:
+    output_path = Path(command[command.index("-o") + 1])
+    if output_path.name.endswith("-strategy.json"):
+        payload = {
+            "run_id": output_path.stem.removesuffix("-strategy"),
+            "country": "IT",
+            "locality": None,
+            "profile_set": "commercial",
+            "profile_id": "light_manufacturing",
+            "recommended_strategy_order": [
+                "official_facility_statistics",
+                "dataset_row_extraction",
+                "operational_schedule_factors",
+            ],
+            "recommendations": [
+                {
+                    "strategy_id": "official_facility_statistics",
+                    "emphasis": "primary",
+                    "rationale": "Official industrial statistics are likely source families.",
+                    "query_patterns": ["Italy light manufacturing employees statistics"],
+                    "expected_traps": ["metadata-only pages"],
+                },
+                {
+                    "strategy_id": "dataset_row_extraction",
+                    "emphasis": "primary",
+                    "rationale": "Open-data rows may contain employee and shift values.",
+                    "query_patterns": ["Italy light manufacturing CSV API employees"],
+                    "expected_traps": ["unretrieved row-level values"],
+                },
+                {
+                    "strategy_id": "operational_schedule_factors",
+                    "emphasis": "secondary",
+                    "rationale": "Schedule sources may supply shift factors.",
+                    "query_patterns": ["Italy light manufacturing shifts employees"],
+                    "expected_traps": ["ordinary hours without values"],
+                },
+            ],
+            "local_source_ideas": ["Italian statistics open-data portals"],
+            "overall_rationale": "Start with official datasets and extract rows when possible.",
+            "confidence": "medium",
+        }
+        output_path.write_text(json.dumps(payload), encoding="utf-8")
+    else:
+        output_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "occupancy_leads": [],
+                    "component_leads": [],
+                    "component_bundles": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        activity_path = cwd / "agent_activity" / f"{output_path.stem}.harvester.json"
+        activity_path.parent.mkdir(parents=True, exist_ok=True)
+        activity_path.write_text(
+            json.dumps(
+                {
+                    "run_id": output_path.stem,
+                    "overall_summary": (
+                        "Official dataset portals were found, but row-level component data "
+                        "not retrieved from CSV/API endpoints."
+                    ),
+                    "strategy_activity": [
+                        {
+                            "strategy_id": "dataset_row_extraction",
+                            "outcome": "partially_productive",
+                            "query_examples": ["Italy light manufacturing CSV API employees"],
+                            "notes": (
+                                "Could not retrieve row-level values from the dataset table."
+                            ),
+                            "accepted_lead_count": 0,
+                        }
+                    ],
+                    "accepted_lead_count": 0,
+                    "rejected_or_context_notes": ["Metadata-only dataset pages were not enough."],
+                    "follow_up_suggestions": [
+                        "Manually inspect the CSV/API endpoint for row-level component data."
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+    assert "Dataset Row Extraction" in prompt or "Strategy Scout" in prompt
+    return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+
 def no_gap_runner(
     command: Sequence[str],
     prompt: str,
@@ -497,12 +589,14 @@ def test_index_page_contains_local_app_controls(tmp_path: Path) -> None:
     assert "Project Workflow" in html
     assert "Recommended next:" in js.text
     assert "/workflow-status" in js.text
+    assert "workflow-alert" in js.text
+    assert "Agent note" in js.text
     assert "Geocoding ${index + 1}/${pending.length}" in js.text
     assert "Review Dataset / Coverage" in html
     assert html.index("Geometry Studio") < html.index("Review Dataset / Coverage")
     assert "Assemble Review Dataset" in html
     assert "Check Coverage" in html
-    assert "Run Coverage Gap Follow-ups" in html
+    assert "Run Targeted Follow-ups" in html
     assert "Run QAQC Missing" in html
     assert "Run Address Missing" in html
     assert "leaflet.draw" in html
@@ -795,6 +889,35 @@ def test_workflow_status_recommends_next_artifact_backed_stage(tmp_path: Path) -
     updated_stages = {stage["id"]: stage for stage in updated["stages"]}
     assert updated_stages["qaqc"]["status"] == "complete"
     assert updated["next_action"]["id"] == "run_address"
+
+
+def test_workflow_status_explains_dataset_row_extraction_gap(tmp_path: Path) -> None:
+    client = TestClient(
+        create_app(workspace=tmp_path, runner=dataset_row_gap_runner, background=False)
+    )
+    harvested = client.post(
+        "/api/harvest/run",
+        json={
+            "country": "IT",
+            "profiles": "commercial",
+            "profile": "light_manufacturing",
+            "target": 20,
+        },
+    ).json()
+    run_id = harvested["manifest"]["run_id"]
+
+    workflow = client.get(f"/api/runs/{run_id}/workflow-status")
+
+    assert workflow.status_code == 200
+    stages = {stage["id"]: stage for stage in workflow.json()["stages"]}
+    harvest_stage = stages["harvest"]
+    assert harvest_stage["status"] == "attention"
+    assert "No row-level component data retrieved from dataset sources" in (
+        harvest_stage["detail"]
+    )
+    assert harvest_stage["alert_message"] == harvest_stage["detail"]
+    assert harvest_stage["metrics"]["dataset_row_gap_count"] == 1
+    assert harvest_stage["metrics"]["dataset_row_gap_run_ids"] == [run_id]
 
 
 def test_harvest_batch_run_endpoint_returns_child_runs(tmp_path: Path) -> None:
@@ -2435,10 +2558,10 @@ def test_sample_set_coverage_and_gap_fill_api_flow(tmp_path: Path) -> None:
     assert workflow_stages["coverage"]["label"] == "Check Coverage"
     assert workflow_stages["coverage"]["display_mode"] == "gate"
     assert "Coverage gaps found" in workflow_stages["coverage"]["detail"]
-    assert workflow_stages["gap_fill"]["label"] == "Run Coverage Gap Follow-ups"
+    assert workflow_stages["gap_fill"]["label"] == "Run Targeted Follow-ups"
     assert workflow_stages["gap_fill"]["display_mode"] == "job_progress"
     assert workflow_stages["gap_fill"]["action_id"] == "run_gap_fill"
-    assert workflow_stages["gap_fill"]["action_label"] == "Run Coverage Gap Follow-ups"
+    assert workflow_stages["gap_fill"]["action_label"] == "Run Targeted Follow-ups"
     assert coverage_results.json()["review"]["recommended_child_jobs"][0]["locality"] == (
         "Western Tennessee"
     )
@@ -2479,11 +2602,12 @@ def test_workflow_status_explains_failed_targeted_follow_ups(tmp_path: Path) -> 
     assert gap_stage["status"] == "attention"
     assert gap_stage["current"] == 1
     assert gap_stage["total"] == 2
-    assert "1/2 coverage gap follow-up job(s) succeeded; 1 need repair or retry." in (
+    assert "1/2 targeted follow-up job(s) succeeded; 1 need repair or retry." in (
         gap_stage["detail"]
     )
     assert "Western Tennessee" in gap_stage["detail"]
-    assert gap_stage["action_label"] == "Retry Coverage Gap Follow-ups"
+    assert gap_stage["alert_message"] == gap_stage["detail"]
+    assert gap_stage["action_label"] == "Retry Targeted Follow-ups"
     assert gap_stage["metrics"]["failed_count"] == 1
     assert gap_stage["metrics"]["failed_child_runs"][0]["error_message"] == "harvest failed"
 
@@ -2515,12 +2639,12 @@ def test_workflow_status_marks_targeted_follow_ups_not_needed(tmp_path: Path) ->
     assert sample.status_code == 200
     assert coverage.status_code == 200
     assert stages["coverage"]["detail"] == (
-        "Coverage sufficient. No coverage gap follow-ups recommended."
+        "Coverage sufficient. No targeted follow-ups recommended."
     )
     assert stages["coverage"]["display_mode"] == "gate"
     assert stages["gap_fill"]["status"] == "complete"
     assert stages["gap_fill"]["detail"] == (
-        "Not needed. No coverage gap follow-ups are currently recommended."
+        "Not needed. No targeted follow-ups are currently recommended."
     )
     assert stages["gap_fill"]["display_mode"] == "gate"
     assert stages["gap_fill"]["action_id"] is None

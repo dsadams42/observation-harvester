@@ -46,6 +46,8 @@ def test_component_prompt_uses_arguments_and_does_not_invite_incident_harvest() 
     assert "Component input fields: Number of rooms" in prompt
     assert "Regional/country component fields: Hotel Occupancy Rate" in prompt
     assert "Search for the configured argument fields" in prompt
+    assert "CSV/XLSX downloads, APIs, CKAN datastores, SDMX feeds" in prompt
+    assert "row-level component data was not retrieved" in prompt
     assert "Incidents are one high-value direct-count evidence pathway" not in prompt
     assert "do not derive a final occupancy estimate" in prompt
 

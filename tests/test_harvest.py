@@ -41,6 +41,7 @@ SCOUT_PAYLOAD = {
     "profile_id": "factories_warehouses",
     "recommended_strategy_order": [
         "official_facility_statistics",
+        "dataset_row_extraction",
         "operational_schedule_factors",
     ],
     "recommendations": [
@@ -50,6 +51,13 @@ SCOUT_PAYLOAD = {
             "rationale": "Official facility statistics are likely for factories in this geography.",
             "query_patterns": ["factory employees Tennessee annual report"],
             "expected_traps": ["derived occupancy estimates"],
+        },
+        {
+            "strategy_id": "dataset_row_extraction",
+            "emphasis": "secondary",
+            "rationale": "Dataset rows may expose component values for factories.",
+            "query_patterns": ["factory employees Tennessee CSV dataset"],
+            "expected_traps": ["metadata-only dataset page"],
         },
         {
             "strategy_id": "operational_schedule_factors",
@@ -74,6 +82,13 @@ ACTIVITY_PAYLOAD = {
             "query_examples": ["factory employees Tennessee annual report"],
             "notes": "Official facility statistics helped find component values.",
             "accepted_lead_count": 1,
+        },
+        {
+            "strategy_id": "dataset_row_extraction",
+            "outcome": "review_only",
+            "query_examples": ["factory employees Tennessee CSV dataset"],
+            "notes": "Dataset portals were inspected for row-level component values.",
+            "accepted_lead_count": 0,
         },
         {
             "strategy_id": "operational_schedule_factors",
@@ -187,7 +202,7 @@ def test_run_harvest_writes_prompt_leads_and_completed_manifest(tmp_path: Path) 
         for recommendation in manifest.strategy_plan.recommendations
     ][:2] == [
         "official_facility_statistics",
-        "operational_schedule_factors",
+        "dataset_row_extraction",
     ]
     assert Path(manifest.prompt_path).is_file()
     assert Path(manifest.lead_path).is_file()
@@ -225,6 +240,8 @@ def test_run_harvest_applies_count_method_override_to_prompt_and_manifest(
     assert "Count method: population_subcomponent" in prompt
     assert "seating capacity" in prompt
     assert "Component Facility Deepening Loop" in prompt
+    assert "Dataset Row Extraction For Component Inputs" in prompt
+    assert "row-level component data not retrieved" in prompt
     assert "completed or mostly complete facility component observation bundles" in prompt
     assert '"component_bundles"' in prompt
     saved = json.loads((tmp_path / "harvest_runs/us-tn-theaters-components.json").read_text())
@@ -252,7 +269,7 @@ def test_run_harvest_uses_strategy_scout_and_activity_dialogue(tmp_path: Path) -
         for recommendation in manifest.strategy_plan.recommendations
     ][:2] == [
         "official_facility_statistics",
-        "operational_schedule_factors",
+        "dataset_row_extraction",
     ]
     assert manifest.strategy_scout_path is not None
     assert Path(manifest.strategy_scout_path).is_file()

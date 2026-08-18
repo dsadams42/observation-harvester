@@ -248,6 +248,38 @@ STRATEGIES: dict[EvidenceStrategyType, EvidenceStrategy] = {
         ),
         default_representativeness="component_input",
     ),
+    EvidenceStrategyType.DATASET_ROW_EXTRACTION: EvidenceStrategy(
+        strategy_id=EvidenceStrategyType.DATASET_ROW_EXTRACTION,
+        label="Dataset row extraction",
+        objective=(
+            "Find open-data, CSV, XLSX, API, CKAN, SDMX, or statistical-table rows that contain "
+            "source-backed component values for a named facility, locality, region, or country."
+        ),
+        query_templates=(
+            '"{locality}" {alias} dataset CSV employees rooms beds',
+            '"{locality}" {alias} open data API statistics',
+            '"{locality}" {alias} CKAN SDMX XLSX component statistics',
+        ),
+        preferred_source_types=(
+            "government open-data portal",
+            "CSV or XLSX download",
+            "official API or datastore",
+            "national statistics table",
+        ),
+        accepted_count_semantics=(
+            "dataset_row_component_input",
+            "csv_row_value",
+            "api_row_value",
+            "statistical_table_row",
+        ),
+        negative_traps=(
+            "metadata-only dataset landing page without row values",
+            "unfiltered national aggregate mislabeled as facility-level evidence",
+            "row value without column name, period, or geography",
+            "download link that cannot be inspected for count-bearing rows",
+        ),
+        default_representativeness="component_input",
+    ),
     EvidenceStrategyType.REGIONAL_DEMOGRAPHIC_STATISTICS: EvidenceStrategy(
         strategy_id=EvidenceStrategyType.REGIONAL_DEMOGRAPHIC_STATISTICS,
         label="Regional demographic statistics",
@@ -429,6 +461,7 @@ def _recommendation_reason(
         )
     if strategy_id in {
         EvidenceStrategyType.OFFICIAL_FACILITY_STATISTICS,
+        EvidenceStrategyType.DATASET_ROW_EXTRACTION,
         EvidenceStrategyType.REGIONAL_DEMOGRAPHIC_STATISTICS,
         EvidenceStrategyType.OPERATIONAL_SCHEDULE_FACTORS,
         EvidenceStrategyType.VISITOR_TRAFFIC_VOLUME,
@@ -492,6 +525,7 @@ def build_strategy_plan(
 
     component_strategy_ids = [
         EvidenceStrategyType.OFFICIAL_FACILITY_STATISTICS,
+        EvidenceStrategyType.DATASET_ROW_EXTRACTION,
         EvidenceStrategyType.OPERATIONAL_SCHEDULE_FACTORS,
     ]
     if any(profile.regional_stat_fields for profile in profiles):

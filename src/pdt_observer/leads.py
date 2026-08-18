@@ -916,6 +916,25 @@ When you find a facility-level component hit:
 
 Do not calculate final occupancy estimates from the bundle. The bundle is a source-backed input
 package, not a derived population total.
+
+## Dataset Row Extraction For Component Inputs
+
+When a component source is a data portal, CSV, XLSX, API, CKAN datastore, SDMX feed, or
+downloadable statistical table, continue past the landing-page metadata and inspect the actual
+rows whenever access allows it.
+
+- Prefer row-level records for a named facility or the smallest available geography.
+- Preserve the dataset URL, table title, filter parameters, column names, geography, and period.
+- Use an exact row excerpt as `evidence_quote`, such as a compact header-plus-row fragment or
+  `column=value` list containing the component value.
+- Mark metadata-only pages, inaccessible downloads, and schema pages without row values as
+  context/review notes, not component evidence.
+- If a promising official dataset family is found but row-level component values cannot be
+  retrieved, say "row-level component data not retrieved" in the Harvester activity report and
+  recommend the specific dataset/API/manual extraction path to try next.
+
+Dataset rows are valid component evidence only when the value, unit or column meaning, time basis,
+geography level, and source row/table are clear. Do not derive final occupancy estimates from them.
 """
         if component_only or hybrid
         else ""
@@ -1081,7 +1100,7 @@ disaster totals. Add short machine-readable `review_flags` such as "missing_quot
       "source_url": "String or 'Not provided'",
       "source_title": "String or ''",
       "source_type": "news | official | wire | encyclopedia | social | directory | unknown",
-      "evidence_quote": "Exact source quote containing the component value",
+      "evidence_quote": "Exact quote or dataset row excerpt containing the component value",
       "component_data": [
         {{
           "component_type": "String such as students, staff, beds, annual visitors",

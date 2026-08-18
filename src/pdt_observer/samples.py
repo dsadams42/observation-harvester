@@ -508,7 +508,7 @@ def render_coverage_steering_prompt(
 You are a coverage steering agent for a geospatial observation harvest. Your job is to inspect
 the verified sample, judge whether it is geographically dispersed enough for the requested scope,
 consider whether direct observations or population component fields are missing, and recommend
-targeted gap-fill harvest jobs.
+targeted follow-up harvest jobs.
 
 Use the deterministic summary and included records below. Treat this as steering guidance, not
 formal statistical representativeness. Human-excluded observations are supplied only as bounded
@@ -649,7 +649,7 @@ def run_coverage_steering(
         stage="coverage_review",
         message=(
             f"I assessed the sample as {review.dispersion_status.value} and recommended "
-            f"{len(review.recommended_child_jobs)} gap-fill job(s)."
+            f"{len(review.recommended_child_jobs)} targeted follow-up job(s)."
         ),
         rationale=review.narrative_notes,
     )
@@ -723,7 +723,8 @@ def run_gap_fill(
     append_harvest_log(
         root,
         sample_set_id,
-        f"Dispatching {len(jobs)} gap-fill job(s) with up to {worker_count} active agents.",
+        f"Dispatching {len(jobs)} targeted follow-up job(s) with up to "
+        f"{worker_count} active agents.",
     )
     append_dialogue(
         root,

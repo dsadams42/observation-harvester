@@ -642,7 +642,7 @@ INDEX_HTML = r"""<!doctype html>
           Check Coverage
         </button>
         <button id="runGapFillButton" class="secondary" type="button" disabled>
-          Run Coverage Gap Follow-ups
+          Run Targeted Follow-ups
         </button>
       </div>
       <div id="sampleActionHelp" class="control-help">

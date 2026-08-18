@@ -478,12 +478,20 @@
           ? `<button class="secondary" type="button" data-workflow-action="` +
             `${escapeHtml(stage.action_id)}">${escapeHtml(stage.action_label)}</button>`
           : '';
+        const alertMessage = stage.status === 'attention'
+          ? String(stage.alert_message || stage.detail || '').trim()
+          : '';
+        const alertBox = alertMessage
+          ? `<div class="workflow-alert" role="alert">` +
+            `<strong>Agent note</strong><span>${escapeHtml(alertMessage)}</span></div>`
+          : '';
         return `<div class="workflow-step ${escapeHtml(stage.status)}">
           <div class="workflow-marker">${symbols[stage.status] || '○'}</div>
           <div>
             <div class="workflow-title">${escapeHtml(stage.label)}</div>
             <div class="workflow-detail">${escapeHtml(stage.detail)}</div>
             ${progress}
+            ${alertBox}
           </div>
           ${action}
         </div>`;
@@ -1643,7 +1651,7 @@
       $('sampleOutput').value = JSON.stringify(payload, null, 2);
       setSampleStatus('Targeted follow-ups started.', 'ok');
       if (state.activeWorkspace === 'table') await refreshDataTable();
-      if (payload.started) startSamplePolling(state.currentSampleSetId, 'coverage gap follow-ups');
+      if (payload.started) startSamplePolling(state.currentSampleSetId, 'targeted follow-ups');
       updateActionAvailability();
     }
 
@@ -1760,7 +1768,7 @@
     function geometryRoundLabel(item) {
       const round = geometryRound(item);
       if (!round) return 'current run';
-      return round === 1 ? 'round 1' : `coverage gap follow-up round ${round}`;
+      return round === 1 ? 'round 1' : `targeted follow-up round ${round}`;
     }
 
     function geometryLocation(item) {

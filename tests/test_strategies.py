@@ -20,6 +20,7 @@ def _ids(profile_set_name: str, profile_id: str | None = None) -> tuple[str, ...
 def test_manufacturing_plan_prioritizes_component_input_strategies() -> None:
     assert _ids("commercial", "light_manufacturing") == (
         "official_facility_statistics",
+        "dataset_row_extraction",
         "operational_schedule_factors",
     )
 
@@ -81,7 +82,7 @@ def test_profile_level_strategy_preferences_override_family_defaults() -> None:
     )
     assert power_plants[:2] == (
         "official_facility_statistics",
-        "operational_schedule_factors",
+        "dataset_row_extraction",
     )
     assert theaters[:2] == (
         "official_event_attendance",
@@ -103,6 +104,7 @@ def test_strategy_queries_mix_component_evidence_pathways() -> None:
     )
 
     assert '"Pittsburgh" United States steel mill official statistics' in queries
+    assert any("dataset CSV" in query for query in queries)
     assert any("shifts employees" in query for query in queries)
     assert any("operating hours staff" in query for query in queries)
 

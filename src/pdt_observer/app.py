@@ -123,6 +123,7 @@ from pdt_observer.leads import (
 from pdt_observer.models import (
     AddressEnrichmentStatus,
     CountMethod,
+    EvidenceStrategyType,
     GeometryPoint,
     GeometryStatus,
     HarvestBatchRunManifest,
@@ -1025,7 +1026,7 @@ def _run_address_for_manifest(
             + (
                 "No address research was run because QAQC produced no model-ready or "
                 "partial addressable targets; held component bundles need supervisor review "
-                "or gap fill first."
+                "or targeted follow-up first."
                 if expected_count == 0 and bundle_counters["held"] > 0
                 else "I included strict model-ready observations and partial bundle "
                 "candidates, then preserved ambiguous or missing addresses for human review."
@@ -2201,6 +2202,7 @@ def _workflow_stage(
     action_label: str | None = None,
     indeterminate: bool = False,
     display_mode: str = "progress",
+    alert_message: str | None = None,
 ) -> dict[str, object]:
     return {
         "id": stage_id,
@@ -2214,6 +2216,9 @@ def _workflow_stage(
         "action_label": action_label,
         "indeterminate": indeterminate,
         "display_mode": display_mode,
+        "alert_message": alert_message if alert_message is not None else (
+            detail if status == "attention" else None
+        ),
     }
 
 
@@ -2234,6 +2239,85 @@ def _summary_dicts(summary: dict[str, object], key: str) -> list[dict[str, objec
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, dict)]
+
+
+def _activity_report_text(manifest: HarvestRunManifest) -> str:
+    if manifest.activity_path is None:
+        return ""
+    path = Path(manifest.activity_path)
+    if not path.is_file():
+        return ""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+
+    chunks: list[str] = []
+
+    def collect(value: object) -> None:
+        if isinstance(value, str):
+            chunks.append(value)
+        elif isinstance(value, dict):
+            for nested in value.values():
+                collect(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                collect(nested)
+
+    collect(payload)
+    return " ".join(chunks).casefold()
+
+
+def _has_dataset_row_extraction_gap(manifest: HarvestRunManifest) -> bool:
+    if manifest.status != HarvestRunStatus.COMPLETED or manifest.strategy_plan is None:
+        return False
+    if not any(
+        item.strategy_id == EvidenceStrategyType.DATASET_ROW_EXTRACTION
+        for item in manifest.strategy_plan.recommendations
+    ):
+        return False
+    summary = manifest.summary or {}
+    if _summary_int(summary, "budget_observation_count") > 0:
+        return False
+    if (
+        _summary_int(summary, "lead_count")
+        + _summary_int(summary, "component_lead_count")
+        + _summary_int(summary, "component_bundle_count")
+    ) > 0:
+        return False
+
+    activity_text = _activity_report_text(manifest)
+    if not activity_text:
+        return False
+    row_gap_terms = (
+        "row-level component data not retrieved",
+        "row-level values",
+        "row level values",
+        "row-level data",
+        "csv/api",
+        "csv",
+        "api",
+        "ckan",
+        "sdmx",
+        "downloadable",
+        "dataset",
+        "table",
+    )
+    data_source_terms = ("dataset", "csv", "api", "ckan", "sdmx", "download", "table")
+    retrieval_gap_terms = (
+        "not retrieved",
+        "could not retrieve",
+        "unable to retrieve",
+        "no row",
+        "without row",
+        "could not extract",
+        "unable to extract",
+    )
+    return (
+        any(term in activity_text for term in row_gap_terms)
+        and any(term in activity_text for term in data_source_terms)
+        and any(term in activity_text for term in retrieval_gap_terms)
+    )
 
 
 def _workflow_status_payload(
@@ -2320,6 +2404,21 @@ def _workflow_status_payload(
         harvest_status = "complete"
     else:
         harvest_status = "ready"
+    dataset_row_gap_run_ids = tuple(
+        child.run_id for child in initial_manifests if _has_dataset_row_extraction_gap(child)
+    )
+    dataset_row_gap_count = len(dataset_row_gap_run_ids)
+    harvest_detail = (
+        f"{successful_jobs}/{planned_jobs} jobs completed successfully; "
+        f"{failed_jobs} failed or cancelled; "
+        f"{observation_count}/{lead_quota} target observations."
+    )
+    if dataset_row_gap_count:
+        harvest_detail += (
+            f" No row-level component data retrieved from dataset sources for "
+            f"{dataset_row_gap_count} run(s); inspect the Harvester activity report for the "
+            "dataset/API/manual extraction path."
+        )
 
     all_lead_count = 0
     review_count = 0
@@ -2616,12 +2715,12 @@ def _workflow_status_payload(
                 recommended_count = len(coverage_review.recommended_child_jobs)
                 if recommended_count:
                     coverage_detail = (
-                        f"Coverage gaps found: {recommended_count} coverage gap follow-up "
+                        f"Coverage gaps found: {recommended_count} targeted follow-up "
                         "search(es) recommended."
                     )
                 else:
                     coverage_detail = (
-                        "Coverage sufficient. No coverage gap follow-ups recommended."
+                        "Coverage sufficient. No targeted follow-ups recommended."
                     )
             else:
                 coverage_status = "ready"
@@ -2687,7 +2786,7 @@ def _workflow_status_payload(
     else:
         gap_status = "blocked"
     if recommended_jobs == 0:
-        gap_detail = "Not needed. No coverage gap follow-ups are currently recommended."
+        gap_detail = "Not needed. No targeted follow-ups are currently recommended."
     elif gap_status == "attention":
         failed_labels = [
             str(child.get("locality") or child.get("run_id") or "unnamed follow-up")
@@ -2695,11 +2794,11 @@ def _workflow_status_payload(
         ]
         failed_text = f" Failed: {', '.join(failed_labels)}." if failed_labels else ""
         gap_detail = (
-            f"{gap_completed}/{gap_total} coverage gap follow-up job(s) succeeded; "
+            f"{gap_completed}/{gap_total} targeted follow-up job(s) succeeded; "
             f"{gap_failed} need repair or retry.{failed_text}"
         )
     else:
-        gap_detail = f"{gap_completed}/{gap_total} coverage gap follow-up job(s) complete."
+        gap_detail = f"{gap_completed}/{gap_total} targeted follow-up job(s) complete."
 
     stages = [
         _workflow_stage(
@@ -2720,11 +2819,7 @@ def _workflow_status_payload(
             status=harvest_status,
             current=observation_count,
             total=lead_quota,
-            detail=(
-                f"{successful_jobs}/{planned_jobs} jobs completed successfully; "
-                f"{failed_jobs} failed or cancelled; "
-                f"{observation_count}/{lead_quota} target observations."
-            ),
+            detail=harvest_detail,
             metrics={
                 "planned_jobs": planned_jobs,
                 "finished_jobs": finished_jobs,
@@ -2732,6 +2827,8 @@ def _workflow_status_payload(
                 "failed_jobs": failed_jobs,
                 "lead_count": observation_count,
                 "lead_quota": lead_quota,
+                "dataset_row_gap_count": dataset_row_gap_count,
+                "dataset_row_gap_run_ids": dataset_row_gap_run_ids,
             },
             indeterminate=harvest_running,
             display_mode="progress",
@@ -2907,7 +3004,7 @@ def _workflow_status_payload(
         ),
         _workflow_stage(
             stage_id="gap_fill",
-            label="Run Coverage Gap Follow-ups",
+            label="Run Targeted Follow-ups",
             status=gap_status,
             current=gap_completed,
             total=gap_total,
@@ -2921,9 +3018,9 @@ def _workflow_status_payload(
             action_id="run_gap_fill" if gap_status in {"ready", "attention"} else None,
             action_label=(
                 (
-                    "Retry Coverage Gap Follow-ups"
+                    "Retry Targeted Follow-ups"
                     if gap_status == "attention"
-                    else "Run Coverage Gap Follow-ups"
+                    else "Run Targeted Follow-ups"
                 )
                 if gap_status in {"ready", "attention"}
                 else None
@@ -4513,7 +4610,7 @@ def create_app(
                 ),
                 rationale=(
                     "No item-by-item feedback was required; only explicit exclusions affect "
-                    "coverage and coverage gap follow-up guidance."
+                    "coverage and targeted follow-up guidance."
                 ),
             )
             return JSONResponse(_sample_curation_payload(root, sample_set_id))

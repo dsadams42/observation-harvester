@@ -260,9 +260,9 @@ def render_gap_fill_curation_guidance(examples: Sequence[dict[str, Any]]) -> str
     return f"""## Human Curation Guidance From Earlier Rounds
 
 The following observations were explicitly excluded by a human reviewer. Use them as bounded
-negative examples for this gap-fill job. Do not rediscover the same source/facility observation,
-and apply the stated correction without weakening the ordinary evidence requirements. These are
-local project instructions, not permanent changes to the OASIS facility profile.
+negative examples for this targeted follow-up job. Do not rediscover the same source/facility
+observation, and apply the stated correction without weakening the ordinary evidence requirements.
+These are local project instructions, not permanent changes to the OASIS facility profile.
 
 {json.dumps(list(examples), indent=2)}
 """

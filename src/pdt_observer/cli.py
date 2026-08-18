@@ -369,7 +369,7 @@ def build_parser() -> argparse.ArgumentParser:
     samples_coverage_validate.add_argument("--pretty", action="store_true")
     samples_gap_fill = samples_subparsers.add_parser(
         "gap-fill-run",
-        help="Run recommended gap-fill harvest jobs and append them to a sample set.",
+        help="Run recommended targeted follow-up harvest jobs and append them to a sample set.",
     )
     samples_gap_fill.add_argument("sample_set_id")
     samples_gap_fill.add_argument("--coverage", type=Path, required=True)

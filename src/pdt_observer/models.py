@@ -49,6 +49,7 @@ class EvidenceStrategyType(StrEnum):
     TEMPORARY_USE_OCCUPANCY = "temporary_use_occupancy"
     RESEARCH_MEASURED_OCCUPANCY = "research_measured_occupancy"
     OFFICIAL_FACILITY_STATISTICS = "official_facility_statistics"
+    DATASET_ROW_EXTRACTION = "dataset_row_extraction"
     REGIONAL_DEMOGRAPHIC_STATISTICS = "regional_demographic_statistics"
     OPERATIONAL_SCHEDULE_FACTORS = "operational_schedule_factors"
     VISITOR_TRAFFIC_VOLUME = "visitor_traffic_volume"
